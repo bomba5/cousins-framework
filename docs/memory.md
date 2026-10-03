@@ -464,6 +464,98 @@ cousin-sweep compact --target both      # every cousin, for a timer
 The `cousin-sweep` timer in `systemd/` runs both compactions over every
 cousin; see [operations](operations.md).
 
+## Dreaming
+
+Dreaming is a background pass that consolidates a cousin's memory. It
+merges claims that say the same thing, retires a claim a newer one
+supersedes, and settles a contradiction when it can quote what settles
+it. It is off unless you turn it on (`[agent] dreaming`, see
+[configuration](configuration.md#agent-dreaming)), and every pass can be
+undone.
+
+A pass takes the next slice of raw memory: the lines no pass has taken
+yet, oldest first with the monthly archives included, up to 40,000
+characters of claims (about 10k tokens). When raw fold has folded away
+the day file dreaming had got to, the next pass starts at the beginning of
+that month's archive, so the month is read again rather than any of it
+skipped. Each claim is
+shown on one line with its time, truth level, id and topic, cut at 800
+characters. Monthly digests and the framework's own log (`episode:`,
+`job:`, `framework:`) are skipped, and the open
+[tensions](#valid-time-tensions-and-the-review-gate) among the slice's
+topics are listed above it. The slice goes to a short Sonnet session in a
+child process, on the cousin's account. That session has no built-in tools
+and no MCP server but `dream`, whose four tools are the memory operations:
+
+| tool | what it does |
+|---|---|
+| `merge` | consolidates one topic: keeps the claim that already says it (`keep`) or writes the consolidated claim (`fact`), and retires the rest. A `fact` claim names the claims it retired as its `derived_from`. |
+| `retire` | retires one claim: a duplicate, or one a newer claim supersedes |
+| `settle` | retires the losing claims of a contradiction. `evidence` must be a quote from one of them, and the topic keeps at least one live claim. |
+| `remember` | writes a claim the slice shows and no live claim on the topic says word for word. `derived_from` optionally names the claims it was read out of. |
+
+What a pass may not do is refused in code, whatever the model asks for.
+It acts only on claims shown in its own slice, named by id and written
+before the pass began. It retires only L3 and L4 claims: what the
+operator, the framework or a tool said (L0-L2) is never retired, though a
+pass may derive a new claim from it. It writes at L3 (the default) or L4,
+with source `dream`, and its marks are made `by` `dream:<pass_id>`. One
+operation works on one topic, a retired claim cannot be retired again,
+and every `retire`, `merge` and `settle` carries a `why`. Its files go
+through the [perimeter](#the-perimeter), so a pass writes `memory/` and
+`data/dreams/` and nothing else. A refused call writes nothing, and the
+model is told why.
+
+A pass has a budget of 32,000 tokens (cache reads count at a tenth) and
+at most 24 model turns, and the loops daemon and the console stop it
+after 15 minutes. It ends with one of these results:
+
+- `done`: it changed something, and the next pass starts after this slice.
+- `no_change`: nothing to change, or nothing new since the last pass.
+- `budget`: it ran out of tokens and was stopped. What it had already
+  changed stays (undo removes it), and the next pass is given the same
+  slice again.
+- `error`: it failed, a pass that could not start included. The next
+  pass is given the same slice again. A failed nightly pass is not
+  retried until the next night.
+- `running`, or `lost` once a pass has no end record 16 minutes after it
+  started: it was killed (the 15-minute limit, a restart of the loops
+  daemon, a reboot). The next pass releases the slice it held (its end
+  line names it as `released`), so dreaming goes on. A lost pass's
+  changes are read from its journal: they stay, and they can be undone.
+
+The record is in the cousin's home:
+
+- `data/dreams/YYYY-MM-DD.jsonl`: a `start` line and an `end` line per
+  pass with the same `pass_id`, and an `undo` line when one is reversed.
+  The end line has the `trigger` (`nightly`, `rollover` or `manual`),
+  `model`, `tokens`, the `summary` (the session's last words, at most 500
+  characters), the `coverage` (which files it read, how many claims and
+  lines, where the slice was cut and why) and the `changes`.
+- `data/dreams/journal/<pass_id>.jsonl`: each change, written and synced
+  to disk as soon as the memory write it describes has landed. This is
+  the record of a pass that died before its end line.
+- `memory/.dream-ledger.json`: how far dreaming has got (a raw file name
+  and a line count) and the pass in progress, if any. It lives in
+  `memory/` so a cousin transplanted with its memory does not dream the
+  same memory twice. Do not edit it.
+
+The console's memory page has a **dreaming** view: the setting, a button
+that runs a pass now (whatever the setting), and every pass newest first
+with its result, tokens and changes. Undo is a button on a pass that
+changed something (`POST /api/memory/<slug>/dreams/undo`, see the
+[console API](reference/console-api.md)); a pass still running cannot be
+undone. It moves every line the pass
+wrote, its marks and its new claims, into a [trash](#the-explorer-and-the-trash)
+batch. The claims it retired are live again, and the claims it wrote are
+gone, along with what they said they were built from. The undo is
+recorded with who asked, and the batch can be restored like any other.
+The ledger does not move back: that memory counts as dreamed and the next
+pass does not take it again. A line already folded into the gzip archive
+cannot be moved; undo names it and reverses the rest. From a shell,
+`python -m cousin_lib.dreaming --home <home> --root <root>` runs one pass
+and prints its verdict as JSON.
+
 ## What the boot packet reads
 
 The boot packet is what a new session starts from, in two parts. The

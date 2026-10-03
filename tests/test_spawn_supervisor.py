@@ -63,22 +63,21 @@ class TestRunnerLaneStart(_Case):
     def test_start_asks_the_supervisor_and_never_tmux(self):
         home = runner_home(self.root, "wren")
         stub = self.stub()
-        out = spawn.start_cousin(home, agent_cmd=None, tmux_bin=str(self.tmux),
-                                 root=self.root, start_chat_server=self.fail)
-        self.assertIsNone(out)                  # what the tmux path returns
+        out = spawn.start_cousin(home, root=self.root)
+        self.assertIsNone(out)
         self.assertEqual(stub.ops(), [("start", "wren")])
         self.assertEqual(self.tmux_calls(), "")
 
     def test_the_root_comes_from_the_home_when_not_given(self):
         home = runner_home(self.root, "wren", runner="sdk")
         stub = self.stub()
-        spawn.start_cousin(home, agent_cmd=None, tmux_bin=str(self.tmux))
+        spawn.start_cousin(home)
         self.assertEqual(stub.ops(), [("start", "wren")])
 
     def test_no_supervisor_is_a_spawn_error_that_says_how(self):
         home = runner_home(self.root, "wren")
         with self.assertRaises(spawn.SpawnError) as caught:
-            spawn.start_cousin(home, agent_cmd=None, tmux_bin=str(self.tmux), root=self.root)
+            spawn.start_cousin(home, root=self.root)
         self.assertEqual(str(caught.exception),
                          "no cousin-supervisor is running for %s: start it with"
                          " `cousin-supervisor run`" % self.root)
@@ -89,7 +88,7 @@ class TestRunnerLaneStart(_Case):
         self.stub(start={"ok": False, "name": "runner:wren",
                          "error": "runner:wren is still stopping; start it once it is down"})
         with self.assertRaises(spawn.SpawnError) as caught:
-            spawn.start_cousin(home, agent_cmd=None, root=self.root)
+            spawn.start_cousin(home, root=self.root)
         self.assertIn("runner:wren is still stopping", str(caught.exception))
 
     def test_still_stopping_is_its_own_refusal(self):
@@ -98,13 +97,13 @@ class TestRunnerLaneStart(_Case):
         self.stub(start={"ok": False, "name": "runner:wren",
                          "error": "runner:wren is still stopping; start it once it is down"})
         with self.assertRaises(spawn.StillStopping):
-            spawn.start_cousin(home, agent_cmd=None, root=self.root)
+            spawn.start_cousin(home, root=self.root)
 
     def test_another_refusal_is_a_plain_spawn_error(self):
         home = runner_home(self.root, "wren")
         self.stub(start={"ok": False, "error": "runner:wren is not a cousin"})
         with self.assertRaises(spawn.SpawnError) as caught:
-            spawn.start_cousin(home, agent_cmd=None, root=self.root)
+            spawn.start_cousin(home, root=self.root)
         self.assertNotIsInstance(caught.exception, (spawn.StillStopping, spawn.ForeignRunner))
 
     def test_a_runner_the_supervisor_did_not_start_is_not_joined_by_a_second(self):
@@ -118,7 +117,7 @@ class TestRunnerLaneStart(_Case):
         supervisor.hold(home, "Testa")
         with mock.patch("cousin_lib.delivery.is_alive", lambda home, **kw: True), \
                 self.assertRaises(spawn.ForeignRunner) as caught:
-            spawn.start_cousin(home, agent_cmd=None, root=self.root)
+            spawn.start_cousin(home, root=self.root)
         self.assertIn("did not start", str(caught.exception))
         self.assertEqual(stub.ops(), [])
 
@@ -130,7 +129,7 @@ class TestRunnerLaneStart(_Case):
         supervisor.hold(home, "Testa")
         with mock.patch("cousin_lib.delivery.is_alive", lambda home, **kw: True), \
                 self.assertRaises(spawn.StillStopping):
-            spawn.start_cousin(home, agent_cmd=None, root=self.root)
+            spawn.start_cousin(home, root=self.root)
         self.assertEqual(stub.ops(), [("start", "wren")])
 
 
@@ -230,7 +229,7 @@ class TestRealSupervisor(_Case):
         self.assertTrue(_wait_for(lambda: supervisor.snapshot(self.root)),
                         (self.dir / "supervisor.log").read_text())
         self.assertFalse(is_running(home))
-        spawn.start_cousin(home, agent_cmd=None)
+        spawn.start_cousin(home)
         self.assertTrue(_wait_for(lambda: is_running(home)),
                         (self.dir / "supervisor.log").read_text())
         out = spawn.stop_cousin(home)
@@ -241,7 +240,7 @@ class TestRealSupervisor(_Case):
         held = home / "run" / "held"
         self.assertTrue(held.read_text().endswith(" spawn.stop_cousin\n"))
         self.assertTrue(supervisor.is_held(home))
-        spawn.start_cousin(home, agent_cmd=None)
+        spawn.start_cousin(home)
         self.assertFalse(held.exists())
         self.assertTrue(_wait_for(lambda: is_running(home)),
                         (self.dir / "supervisor.log").read_text())

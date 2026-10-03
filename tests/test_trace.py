@@ -87,12 +87,13 @@ class TestCliWiring(TraceCase):
 
 
 class TestBootConsumption(TraceCase):
-    def test_boot_packet_carries_recent_traces(self):
-        from cousin_lib.boot import assemble
+    def test_the_state_digest_carries_recent_traces(self):
+        from cousin_lib.runner import prompt
         log_call("wren", "cousin-schedule", args_summary="add 'in 30m'")
-        packet = assemble("wren", self.home, generation=1)
-        self.assertIn("cousin-schedule", packet["text"])
-        self.assertNotIn("trace_summary", packet["degraded_sections"])
+        digest = prompt.state_digest(self.home, root=self.root, slug="wren",
+                                     generation=1)
+        self.assertIn("cousin-schedule", digest["text"])
+        self.assertNotIn("trace_summary", digest["degraded_sections"])
 
 
 if __name__ == "__main__":

@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.12.1 - 2026-10-03
+
+### Removed
+
+- **The legacy tmux lane's clean stop and boot packet**, unreachable since
+  2.0.0 refuses a cousin with no runner kind before any of it runs:
+  `flip.close_session` and its handoff helpers, the console stop route's
+  background close (`close_fn`), `spawn.start_cousin`'s tmux session code
+  and the pending boot it typed in (`data/pending-boot.json`, never written
+  any more), `cousin-migrate`'s pending-boot write on rollback, and
+  `boot.assemble` with the layers only it read: the tool-surface quote, the
+  MCP warning and the boot actions. `cousin-tool-surface` still writes
+  `data/tool-surface.md` for a cousin to read. No behaviour changes: a
+  runner cousin starts, stops and boots on its system prompt and state
+  digest as before.
+
 ## 3.12.0 - 2026-10-03
 
 ### Added

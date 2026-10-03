@@ -210,13 +210,6 @@ class TestTheLawSurvivesFit(unittest.TestCase):
                        dict(boot.LAYER_BUDGETS), boot.TRUNCATE_ORDER, 100)
         self.assertEqual(out["law"], law)
 
-    def test_the_overflow_is_reported_rather_than_hidden(self):
-        law = "rule. " * 9000
-        out = boot.fit({"law": law}, dict(boot.LAYER_BUDGETS),
-                       boot.TRUNCATE_ORDER, 1000)
-        self.assertEqual(boot.hard_overflow(out, 1000), [("law", len(law))])
-        self.assertEqual(boot.hard_overflow({"law": "short"}, 1000), [])
-
     def test_the_law_is_the_only_hard_layer_today(self):
         self.assertEqual(tuple(boot.HARD_LAYERS), ("law",))
         self.assertNotIn("law", boot.TRUNCATE_ORDER)

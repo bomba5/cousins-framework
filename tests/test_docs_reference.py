@@ -330,8 +330,11 @@ def read_corrections(text):
 
 
 def tag_versions():
-    """{version: tag name} of the vX.Y.Z tags here, or None without git."""
-    out = git("tag", "--list", "v*")
+    """{version: tag name} of the vX.Y.Z tags this checkout contains, or
+    None without git. A tag the checkout does not reach is left out: CI on
+    an older tag, run after a newer one was pushed, must not be held to the
+    newer tag's sections."""
+    out = git("tag", "--list", "--merged", "HEAD", "v*")
     if out is None:
         return None
     found = {}

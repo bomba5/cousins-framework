@@ -116,6 +116,8 @@ class TestSend(ExternalCase):
             self._peers('[peers.kestrel]\nurl = "%s/"\n' % url)
             rc, _out, err = self._main(
                 ["send", "kestrel", "hi", "--from", "Wren of testbed"])
+        # an external peer may be shown a free-form name: its own install
+        # checks it (peer_inbound.check_display); a local cousin may not
         self.assertEqual(rc, 0, err)
         self.assertEqual(received, [("/api/send", {"user": "Wren of testbed",
                                                     "message": "hi"})])

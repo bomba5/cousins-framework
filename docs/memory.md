@@ -953,9 +953,29 @@ cousin-shared read norms.md
 ```
 
 Replacing an existing proposal needs `--force`. A rejected proposal is
-deleted, but the reason stays in the audit log. Exit codes: 0 ok, 1 not
-found (or a proposal already exists), 2 usage, 3 refused by the review
-rule.
+deleted, but the reason stays in the audit log. Every slug, proposer and
+file name must be a bare name: one with `/` or `\` in it, or starting
+with `.`, is refused before any path is built, so a `../` slug can't
+land a proposal outside `shared/proposed/` and a `../` file can't read
+another home. Exit codes: 0 ok, 1 not found (or a proposal already
+exists), 2 usage (a path-shaped name included), 3 refused by the review
+rule or by law 11 (below).
+
+A proposal never names a private cousin (law 11): every cousin reads
+`shared/proposed/` and the audit log. A private cousin is one whose
+`cousin.toml` says `scope = "private"` under `[memory]` in so many words
+(an unset scope keeps a cousin from nominating, but doesn't make it
+private here), and the `protected` slugs of
+[outbound-filter.json](configuration.md#outbound-filterjson) count too.
+`propose` refuses, exit 3, before anything is written:
+
+- a proposal whose file name, `--reason` or body names a private cousin
+  by slug or display name (a whole word, any case);
+- any proposal from a private cousin, whose slug would head the file
+  name.
+
+The refusal says which rule and which part refused it, never the name.
+`cousin-memory propose-shared --commit` skips such a file and lists it.
 
 Names are resolved before they're compared: a cousin's slug and its
 display name are the same principal, so a cousin can't approve its own

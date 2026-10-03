@@ -254,6 +254,9 @@ def _j_close(ctx, a, status):
     job = jobs.get_job(job_id)
     if not job:
         raise ValueError("job #%d not found" % job_id)
+    refused = jobs.close_refusal(job, ctx.slug)
+    if refused:
+        raise ValueError(refused)
     summary = _str(a, "summary")
     jobs.finish_job(job_id, status=status, summary=summary,
                     exit_code=a.get("exit") if status == "failed" else None)

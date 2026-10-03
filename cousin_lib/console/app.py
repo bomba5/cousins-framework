@@ -611,6 +611,8 @@ def console_main(argv=None):
     state, error = server.users.state()
     if state == "broken":
         server.report_users_error(error)
+    from cousin_lib import version
+    version.announce(root, "console")      # cousin-upgrade's restart check
     try:
         server.serve_forever()
     except KeyboardInterrupt:

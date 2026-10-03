@@ -14,7 +14,8 @@ import tomllib
 import unittest
 from unittest import mock
 
-from cousin_lib import mcp_server, shared_tier, template_sync, upgrade
+from cousin_lib import (mcp_server, shared_tier, template_sync, upgrade,
+                        upgrade_switch)
 
 MARKER = template_sync.MARKER
 
@@ -76,14 +77,15 @@ def _git(repo, *args):
                     *args], check=True, capture_output=True, text=True)
 
 
-def _release(repo, version, *, registry, chat, law, rule, deps, tag=True):
+def _release(repo, version, *, registry, chat, law, rule, deps, tag=True,
+             extra=None):
     files = {"pyproject.toml": _pyproject(version, deps),
              upgrade.REGISTRY_EXAMPLE: registry,
              upgrade.TEMPLATE: _template(chat),
              upgrade.LAW: law,
              upgrade.RULES + "/reference_wren-rule.md": rule,
              upgrade.RULES + "/examples/reference_not-seeded.md": "x\n",
-             "CHANGELOG.md": CHANGELOG}
+             "CHANGELOG.md": CHANGELOG, **(extra or {})}
     for rel, text in files.items():
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -554,6 +556,517 @@ class TestApplyHomes(_Install):
         self.assertEqual(rows["sam"]["registry"], "skipped")
         self.assertEqual(rows["wren"]["registry"], "applied")
         self.assertEqual(rows["wren"]["mcp_json"], "refreshed")
+
+
+class _FakeOps:
+    """upgrade_switch.Ops with nothing real behind it: git, pip, the
+    probe, the supervisor, the runners' turn states and what each
+    process says it runs are tables; the clock moves only when slept."""
+
+    def __init__(self, root, checkout, versions, head):
+        self.root, self.checkout = pathlib.Path(root), pathlib.Path(checkout)
+        self.python = "/opt/venv/bin/python3"
+        self.versions = versions            # commit -> pyproject version
+        self.head_sha = head
+        self.calls = []
+        self.git_rc = {}                    # first arg -> returncode
+        self.pip_rc = 0
+        self.probe_checkout = str(checkout)
+        self.probe_version = None           # else the version at head
+        self.children = {"loops": {"state": "running", "pid": 101},
+                         "console": {"state": "running", "pid": 102},
+                         "runner:toki": {"state": "running", "pid": 103},
+                         "runner:wren": {"state": "running", "pid": 104}}
+        self.no_supervisor = False
+        self.says = {}                      # name -> what it announced
+        self.wrong = {}                     # name -> the version it comes back on
+        self.silent = set()                 # comes back saying nothing
+        self.down = set()                   # never comes back up
+        self.turns = {}                     # slug -> [states], the last repeats
+        self.pids = iter(range(201, 300))
+        self.clock = 0.0
+        self.detached = []
+
+    def git(self, *args, timeout=120):
+        self.calls.append(("git",) + args)
+        rc = self.git_rc.get(args[0], 0)
+        if rc:
+            return rc, "", "%s failed" % args[0]
+        if args[0] == "checkout":
+            self.head_sha = args[-1]
+        if args[:2] == ("rev-parse", "HEAD"):
+            return 0, self.head_sha + "\n", ""
+        return 0, "", ""
+
+    def pip_install(self, deps):
+        self.calls.append(("pip", deps))
+        return self.pip_rc, "pip said no" if self.pip_rc else ""
+
+    def probe(self):
+        self.calls.append(("probe",))
+        return {"version": self.probe_version or self.versions[self.head_sha],
+                "checkout": self.probe_checkout, "commit": self.head_sha[:7]}
+
+    def supervisor(self, op, timeout=10.0, **args):
+        from cousin_lib.supervisor import SupervisorUnavailable
+        if self.no_supervisor:
+            raise SupervisorUnavailable("no cousin-supervisor answers")
+        if op == "status":
+            return {"ok": True, "children": json.loads(json.dumps(
+                self.children))}
+        name = ("runner:%s" % args["slug"]) if "slug" in args \
+            else args["name"]
+        self.calls.append((op, name))
+        child = self.children[name]
+        if op == "stop":
+            child.update(state="stopped", pid=None)
+            return {"ok": True, "name": name, "state": "stopped"}
+        if name in self.down:
+            child.update(state="backoff", pid=None, reason="exit 1")
+            return {"ok": False, "name": name, "state": "backoff",
+                    "error": "exit 1"}
+        pid = next(self.pids)
+        child.update(state="running", pid=pid)
+        if name not in self.silent:
+            self.says[name] = {"pid": pid, "checkout": str(self.checkout),
+                               "version": self.wrong.get(
+                                   name, self.versions[self.head_sha]),
+                               "commit": self.head_sha[:7]}
+        return {"ok": True, "name": name, "state": "running"}
+
+    def runner_state(self, home):
+        states = self.turns.get(pathlib.Path(home).name) or ["idle"]
+        return states.pop(0) if len(states) > 1 else states[0]
+
+    def head(self):
+        return self.head_sha, self.versions[self.head_sha]
+
+    def announced(self, name):
+        return self.says.get(name)
+
+    def alive(self, pid):
+        return any(c.get("pid") == pid for c in self.children.values())
+
+    def spawn_detached(self, argv, env, unit):
+        self.detached.append((argv, env, unit))
+        return "a fake unit"
+
+    def now(self):
+        return self.clock
+
+    def sleep(self, seconds):
+        self.clock += seconds
+
+    def wall(self):
+        return 1000
+
+    def restarts(self):
+        return [c for c in self.calls if c[0] in ("stop", "start")]
+
+
+class _Switch(_Install):
+    """The install of _Install, with a v3.11.0 whose processes say which
+    release they run and which can restart its caller detached, and the
+    checkout on a branch `work` at v3.9.0."""
+
+    def setUp(self):
+        super().setUp()
+        _release(self.repo, "3.11.0", registry=NEW_REGISTRY,
+                 chat="new chat wording", law="the law, amended\n",
+                 rule="a rule\n", deps=["tomli>=2"], extra={
+                     "cousin_lib/version.py": "def announce(root, name):\n",
+                     "cousin_lib/upgrade_switch.py":
+                         "RESTART_PROTOCOL = 1\n"})
+        _git(self.repo, "checkout", "-q", "-B", "work", "v3.9.0")
+        self.sha = {v: _sha(self.repo, "v" + v)
+                    for v in ("3.9.0", "3.10.0", "3.11.0")}
+        os.environ["COUSIN_HOME"] = str(self.homes["wren"])
+        self.ops = _FakeOps(self.root, self.repo,
+                            {sha: v for v, sha in self.sha.items()},
+                            self.sha["3.9.0"])
+        self.ops.says = {"loops": {"pid": 101, "version": "3.9.0"},
+                         "console": {"pid": 102, "version": "3.9.0"}}
+
+    def plan(self, **kw):
+        return super().plan(**kw)
+
+    def switch(self, plan=None, **kw):
+        kw.setdefault("deps", True)
+        kw.setdefault("idle_timeout", 30)
+        kw.setdefault("verify_timeout", 10)
+        return upgrade_switch.run_switch(plan or self.plan(), self.ops, **kw)
+
+    def state(self):
+        return json.loads((self.root / upgrade_switch.STATE).read_text())
+
+    def statuses(self, result):
+        return [(r["name"], r["status"]) for r in result["restarts"]]
+
+
+class TestSwitchPlan(_Switch):
+
+    def test_the_dry_run_shows_the_switch_the_order_and_the_rollback(self):
+        plan = self.plan()
+        out = upgrade.render(plan)
+        self.assertEqual(plan["from"]["branch"], "work")
+        self.assertEqual(plan["from"]["sha"], self.sha["3.9.0"])
+        self.assertEqual(plan["switch"]["verify"], "version")
+        self.assertTrue(plan["switch"]["self_restart"])
+        self.assertIn("git checkout --detach v3.11.0 (%s)"
+                      % self.sha["3.11.0"][:12], out)
+        self.assertIn("pip install --quiet --no-deps -e %s" % self.repo, out)
+        self.assertIn("[refused now: dependencies changed, --deps installs"
+                      " them]", out)
+        self.assertIn("rollback: cousin-upgrade --switch --to %s --deps --yes"
+                      % self.sha["3.9.0"][:12], out)
+        self.assertIn("git -C %s checkout work" % self.repo, out)
+        self.assertIn("each checked by the release it comes back on", out)
+        self.assertRegex(out, r"4\. runner:wren .*the caller's own: last,"
+                              r" detached after this call")
+
+    def test_a_target_that_does_not_say_its_version_is_checked_by_pid(self):
+        plan = self.plan(to="v3.10.0")
+        self.assertEqual(plan["switch"], {"python": upgrade.sys.executable,
+                                          "verify": "pid",
+                                          "self_restart": False})
+        out = upgrade.render(plan)
+        self.assertIn("each checked by its new pid only", out)
+        self.assertIn("the caller's own: by hand", out)
+
+    def test_the_plan_still_writes_nothing(self):
+        before = _snapshot(self.top)
+        upgrade.render(self.plan())
+        self.assertEqual(_snapshot(self.top), before)
+
+
+class TestPreflight(_Switch):
+
+    def test_tracked_changes_are_refused(self):
+        (self.repo / "CHANGELOG.md").write_text("mine\n")
+        why = upgrade_switch.preflight(self.plan(), self.ops, deps=True)
+        self.assertIn("tracked changes (CHANGELOG.md)", why)
+        self.assertEqual(self.ops.calls, [])
+
+    def test_changed_dependencies_need_deps(self):
+        why = upgrade_switch.preflight(self.plan(), self.ops)
+        self.assertIn("the dependencies changed", why)
+        self.assertIsNone(upgrade_switch.preflight(self.plan(), self.ops,
+                                                   deps=True))
+
+    def test_a_venv_that_imports_another_checkout_is_refused(self):
+        self.ops.probe_checkout = "/elsewhere/cousins-framework"
+        why = upgrade_switch.preflight(self.plan(), self.ops, deps=True)
+        self.assertIn("imports cousin_lib from /elsewhere", why)
+
+
+class TestSwitch(_Switch):
+
+    def test_checkout_install_check_then_restarts_in_order(self):
+        result = self.switch()
+        self.assertEqual(result["outcome"], "done", result)
+        self.assertEqual([(s["step"], s["status"]) for s in result["steps"]],
+                         [("checkout", "done"), ("install", "done"),
+                          ("check", "done")])
+        self.assertIn(("git", "checkout", "--quiet", "--detach",
+                       self.sha["3.11.0"]), self.ops.calls)
+        self.assertIn(("pip", True), self.ops.calls)
+        self.assertEqual(self.ops.restarts(), [
+            ("stop", "loops"), ("start", "loops"),
+            ("stop", "console"), ("start", "console"),
+            ("stop", "runner:toki"), ("start", "runner:toki")])
+        self.assertEqual(self.statuses(result), [
+            ("loops", "done"), ("console", "done"), ("runner:toki", "done"),
+            ("runner:wren", "detached")])
+        self.assertIn("runs 3.11.0", result["restarts"][0]["detail"])
+        self.assertIn("the branch work stays at", result["steps"][0]["detail"])
+
+    def test_the_callers_runner_restarts_detached_with_its_environment(self):
+        self.switch()
+        [(argv, env, unit)] = self.ops.detached
+        self.assertEqual(argv[:3], ["/opt/venv/bin/python3", "-m",
+                                    "cousin_lib.upgrade"])
+        self.assertEqual(argv[3:7], ["--restart", "--only", "runner:wren",
+                                     "--yes"])
+        self.assertIn(str(self.root), argv)
+        self.assertTrue(all(os.path.isabs(a) for a in argv
+                            if a.startswith("/") or "/" in a))
+        self.assertEqual(env["FRAMEWORK_ROOT"], str(self.root))
+        self.assertTrue(env["PATH"].startswith("/opt/venv/bin" + os.pathsep))
+        self.assertEqual(env["COUSIN_HOME"], "")
+        self.assertEqual(unit, "cousin-upgrade-restart-wren")
+        self.assertNotIn(("stop", "runner:wren"), self.ops.calls)
+
+    def test_the_from_ref_and_each_restart_are_recorded(self):
+        self.switch()
+        state = self.state()
+        self.assertEqual(state["from"], {"version": "3.9.0", "ref": "v3.9.0",
+                                         "sha": self.sha["3.9.0"],
+                                         "branch": "work"})
+        self.assertEqual(state["to"]["sha"], self.sha["3.11.0"])
+        self.assertEqual(state["stage"], "done")
+        self.assertEqual(state["restarts"]["runner:toki"]["status"], "done")
+        self.assertEqual(state["restarts"]["runner:wren"]["status"],
+                         "detached")
+        self.assertIn("git -C %s checkout work" % self.repo,
+                      state["rollback"]["by_hand"])
+
+    def test_a_runner_mid_turn_is_waited_for(self):
+        self.ops.turns["toki"] = ["running", "running", "idle"]
+        result = self.switch()
+        self.assertEqual(result["outcome"], "done")
+        self.assertIn(("start", "runner:toki"), self.ops.calls)
+        self.assertEqual(self.ops.clock, 2.0)
+
+    def test_a_runner_still_busy_is_left_pending_and_recorded(self):
+        self.ops.turns["toki"] = ["waiting_permission"]
+        result = self.switch(idle_timeout=5)
+        self.assertEqual(result["outcome"], "left")
+        self.assertEqual(self.statuses(result)[2], ("runner:toki", "pending"))
+        self.assertIn("mid-turn (waiting_permission)",
+                      result["restarts"][2]["detail"])
+        self.assertNotIn(("stop", "runner:toki"), self.ops.calls)
+        self.assertEqual(self.statuses(result)[3], ("runner:wren", "detached"))
+        self.assertEqual(self.state()["restarts"]["runner:toki"]["status"],
+                         "pending")
+        # later, once idle: --restart finishes it and leaves the rest
+        self.ops.turns["toki"] = ["idle"]
+        os.environ["COUSIN_HOME"] = ""
+        order = upgrade.restart_plan(self.root)["order"]
+        again = upgrade_switch.run_restarts(self.root, self.repo, order,
+                                            self.ops, verify_timeout=10)
+        self.assertEqual(again["outcome"], "done", again)
+        self.assertEqual([(r["name"], r["status"]) for r in again["restarts"]],
+                         [("loops", "already"), ("console", "already"),
+                          ("runner:toki", "done"), ("runner:wren", "done")])
+
+    def test_the_first_failure_stops_the_run_and_says_how_to_roll_back(self):
+        self.ops.wrong["console"] = "3.9.0"
+        result = self.switch()
+        self.assertEqual(result["outcome"], "failed")
+        self.assertEqual(self.statuses(result), [
+            ("loops", "done"), ("console", "failed"),
+            ("runner:toki", "not reached"), ("runner:wren", "not reached")])
+        self.assertIn("came back on version 3.9.0, not 3.11.0",
+                      result["restarts"][1]["detail"])
+        self.assertNotIn(("stop", "runner:toki"), self.ops.calls)
+        self.assertEqual(self.ops.detached, [])
+        out = upgrade_switch.render_result(self.plan(), result)
+        self.assertIn("FAILED. The rest was not done. To roll back:", out)
+        self.assertIn("cousin-upgrade --switch --to %s --deps --yes"
+                      % self.sha["3.9.0"][:12], out)
+        self.assertIn("git -C %s checkout work" % self.repo, out)
+        self.assertEqual(self.state()["stage"], "failed")
+
+    def test_a_process_that_does_not_come_back_fails_in_time(self):
+        self.ops.silent.add("loops")
+        result = self.switch(verify_timeout=4)
+        self.assertEqual(self.statuses(result)[0], ("loops", "failed"))
+        self.assertIn("not back on 3.11.0 within 4s (pid 201 has not said"
+                      " which release it runs)", result["restarts"][0]["detail"])
+        self.ops.down.add("console")
+        self.ops.silent.clear()
+        result = self.switch()
+        self.assertEqual(self.statuses(result)[1], ("console", "failed"))
+        self.assertIn("cousin-supervisor start --name console",
+                      result["restarts"][1]["detail"])
+
+    def test_a_held_runner_is_left_and_one_we_stopped_is_started(self):
+        self.ops.children["runner:toki"].update(state="stopped", pid=None,
+                                                reason="stopped by request")
+        result = self.switch()
+        self.assertEqual(self.statuses(result)[2], ("runner:toki", "skipped"))
+        self.assertNotIn(("start", "runner:toki"), self.ops.calls)
+        state = self.state()
+        state["restarts"]["runner:toki"] = {"status": "stopping"}
+        upgrade_switch.write_state(self.root, state)
+        result = self.switch(plan=self.plan())
+        self.assertEqual(self.statuses(result)[2], ("runner:toki", "done"))
+
+    def test_without_a_supervisor_the_restarts_are_by_hand(self):
+        self.ops.no_supervisor = True
+        result = self.switch()
+        self.assertEqual(result["outcome"], "left")
+        self.assertEqual([r["status"] for r in result["restarts"]],
+                         ["by hand", "by hand", "by hand", "detached"])
+
+    def test_a_process_already_on_the_target_is_not_restarted(self):
+        self.ops.head_sha = self.sha["3.11.0"]
+        self.ops.says["loops"] = {"pid": 101, "version": "3.11.0",
+                                  "commit": self.sha["3.11.0"][:7],
+                                  "checkout": str(self.repo)}
+        self.switch()
+        self.assertNotIn(("stop", "loops"), self.ops.calls)
+        self.assertIn(("stop", "console"), self.ops.calls)
+
+    def test_a_failed_checkout_moves_nothing_and_installs_nothing(self):
+        self.ops.git_rc["checkout"] = 1
+        result = self.switch()
+        self.assertEqual(result["outcome"], "failed")
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn("nothing moved", result["steps"][0]["detail"])
+        self.assertNotIn(("pip", True), self.ops.calls)
+        self.assertEqual(self.ops.restarts(), [])
+        self.assertTrue(self.state()["stage"].startswith("failed: checkout"))
+
+    def test_a_failed_install_or_check_stops_before_the_restarts(self):
+        self.ops.pip_rc = 1
+        result = self.switch()
+        self.assertEqual(result["steps"][-1], {"step": "install",
+                                               "status": "failed",
+                                               "detail": "pip: pip said no"})
+        self.assertEqual(self.ops.restarts(), [])
+        self.ops.pip_rc = 0
+        self.ops.head_sha = self.sha["3.9.0"]
+        self.ops.probe_version = "3.9.0"
+        result = self.switch()
+        self.assertEqual(result["steps"][-1]["status"], "failed")
+        self.assertIn("version 3.9.0, not 3.11.0",
+                      result["steps"][-1]["detail"])
+        self.assertEqual(self.ops.restarts(), [])
+
+    def test_no_restart_moves_the_code_only(self):
+        result = self.switch(restart=False)
+        self.assertEqual(result["outcome"], "left")
+        self.assertEqual(self.ops.restarts(), [])
+        self.assertIn("--no-restart", self.state()["stage"])
+
+    def test_a_target_without_announce_is_checked_by_its_new_pid(self):
+        result = self.switch(plan=self.plan(to="v3.10.0"))
+        self.assertEqual(self.statuses(result), [
+            ("loops", "done"), ("console", "done"), ("runner:toki", "done"),
+            ("runner:wren", "by hand")])
+        self.assertIn("checked by its new pid only",
+                      result["restarts"][0]["detail"])
+        self.assertIn("cousin-supervisor stop wren",
+                      result["restarts"][3]["detail"])
+        self.assertEqual(self.ops.detached, [])
+
+
+class TestDetachedSpawn(unittest.TestCase):
+    """How the caller's own restart leaves the process tree: nothing is
+    started here, subprocess is replaced."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.ops = upgrade_switch.Ops(tmp.name, "/srv/checkout",
+                                      python="/opt/venv/bin/python3")
+        self.env = upgrade_switch.detached_env(self.ops)
+
+    def test_a_user_unit_gets_every_variable_set_explicitly(self):
+        done = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(upgrade_switch.shutil, "which",
+                               return_value="/usr/bin/systemd-run"), \
+                mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/1"}), \
+                mock.patch.object(upgrade_switch.subprocess, "run",
+                                  return_value=done) as run, \
+                mock.patch.object(upgrade_switch.subprocess, "Popen") as popen:
+            how = self.ops.spawn_detached(["/opt/venv/bin/python3", "-m", "x"],
+                                          self.env, "cousin-upgrade-restart-wren")
+        cmd = run.call_args[0][0]
+        self.assertEqual(cmd[:4], ["systemd-run", "--user", "--unit",
+                                   "cousin-upgrade-restart-wren"])
+        self.assertIn("--setenv=FRAMEWORK_ROOT=%s" % self.ops.root, cmd)
+        self.assertIn("--setenv=COUSIN_HOME=", cmd)
+        self.assertTrue(any(c.startswith("--setenv=PATH=/opt/venv/bin" + os.pathsep)
+                            for c in cmd))
+        self.assertEqual(cmd[-3:], ["/opt/venv/bin/python3", "-m", "x"])
+        popen.assert_not_called()
+        self.assertIn("cousin-upgrade-restart-wren", how)
+
+    def test_without_a_user_manager_it_is_a_new_session(self):
+        with mock.patch.object(upgrade_switch.shutil, "which",
+                               return_value=None), \
+                mock.patch.object(upgrade_switch.subprocess, "Popen") as popen:
+            popen.return_value.pid = 4242
+            how = self.ops.spawn_detached(["/opt/venv/bin/python3"], self.env,
+                                          "u")
+        kw = popen.call_args[1]
+        self.assertTrue(kw["start_new_session"])
+        self.assertEqual(kw["env"]["FRAMEWORK_ROOT"], str(self.ops.root))
+        self.assertEqual(kw["env"]["COUSIN_HOME"], "")
+        self.assertIn("process 4242", how)
+
+
+class TestSwitchCLI(_Switch):
+
+    def run_cli(self, *argv, stdin=None):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err), \
+                mock.patch.object(upgrade.sys, "stdin", stdin or _Pipe()), \
+                mock.patch.object(upgrade_switch, "Ops",
+                                  return_value=self.ops), \
+                mock.patch.object(upgrade.version, "version",
+                                  return_value="3.9.0"), \
+                mock.patch.object(upgrade.version, "CHECKOUT", self.repo):
+            code = upgrade.upgrade_main(["--root", str(self.root),
+                                         "--checkout", str(self.repo),
+                                         "--verify-timeout", "5", *argv])
+        return code, out.getvalue(), err.getvalue()
+
+    def test_switch_asks_and_without_an_answer_does_nothing(self):
+        code, out, err = self.run_cli("--switch", "--deps")
+        self.assertEqual(code, 2)
+        self.assertIn("pass --yes", err)
+        self.assertIn("1. git checkout --detach v3.11.0", out)
+        self.assertNotIn("checkout", [c[1] for c in self.ops.calls
+                                      if c[0] == "git"])
+        code, out, err = self.run_cli("--switch", "--deps",
+                                      stdin=_Terminal("n\n"))
+        self.assertEqual(code, 2)
+        self.assertIn("and restart 4 processes? [y/N]", err)
+        self.assertEqual(self.ops.restarts(), [])
+
+    def test_switch_with_yes_fetches_switches_and_restarts(self):
+        code, out, err = self.run_cli("--switch", "--deps", "--yes")
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(self.ops.calls[0], ("git", "fetch", "--tags",
+                                             "--quiet"))
+        self.assertIn("0. git fetch --tags: done", out)
+        self.assertRegex(out, r"3\. runner:toki +done +pid \d+ runs 3\.11\.0")
+        self.assertIn("note: 4 homes not in step with v3.11.0", out)
+        self.assertIn("done; to roll back: cousin-upgrade --switch --to", out)
+
+    def test_switch_refusals_are_exit_2(self):
+        code, _out, err = self.run_cli("--switch", "--yes")
+        self.assertEqual(code, 2)
+        self.assertIn("--deps", err)
+        self.ops.git_rc["fetch"] = 128
+        code, _out, err = self.run_cli("--switch", "--deps", "--yes")
+        self.assertEqual(code, 1)
+        self.assertIn("--no-fetch", err)
+        code, _out, _err = self.run_cli("--switch", "--deps", "--yes",
+                                        "--no-fetch")
+        self.assertEqual(code, 0, _out + _err)
+
+    def test_a_failure_is_exit_1_and_a_busy_runner_too(self):
+        self.ops.turns["toki"] = ["running"]
+        code, out, err = self.run_cli("--switch", "--deps", "--yes",
+                                      "--idle-timeout", "2")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("left for a person", out)
+
+    def test_flags_that_go_with_another_mode(self):
+        for argv, word in ((("--dry-run", "--no-fetch"), "--switch"),
+                           (("--apply-homes", "--deps"), "--switch"),
+                           (("--switch", "--only", "loops"), "--restart"),
+                           (("--dry-run", "--yes"), "--yes goes with")):
+            code, _out, err = self.run_cli(*argv)
+            self.assertEqual(code, 2, argv)
+            self.assertIn(word, err)
+
+    def test_restart_only_one_process(self):
+        os.environ["COUSIN_HOME"] = ""
+        self.ops.head_sha = self.sha["3.11.0"]
+        code, out, err = self.run_cli("--restart", "--only", "console",
+                                      "--yes")
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(self.ops.restarts(), [("stop", "console"),
+                                               ("start", "console")])
+        code, out, err = self.run_cli("--restart", "--only", "nope", "--yes")
+        self.assertEqual(code, 2)
+        self.assertIn("--only nope: not in the restart order", err)
 
 
 class TestTemplateSyncText(unittest.TestCase):

@@ -3,6 +3,25 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.25.0 - 2026-10-03
+
+### Added
+
+- **`cousin-upgrade --switch` moves the code and restarts every process on
+  it, in order.** It fetches, refuses a checkout with tracked changes,
+  checks the target out detached, reinstalls with `pip --no-deps -e`
+  (changed dependencies need `--deps`) and checks a fresh interpreter
+  imports the target. It then restarts the loops daemon, the console and
+  each runner through the supervisor, each confirmed by the release it
+  reports before the next; a runner mid-turn is waited for, then left
+  pending, and the calling cousin's own runner restarts last, detached,
+  with its environment passed explicitly. The first failure stops the run
+  with rollback steps; `data/upgrade.json` records the from-ref and every
+  restart, and `cousin-upgrade --restart` finishes what was left.
+- **Each long-running process says which release it runs:** the console,
+  the loops daemon and each runner write `run/versions/<name>.json` (pid,
+  version, commit, checkout) at start.
+
 ## 3.24.0 - 2026-10-03
 
 ### Added

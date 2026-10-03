@@ -10,6 +10,10 @@ pyproject in place, touching nothing but the version string.
 A process reads the version and the git commit once, at first use:
 the console shows what it is RUNNING, so a checkout that was bumped or
 pulled but not restarted shows the old values until the restart.
+The long-running processes (the console, the loops daemon, each
+runner) also write them to <root>/run/versions/<name>.json at their
+start (announce), which is how cousin-upgrade tells that a restart came
+back on the new code.
 """
 import argparse
 import functools
@@ -77,6 +81,55 @@ def git_commit():
         return None
     commit = (r.stdout or "").strip()
     return commit if r.returncode == 0 and commit else None
+
+
+ANNOUNCE_DIR = "run/versions"
+
+
+def announce_path(root, name):
+    """Where the process `name` (a supervisor child name: `console`,
+    `loops`, `runner:<slug>`) says which release it runs."""
+    return Path(root) / ANNOUNCE_DIR / ("%s.json" % name.replace(":", "-"))
+
+
+def announce(root, name):
+    """Say which release this process runs, once, at its start:
+    <root>/run/versions/<name>.json = {"name", "pid", "version",
+    "commit", "checkout", "at"}. The console, the loops daemon and each
+    runner write it; cousin-upgrade reads it to tell that a restarted
+    process came back on the new code (its pid, its version, its
+    commit). The path written, or None: a file that cannot be written
+    is never a reason to fail a start."""
+    import json
+    import os
+    import time
+    path = announce_path(root, name)
+    body = {"name": name, "pid": os.getpid(), "version": version(),
+            "commit": git_commit(), "checkout": str(CHECKOUT),
+            "at": int(time.time())}
+    tmp = path.with_name("%s.%d.tmp" % (path.name, os.getpid()))
+    try:
+        (Path(root) / "run").mkdir(mode=0o700, exist_ok=True)
+        path.parent.mkdir(exist_ok=True)
+        tmp.write_text(json.dumps(body) + "\n")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return None
+    return path
+
+
+def announced(root, name):
+    """What the process `name` last said it runs (announce), or None."""
+    import json
+    try:
+        data = json.loads(announce_path(root, name).read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def browse_url(remote):

@@ -759,10 +759,13 @@ rewritten, whether a `policy.toml` is there (operator policy, never touched),
 and the CLAUDE.md diff against the target's template. A home with no registry
 is listed as such. A home's starting point is the release
 `data/template-sync.json` records as its last registry sync, else the running
-version. Last come the restarts it would do, in order: the loops daemon, the
-console, each runner (from `cousin-supervisor status`, or from the
-configuration when no supervisor answers), the caller's own runner last and
-detached. A dirty checkout is reported, not refused. `--json` prints the same
+version. Then the code switch `--switch` would do (the fetch, the checkout,
+the reinstall, the check) with how to roll it back, and last the restarts, in
+order: the loops daemon, the console, each runner (from `cousin-supervisor
+status`, or from the configuration when no supervisor answers), the caller's
+own runner last and detached, each with the release it says it runs now and
+how its restart will be checked. A dirty checkout is reported, not refused.
+`--json` prints the same
 plan as JSON, `-v`/`--full` prints each diff, `--root` picks the install and
 `--checkout` the git checkout to read releases from (default: the one
 running), `--home SLUG` (repeatable) limits the homes. Exit 0 the plan was
@@ -770,8 +773,7 @@ computed, 1 it could not be (no release tag, not a git checkout), 2 refused.
 
 `cousin-upgrade --apply-homes` applies the homes' part of the same plan: each
 home's `mcp-registry.toml` and `.mcp.json` are brought to the target. The
-code is not switched and nothing restarts (that comes in a later release).
-It prints the homes' plan and asks `apply to N homes? [y/N]`; `--yes` skips
+code is not switched and nothing restarts (that is `--switch`). It prints the homes' plan and asks `apply to N homes? [y/N]`; `--yes` skips
 the question, and without a terminal to ask at, `--yes` is required (else
 exit 2, nothing written). Per home:
 
@@ -803,10 +805,65 @@ plan and the results. Exit 0 all done, 1 a home is left for a person (a
 failed registry, a `.mcp.json` that could not be refreshed), 2 refused (no
 `--yes` and no terminal, the question answered no, an unknown `--home`).
 
+`cousin-upgrade --switch` moves the code to the target and restarts every
+process on it. It runs `git fetch --tags` first (`--no-fetch` skips it), then
+computes the plan, prints the switch and the restarts, and asks `switch <checkout>
+to <version> and restart N processes? [y/N]` (`--yes` skips the question and is
+required without a terminal). Refused before anything moves (exit 2): tracked
+changes in the checkout; a dependency change without `--deps`; a venv whose
+python does not import `cousin_lib` from the checkout being upgraded. Then:
+
+1. `data/upgrade.json` (under the root) records where it started: the
+   version, the commit and the branch HEAD was on.
+2. `git checkout --detach <target commit>`. The branch HEAD was on is not
+   moved.
+3. `<python> -m pip install --no-deps -e <checkout>` with the python of the
+   venv the command runs in (`--deps` lets pip install the dependencies too).
+4. A fresh interpreter of that venv must import `cousin_lib` at the target
+   version from the checkout.
+5. The restarts, in order (`--no-restart` stops after step 4): the loops
+   daemon, the console, each runner, each through the supervisor (`stop`, then
+   `start`; a runner's Telegram bridge stops and starts with it). Each one
+   must come back `running` on a new pid that says it runs the target
+   (version, commit and checkout, from `run/versions/<name>.json`, which the
+   console, the loops daemon and each runner write at their start) within
+   `--verify-timeout` (90 s). A target older than that file is checked by
+   its new pid only.
+
+A process that already says it runs the target is not restarted, so a second
+run does only what is left. A runner mid-turn is waited for, up to
+`--idle-timeout` (600 s); still busy, it is left `pending`. A runner held down
+by a stop, or `failing`, is left as it is: it runs the new code when it is
+started. With no supervisor, or for a process that is not its child (its own
+unit), the restart is `by hand`. The caller's own runner (a cousin running
+the command) is restarted last and detached, once its turn is over: a
+`systemd-run --user` unit when there is a user manager, else a process in its
+own session (output in `data/upgrade-restart.log`), running `cousin-upgrade
+--restart --only runner:<slug>` with absolute paths and `FRAMEWORK_ROOT` and
+the venv's `bin` on `PATH` set explicitly, since a transient unit has
+neither. The first restart that fails stops the run; the rest are `not
+reached`, and the report says how to roll back: `cousin-upgrade --switch --to
+<from commit> --yes`, or by hand `git -C <checkout> checkout <branch>`, the
+same pip line, then the restarts. Every step and every restart is recorded in
+`data/upgrade.json` as it goes. From inside a cousin, run it as a background
+job: the waits can outlast a tool call.
+
+`cousin-upgrade --restart` does the restarts alone, on what the checkout
+holds now (its HEAD and version): what a switch left `pending` or `by hand`,
+or a runner it stopped and did not get back. `--only NAME` (repeatable:
+`loops`, `console`, `runner:<slug>`) limits it. It asks like `--switch`.
+
+Exit for `--switch` and `--restart`: 0 all done (the caller's detached
+restart counts as done; `data/upgrade.json` records how it went), 1 a step or
+a restart failed, or something is left for a person (`pending`, `by hand`),
+2 refused.
+
 ```
 cousin-upgrade --dry-run
 cousin-upgrade --dry-run --to v3.17.0 --full
 cousin-upgrade --apply-homes --to v3.18.0 --home wren --yes
+cousin-upgrade --switch --to v3.18.0
+cousin-upgrade --restart --only runner:wren --yes
 ```
 
 `cousin-gate` scans a tree you are about to publish for private addresses,

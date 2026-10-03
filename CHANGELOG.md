@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.8.1 - 2026-10-03
+
+### Fixed
+
+- **A dreaming pass that fails before it starts is no longer run again on
+  every loops tick.** The pass loaded its memory side before writing its
+  start record, so a failure there (an import error, for one) left no
+  attempt on record and `due()` fired the nightly pass every tick until
+  midnight. The start record is now written first; the failure is an
+  `error` pass like any other, and the next attempt is the next night.
+
 ## 3.8.0 - 2026-10-02
 
 ### Added

@@ -196,15 +196,17 @@ def run_pass(home, root, *, trigger="manual", model=None, budget=BUDGET_TOKENS,
     every change, commit the ledger when the session ended clean, else
     abandon it. Returns the end record (also written to the log)."""
     from cousin_lib import accounts
-    ops = ops or _memory_ops()
     home, root = Path(home), Path(root)
     pass_id = "%s-%s" % (datetime.now().strftime("%Y%m%dT%H%M%S"), uuid.uuid4().hex[:6])
     model = model or DEFAULT_MODEL
     start = {"pass_id": pass_id, "event": "start", "started": time.time(),
              "trigger": trigger, "model": model, "budget": budget}
+    # the start is written before anything can fail: a pass that dies
+    # early is still an attempt, so due() does not fire it again each tick
     _write(home, start)
     changes, end = [], dict(start, event="end")
     try:
+        ops = ops or _memory_ops()
         piece = ops.slice_for(home, chars=SLICE_CHARS)
         end["through_before"] = getattr(piece, "through", None)
         # what a bounded slice saw and left out (topics seen / left, new
@@ -230,7 +232,8 @@ def run_pass(home, root, *, trigger="manual", model=None, budget=BUDGET_TOKENS,
     except Exception as err:  # noqa: BLE001 - every failure is a recorded result
         end.update(result="error", error="%s: %s" % (type(err).__name__, err))
         try:
-            ops.abandon(home, pass_id, end["error"])
+            if ops is not None:
+                ops.abandon(home, pass_id, end["error"])
         except Exception:  # noqa: BLE001 - the record says what failed first
             pass
     finally:

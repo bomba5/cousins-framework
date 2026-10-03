@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.10.2 - 2026-10-03
+
+### Fixed
+
+- **`cousin-version bump` edits the checkout it runs in.** It looked at
+  the checkout the package runs from first, so a bump in a git worktree
+  edited the live install's pyproject.toml instead of the worktree's. It
+  now takes the nearest pyproject naming the framework from the working
+  directory up, and only then the running checkout.
+
 ## 3.10.1 - 2026-10-03
 
 ### Fixed

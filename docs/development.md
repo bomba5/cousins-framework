@@ -356,7 +356,8 @@ cousin-version bump          # patch: 1.24.0 -> 1.24.1
 cousin-version bump minor    # 1.24.0 -> 1.25.0
 ```
 
-`bump` edits only that line in `pyproject.toml`. The console shows the
+`bump` edits only that line, in the `pyproject.toml` of the checkout you
+run it in (so a bump in a worktree stays in the worktree). The console shows the
 version it's running, read once at start, so restart it after a bump
 or a pull.
 

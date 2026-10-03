@@ -482,15 +482,39 @@ the changelog between the running version and the newest release tag (or
 cousin's registry, `.mcp.json` and CLAUDE.md against the new release, and the
 restarts in order. It writes nothing.
 
-After the code steps above, `cousin-upgrade --apply-homes --to <tag>` brings
-each cousin's registry and `.mcp.json` to that release: it asks first (or
-takes `--yes`), keeps a copy of each registry in the home's
-`data/mcp-registry.toml.pre-<version>`, never changes a value the cousin or
-you set, and puts a registry back as it was when the result does not check.
-Each home's `data/template-sync.json` records what it got, so a second run
-says "in step". A cousin picks the new registry up at its next start. The
-code switch and the restarts are not part of it yet: the steps above remain
-the upgrade ([commands](commands.md#maintenance)).
+`cousin-upgrade --apply-homes --to <tag>` brings each cousin's registry and
+`.mcp.json` to that release: it asks first (or takes `--yes`), keeps a copy
+of each registry in the home's `data/mcp-registry.toml.pre-<version>`, never
+changes a value the cousin or you set, and puts a registry back as it was
+when the result does not check. Each home's `data/template-sync.json` records
+what it got, so a second run says "in step". It reads the release from git,
+so it works before the code moves. A cousin picks the new registry up at its
+next start.
+
+`cousin-upgrade --switch --to <tag>` is the rest of the upgrade, in place of
+the code steps above: it fetches, checks the release out in the checkout
+(refused with tracked changes), reinstalls it into the venv, checks that a
+fresh interpreter imports it, then restarts the loops daemon, the console
+and each runner in that order through the supervisor, one at a time. Each
+restart must come back on the new release (each process writes the release
+it runs to `run/versions/` at its start) before the next one starts; the
+first that does not stops the run and the report says how to roll back. A
+cousin mid-turn is waited for, then left pending; a cousin you stopped stays
+stopped. Run from inside a cousin, that cousin's own runner restarts last,
+detached, after its turn. `data/upgrade.json` records where it started and
+each restart; `cousin-upgrade --restart` finishes what was left. So an
+upgrade is:
+
+```
+cousin-upgrade --dry-run
+cousin-upgrade --apply-homes --yes
+cousin-upgrade --switch
+```
+
+The supervisor itself keeps running the code it started with (it starts its
+children with the new one); restart its unit when the release notes say
+`cousin-supervisor` changed. If `systemd/` changed, re-render the units as
+above ([commands](commands.md#maintenance)).
 
 ## After a reboot
 

@@ -5,8 +5,9 @@
 written, no code is switched and nothing restarts. `--apply-homes`
 applies the homes' part of the same plan, after a confirmation (--yes,
 or y at the prompt): each home's mcp-registry.toml and .mcp.json are
-brought to TO, and the code still is not switched and nothing restarts
-(that part comes in a later release).
+brought to TO. `--switch` moves the checkout to TO, reinstalls it and
+restarts every process on it in order, and `--restart` does the
+restarts alone (cousin_lib/upgrade_switch.py says how).
 
 The plan is computed before the checkout moves, so every shipped text
 comes from git (`git show <ref>:<path>`), never from the working tree:
@@ -31,7 +32,10 @@ comes from git (`git show <ref>:<path>`), never from the working tree:
 - The seeded files (config/law.md, shared/) are compared with TO's
   templates (shared_tier.compare_templates).
 - The restarts are listed in order: loops, console, each runner, the
-  caller's own runner last and detached.
+  caller's own runner last and detached, with what each process says
+  it runs now (version.announce) and how a restart will be checked
+  (the version it comes back on, or its new pid when TO does not say).
+- FROM's branch and commit, for the switch's rollback.
 - The CHANGELOG sections between FROM and TO (headings and bold leads)
   and whether pyproject's dependencies changed are part of the report.
 
@@ -50,8 +54,8 @@ Every home applied records data/template-sync.json:
 "applied" | "in-step" | "failed: <why>"}, a failed one also "from",
 the commit it was planned from, so the next plan starts there again.
 
-Exit 0 the plan was computed (and applied), 1 it could not be or a home
-is left for a person, 2 refused.
+Exit 0 the plan was computed (and applied, switched, restarted), 1 it
+could not be or something is left for a person, 2 refused.
 """
 import argparse
 import contextlib
@@ -356,6 +360,21 @@ def _caller(root):
     return _slug(home)
 
 
+def _runs(root, name):
+    """The release the process `name` says it runs (version.announce),
+    when the pid it said it with is alive; else None."""
+    said = version.announced(root, name)
+    if not said or not said.get("pid"):
+        return None
+    try:
+        os.kill(int(said["pid"]), 0)
+    except PermissionError:
+        pass
+    except (OSError, TypeError, ValueError):
+        return None
+    return said.get("version")
+
+
 def restart_plan(root, caller=None):
     """The restarts an upgrade would do, in order, from the running
     supervisor's status when it answers (else from the configuration):
@@ -377,7 +396,7 @@ def restart_plan(root, caller=None):
             how = "not a supervisor child: its own unit or process"
         row = (children or {}).get(name) or {}
         rows.append({"name": name, "how": how, "state": row.get("state"),
-                     "detached": False})
+                     "detached": False, "runs": _runs(root, name)})
     if children is None:
         runners = ["runner:%s" % c.slug
                    for c in supervisor.runner_cousins(root)]
@@ -391,7 +410,8 @@ def restart_plan(root, caller=None):
                  else "unknown (no supervisor status)",
                  "state": row.get("state"), "detached": False,
                  "bridge": children is not None
-                 and ("telegram:%s" % slug) in children}
+                 and ("telegram:%s" % slug) in children,
+                 "runs": _runs(root, name)}
         if slug == caller:
             entry["detached"] = True
             own = entry
@@ -436,6 +456,8 @@ def build_plan(root, checkout, *, to=None, running=None):
         notes.append("no tag %s: FROM is the checkout's HEAD" % code_from)
         code_from = "HEAD"
     head = resolve(checkout, "HEAD") or ""
+    branch = _git(checkout, "symbolic-ref", "--short", "-q", "HEAD",
+                  check=False).stdout.strip() or None
     old, new = _semver(running), _semver(to_version)
     if old is None:
         direction = "unknown"
@@ -485,14 +507,27 @@ def build_plan(root, checkout, *, to=None, running=None):
              for h in _homes(root)]
     return {"root": str(root), "checkout": str(checkout),
             "from": {"version": running, "ref": code_from,
-                     "commit": head[:12]},
+                     "commit": head[:12], "sha": head, "branch": branch},
             "to": {"ref": to, "version": to_version,
                    "commit": to_commit[:12], "sha": to_commit,
                    "explicit": explicit},
             "direction": direction, "dirty": _dirty(checkout),
             "dependencies": deps, "changelog": log, "notes": notes,
             "seeded": seeded, "homes": homes,
+            "switch": _switch_facts(checkout, to),
             "restarts": restart_plan(root, _caller(root))}
+
+
+def _switch_facts(checkout, to):
+    """What the switch needs to know about TO before it moves: whether
+    its processes say which release they run (else a restart is checked
+    by its new pid only) and whether it can restart its caller
+    detached; and the python that installs it."""
+    said = show(checkout, to, "cousin_lib/version.py") or ""
+    switch = show(checkout, to, "cousin_lib/upgrade_switch.py") or ""
+    return {"python": sys.executable,
+            "verify": "version" if "def announce(" in said else "pid",
+            "self_restart": "RESTART_PROTOCOL = " in switch}
 
 
 # --------------------------------------------------------------- apply
@@ -716,7 +751,8 @@ def _head(plan, title):
     say("to        %s (%s, %s)%s" % (t["version"], t["ref"], t["commit"],
                                      "" if plan["direction"] == "upgrade"
                                      else "  [%s]" % plan["direction"]))
-    say("dependencies %s" % ("changed: pip install -e . again"
+    say("dependencies %s" % ("changed: pip installs them with --switch"
+                             " --deps (or install them first)"
                              if plan["dependencies"] else "unchanged"))
     for line in plan["dependencies"]:
         say("  %s" % line)
@@ -725,7 +761,7 @@ def _head(plan, title):
     return out
 
 
-def render(plan, *, full=False, prune=False):
+def render(plan, *, full=False, prune=False, deps=False):
     """The plan as the report a person reads."""
     out = _head(plan, "cousin-upgrade --dry-run: a plan; nothing written,"
                       " nothing restarted")
@@ -754,20 +790,43 @@ def render(plan, *, full=False, prune=False):
     say("homes:")
     out.extend(render_homes(plan["homes"], full=full, prune=prune))
     say("")
+    from cousin_lib import upgrade_switch
+    out.extend(upgrade_switch.render_switch_plan(plan, deps=deps))
+    say("")
+    out.extend(render_restart_plan(plan))
+    return "\n".join(out) + "\n"
+
+
+def render_restart_plan(plan, title=None):
+    """The restarts in order, with how each is checked."""
+    out = []
+    say = out.append
     r = plan["restarts"]
-    say("restarts it would do, in order (none done now):")
+    check = ("each checked by the release it comes back on" if
+             plan["switch"]["verify"] == "version" else "each checked by its"
+             " new pid only: the target does not say its version")
+    say(title or "restarts it would do, in order, %s (none done now):"
+        % check)
     if r["supervisor"]:
         say("  supervisor not reachable: %s" % r["supervisor"])
     for i, row in enumerate(r["order"], 1):
         bits = [row["how"]]
         if row.get("state"):
             bits.append(row["state"])
+        if row.get("runs"):
+            bits.append("runs %s" % row["runs"])
         if row.get("bridge"):
             bits.append("with its telegram bridge")
         if row["detached"]:
-            bits.append("the caller's own: last, detached")
+            bits.append("the caller's own: last, detached after this call"
+                        if plan["switch"]["self_restart"] else
+                        "the caller's own: by hand (the target cannot"
+                        " restart it detached)")
         say("  %d. %-20s %s" % (i, row["name"], ", ".join(bits)))
-    return "\n".join(out) + "\n"
+    if r["order"]:
+        say("  a runner mid-turn is waited for (--idle-timeout), else left"
+            " pending in %s; a held one is left as it is" % "data/upgrade.json")
+    return out
 
 
 def render_applied(plan, rows):
@@ -808,14 +867,17 @@ def render_applied(plan, rows):
     return "\n".join(out) + "\n"
 
 
-def _confirm(count):
+def _confirm(question):
     """y at the terminal; None when there is no terminal to ask."""
     if not sys.stdin.isatty():
         return None
-    sys.stderr.write("apply to %d home%s? [y/N] " % (
-        count, "" if count == 1 else "s"))
+    sys.stderr.write("%s [y/N] " % question)
     sys.stderr.flush()
     return sys.stdin.readline().strip().lower() in ("y", "yes")
+
+
+def _plural(count, word, many=None):
+    return "%d %s" % (count, word if count == 1 else many or word + "s")
 
 
 # ----------------------------------------------------------------- CLI
@@ -833,19 +895,130 @@ def _select(homes, slugs):
     return [known[x] for x in dict.fromkeys(slugs)]
 
 
+def _homes_behind(homes):
+    """The homes whose registry or .mcp.json the target would change."""
+    return [h["slug"] for h in homes
+            if h["registry"]["status"] == "changes"
+            or h["mcp_json"]["status"] == "would change"]
+
+
+def _ask(args, question, refusal):
+    """None to go on, else the exit code: --yes, or y at the prompt."""
+    if args.yes:
+        return None
+    answer = _confirm(question)
+    if answer is None:
+        print("cousin-upgrade: %s: pass --yes, or run it at a terminal to be"
+              " asked" % refusal, file=sys.stderr)
+        return 2
+    if not answer:
+        print("cousin-upgrade: nothing done", file=sys.stderr)
+        return 2
+    return None
+
+
+def _switch(args, root, checkout):
+    """--switch: fetch, plan, refuse or ask, then upgrade_switch.run_switch."""
+    from cousin_lib import upgrade_switch
+    ops = upgrade_switch.Ops(root, checkout)
+    if not args.no_fetch:
+        rc, _out, err = ops.git("fetch", "--tags", "--quiet", timeout=300)
+        if rc != 0:
+            raise UpgradeError("git fetch --tags: %s; --no-fetch switches to"
+                               " a ref this checkout already has"
+                               % (err.strip() or "exit %d" % rc))
+    plan = build_plan(root, checkout, to=args.to)
+    why = upgrade_switch.preflight(plan, ops, deps=args.deps)
+    if why:
+        raise Refused(why)
+    if not args.json:
+        out = _head(plan, "cousin-upgrade --switch: the code to %s, then the"
+                          " restarts" % plan["to"]["version"])
+        behind = _homes_behind(plan["homes"])
+        if behind:
+            out.append("note: %s not in step with %s (%s): `cousin-upgrade"
+                       " --apply-homes --to %s` brings them, best before the"
+                       " restarts" % (_plural(len(behind), "home"),
+                                      plan["to"]["ref"], ", ".join(behind),
+                                      plan["to"]["ref"]))
+        out.append("")
+        out += upgrade_switch.render_switch_plan(
+            plan, deps=args.deps, fetched=not args.no_fetch,
+            restart=not args.no_restart)
+        if not args.no_restart:
+            out.append("")
+            out += render_restart_plan(plan, "restarts, in order:")
+        print("\n".join(out))
+    code = _ask(args, "switch %s to %s%s?" % (
+        checkout, plan["to"]["version"], "" if args.no_restart else
+        " and restart %s" % _plural(len(plan["restarts"]["order"]),
+                                     "process", "processes")),
+        "--switch moves the code and restarts processes")
+    if code is not None:
+        return code
+    result = upgrade_switch.run_switch(
+        plan, ops, deps=args.deps, restart=not args.no_restart,
+        idle_timeout=args.idle_timeout, verify_timeout=args.verify_timeout)
+    if args.json:
+        print(json.dumps({"plan": plan, "switch": result}, indent=2,
+                         default=str))
+    else:
+        sys.stdout.write(upgrade_switch.render_result(plan, result))
+    return 0 if result["outcome"] == "done" else 1
+
+
+def _restart(args, root, checkout):
+    """--restart: the restarts alone, on what the checkout holds now."""
+    from cousin_lib import upgrade_switch
+    ops = upgrade_switch.Ops(root, checkout)
+    order = restart_plan(root, _caller(root))["order"]
+    if args.only:
+        known = {row["name"]: row for row in order}
+        unknown = [x for x in args.only if x not in known]
+        if unknown:
+            raise Refused("--only %s: not in the restart order (%s)"
+                          % (", ".join(unknown), ", ".join(known) or "none"))
+        order = [known[x] for x in dict.fromkeys(args.only)]
+    if not args.json:
+        print("cousin-upgrade --restart: %s, in order:" % _plural(
+            len(order), "process", "processes"))
+        for i, row in enumerate(order, 1):
+            print("  %d. %s%s" % (i, row["name"], ", detached after this call"
+                                  if row["detached"] else ""))
+    code = _ask(args, "restart %s?" % _plural(len(order), "process",
+                                              "processes"),
+                "--restart restarts processes")
+    if code is not None:
+        return code
+    try:
+        result = upgrade_switch.run_restarts(
+            root, checkout, order, ops, idle_timeout=args.idle_timeout,
+            verify_timeout=args.verify_timeout)
+    except upgrade_switch.SwitchError as err:
+        raise UpgradeError(str(err))
+    if args.json:
+        print(json.dumps(result, indent=2, default=str))
+    else:
+        sys.stdout.write(upgrade_switch.render_restarted(result))
+    return 0 if result["outcome"] == "done" else 1
+
+
 def upgrade_main(argv=None):
-    """cousin-upgrade [--to REF] (--dry-run | --apply-homes [--yes])
-    [--home SLUG ...] [--prune-retired] [--json] [--full]. Exit 0 done,
-    1 it could not be or a home is left for a person, 2 refused."""
+    """cousin-upgrade [--to REF] (--dry-run | --apply-homes | --switch |
+    --restart) [--yes] [--home SLUG ...] [--prune-retired] [--no-fetch]
+    [--deps] [--no-restart] [--only NAME ...] [--idle-timeout S]
+    [--verify-timeout S] [--json] [--full]. Exit 0 done, 1 it could not
+    be or something is left for a person, 2 refused."""
+    from cousin_lib import upgrade_switch
     from cousin_lib.config import FrameworkConfig, MissingConfigError
     parser = argparse.ArgumentParser(
         prog="cousin-upgrade",
-        description="plan moving this install to another release: code,"
-                    " seeded files, each home's registry, .mcp.json and"
-                    " CLAUDE.md, restarts (--dry-run, nothing written);"
-                    " or apply the homes' registry and .mcp.json part of"
-                    " it (--apply-homes). This release neither switches"
-                    " the code nor restarts anything.")
+        description="move this install to another release: plan it"
+                    " (--dry-run, nothing written), bring each home's"
+                    " registry and .mcp.json to it (--apply-homes), switch"
+                    " the code and restart every process on it in order,"
+                    " each checked by the version it comes back on"
+                    " (--switch), or do the restarts alone (--restart).")
     parser.add_argument("--to", metavar="REF",
                         help="the release tag or ref to plan for (default:"
                              " the newest v<major>.<minor>.<patch> tag); an"
@@ -858,42 +1031,85 @@ def upgrade_main(argv=None):
                       help="bring each home's mcp-registry.toml (backup"
                            " first) and .mcp.json to the target, record it"
                            " in data/template-sync.json; asks first")
+    mode.add_argument("--switch", action="store_true",
+                      help="fetch, check out the target in the checkout,"
+                           " reinstall it into this venv, then restart every"
+                           " process on it in order; asks first")
+    mode.add_argument("--restart", action="store_true",
+                      help="only the restarts, on what the checkout holds"
+                           " now (what a switch left pending); asks first")
     parser.add_argument("--yes", action="store_true",
-                        help="apply without asking (--apply-homes); needed"
-                             " when there is no terminal to ask at")
+                        help="go on without asking (--apply-homes, --switch,"
+                             " --restart); needed when there is no terminal"
+                             " to ask at")
     parser.add_argument("--home", metavar="SLUG", action="append",
                         help="only this home (repeatable)")
     parser.add_argument("--prune-retired", action="store_true",
                         help="remove the entries the target retired"
                              " instead of reporting them")
+    parser.add_argument("--no-fetch", action="store_true",
+                        help="--switch: use the refs the checkout has, no"
+                             " git fetch")
+    parser.add_argument("--deps", action="store_true",
+                        help="--switch: let pip install the dependencies"
+                             " too (needed when they changed)")
+    parser.add_argument("--no-restart", action="store_true",
+                        help="--switch: move the code, restart nothing")
+    parser.add_argument("--only", metavar="NAME", action="append",
+                        help="--restart: only this process (loops, console,"
+                             " runner:<slug>; repeatable)")
+    parser.add_argument("--idle-timeout", type=float, metavar="S",
+                        default=upgrade_switch.IDLE_TIMEOUT_S,
+                        help="how long to wait for a runner mid-turn"
+                             " (default %(default)g s)")
+    parser.add_argument("--verify-timeout", type=float, metavar="S",
+                        default=upgrade_switch.VERIFY_TIMEOUT_S,
+                        help="how long a restarted process has to say it"
+                             " runs the target (default %(default)g s)")
     parser.add_argument("--json", action="store_true",
-                        help="the plan (and what was applied) as JSON")
+                        help="the plan (and what was done) as JSON")
     parser.add_argument("-v", "--full", action="store_true",
                         help="print each diff under its line")
     parser.add_argument("--root", help="the framework root (else"
                                        " FRAMEWORK_ROOT, else the checkout"
                                        " you are in)")
     parser.add_argument("--checkout", metavar="PATH",
-                        help="the git checkout to read releases from"
-                             " (default: the one this command runs from)")
+                        help="the git checkout to read releases from and"
+                             " switch (default: the one this command runs"
+                             " from)")
     args = parser.parse_args(argv)
 
     def fail(err, code):
         print("cousin-upgrade: %s" % err, file=sys.stderr)
         return code
 
-    if not (args.dry_run or args.apply_homes):
-        return fail("say --dry-run to plan or --apply-homes to apply the"
-                    " homes' part; switching the code and restarting come"
-                    " in a later release", 2)
-    if args.yes and not args.apply_homes:
-        return fail("--yes goes with --apply-homes", 2)
+    if not (args.dry_run or args.apply_homes or args.switch or args.restart):
+        return fail("say --dry-run to plan, --apply-homes to apply the homes'"
+                    " part, --switch to move the code and restart, or"
+                    " --restart for the restarts alone", 2)
+    if args.yes and args.dry_run:
+        return fail("--yes goes with --apply-homes, --switch or --restart", 2)
+    for flag, wanted, ok in (("--no-fetch", args.no_fetch, args.switch),
+                             ("--deps", args.deps, args.switch),
+                             ("--no-restart", args.no_restart, args.switch),
+                             ("--only", args.only, args.restart)):
+        if wanted and not ok:
+            return fail("%s goes with --%s" % (
+                flag, "restart" if flag == "--only" else "switch"), 2)
     try:
         root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
     except MissingConfigError as err:
         return fail(err, 2)
     checkout = Path(args.checkout).resolve() if args.checkout \
         else version.CHECKOUT
+    if args.switch or args.restart:
+        try:
+            return (_switch if args.switch else _restart)(args, root,
+                                                          checkout)
+        except Refused as err:
+            return fail(err, 2)
+        except UpgradeError as err:
+            return fail(err, 1)
     try:
         plan = build_plan(root, checkout, to=args.to)
         plan["homes"] = _select(plan["homes"], args.home)
@@ -917,7 +1133,8 @@ def upgrade_main(argv=None):
                                              prune=args.prune_retired)
         print("\n".join(out))
     if not args.yes:
-        answer = _confirm(len(plan["homes"]))
+        answer = _confirm("apply to %s?" % _plural(len(plan["homes"]),
+                                                   "home"))
         if answer is None:
             return fail("--apply-homes writes to the homes: pass --yes, or"
                         " run it at a terminal to be asked", 2)
@@ -936,5 +1153,9 @@ def upgrade_main(argv=None):
     return 1 if any(left_for_a_person(r) for r in rows) else 0
 
 
-if __name__ == "__main__":
-    sys.exit(upgrade_main())
+if __name__ == "__main__":   # the detached restart runs `python -m cousin_lib.upgrade`
+    # the package module's main, not this __main__ copy's: upgrade_switch
+    # imports cousin_lib.upgrade, and two copies would raise each other's
+    # exceptions past their handlers
+    from cousin_lib import upgrade as _package
+    sys.exit(_package.upgrade_main())

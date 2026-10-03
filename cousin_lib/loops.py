@@ -1377,11 +1377,14 @@ def loops_main(argv=None):
               " next tick" % request_id)
         return 0
     # run: the one clock of this root, for as long as it runs
+    root = FrameworkConfig.from_env().root
     try:
-        lock_fd = hold_loops_lock(FrameworkConfig.from_env().root)
+        lock_fd = hold_loops_lock(root)
     except LoopsLockHeld as err:
         print("cousin-loops: %s" % err, file=sys.stderr)
         return LOCK_HELD_EXIT
+    from cousin_lib import version
+    version.announce(root, "loops")         # cousin-upgrade's restart check
     try:
         count = 0
         while True:

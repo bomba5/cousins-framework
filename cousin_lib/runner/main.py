@@ -523,6 +523,7 @@ def runner_main(argv=None):
     try:
         with hold_lock(args.home):
             export_environment(args.home)
+            _announce(args.home, args.once)
             try:
                 runner = runner_for(args.home, kind=args.runner)
             except RunnerError as err:
@@ -543,6 +544,19 @@ def runner_main(argv=None):
     except RunnerError as err:
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2
+
+
+def _announce(home, once):
+    """Which release this runner runs (version.announce), for
+    cousin-upgrade's check that a restart came back on the new code:
+    the long-running mode of a home inside an install only (a `--once`
+    drain or a home with no install above it has no one to tell)."""
+    from cousin_lib import version
+    from cousin_lib.config import FrameworkConfig
+    root = FrameworkConfig.root_from_home(home)
+    if once or root is None:
+        return None
+    return version.announce(root, "runner:%s" % Path(home).name)
 
 
 def _check_auth(home, *, validate=False):

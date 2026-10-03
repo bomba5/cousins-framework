@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.21.2 - 2026-10-03
+
+### Fixed
+
+- **The README's first-user path lost text-only answers.** On the
+  `opencode` lane (the quick start's free model) a model that answered an
+  operator or person in plain text, without calling `reply`, ended the turn
+  and nothing reached the chat surface. The reply gate (`[agent]
+  reply_gate`, default on) now applies to `opencode` as it does to `sdk`:
+  a run about to end with an operator or person thread unanswered gets one
+  more prompt in the same session and turn, with the same reason the `sdk`
+  lane's `Stop` hook gives, and a `gate` event; the end after that always
+  passes. Both lanes call one decision (`hooks.unanswered_threads`), and
+  the console offers the key on `opencode` cousins. A `cousin_reply` whose
+  result is an error does not count. The `tmux` lane is still not gated.
+
 ## 3.21.1 - 2026-10-03
 
 ### Fixed

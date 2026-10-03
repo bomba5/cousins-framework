@@ -500,7 +500,8 @@ A local cousin with no runner kind is refused with the one line
 `lane_refusal` gives, and nothing is sent (exit 1). `list` prints each
 cousin's kind (`kind=sdk`, `none` for no runner, `worker` for a
 [worker](glossary.md#worker)). Subcommands: `send SLUG TEXT [--from NAME]`,
-`list`.
+`list`. `--from` is the sending cousin's own name or slug; any other name
+(the operator's, another cousin's) is refused with exit 2.
 
 ```
 cousin-chat send kestrel "the greenhouse report is ready" --from Wren

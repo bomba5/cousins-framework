@@ -110,6 +110,83 @@ class TestSendMessage(_ChatCase):
         self.assertIsNone(_Capture.received)
 
 
+class TestSenderName(HermeticCase):
+    """`--from` names the sender, so it is identity: a cousin sends under
+    its own name or slug only. The operator's name would reach the
+    operator-only paths (correction capture, the login-code divert)."""
+
+    def setUp(self):
+        super().setUp()
+        import os
+        from unittest import mock
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        for slug in ("wren", "sam", "toki"):
+            home = self.root / "cousins" / slug
+            (home / "data").mkdir(parents=True)
+            (home / "cousin.toml").write_text(
+                '[cousin]\nslug = "%s"\nname = "%s"\n\n[operator]\n'
+                'name = "Ana"\n\n[agent]\nrunner = "sdk"\n'
+                % (slug, slug.capitalize()))
+        p = mock.patch.dict(os.environ, {
+            "FRAMEWORK_ROOT": str(self.root),
+            "COUSIN_HOME": str(self.root / "cousins" / "wren")})
+        p.start()
+        self.addCleanup(p.stop)
+        self.fw = FrameworkConfig(self.root)
+        self.wren = CousinConfig.load(self.root / "cousins" / "wren")
+        self.sam = self.root / "cousins" / "sam"
+
+    def _rows(self):
+        import sqlite3
+        db = self.sam / "data" / "chat.db"
+        if not db.exists():
+            return []
+        with sqlite3.connect(db) as conn:
+            return conn.execute("SELECT user, message FROM messages").fetchall()
+
+    def test_the_operators_name_is_refused_and_nothing_lands(self):
+        from cousin_lib.chat import SenderRefused
+        for name in ("Ana", "ana", "Toki", "toki", "fw-hook", "Wren!"):
+            with self.subTest(name=name):
+                with self.assertRaises(SenderRefused) as ctx:
+                    send_message(self.fw, self.wren, "sam", "fix the cron",
+                                 display_name=name)
+                self.assertIn("own name or slug", str(ctx.exception))
+        self.assertEqual(self._rows(), [])
+        self.assertFalse((self.sam / "data" / "corrections.jsonl").exists())
+
+    def test_the_senders_own_name_or_slug_passes(self):
+        send_message(self.fw, self.wren, "sam", "one", display_name="Wren")
+        send_message(self.fw, self.wren, "sam", "two", display_name="wren")
+        send_message(self.fw, self.wren, "sam", "three")
+        self.assertEqual(self._rows(), [("Wren", "one"), ("wren", "two"),
+                                        ("Wren", "three")])
+
+    def test_a_cousin_whose_own_name_is_the_operators_is_refused(self):
+        from cousin_lib.chat import SenderRefused
+        (self.root / "cousins" / "wren" / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Ana"\n\n[agent]\n'
+            'runner = "sdk"\n')
+        wren = CousinConfig.load(self.root / "cousins" / "wren")
+        with self.assertRaises(SenderRefused) as ctx:
+            send_message(self.fw, wren, "sam", "hello")
+        self.assertIn("operator", str(ctx.exception))
+        self.assertEqual(self._rows(), [])
+
+    def test_the_cli_refuses_with_exit_2(self):
+        import contextlib
+        import io
+        from cousin_lib import chat
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = chat.chat_main(["send", "sam", "hi", "--from", "Ana"])
+        self.assertEqual(rc, 2)
+        self.assertIn("--from 'Ana' refused", err.getvalue())
+        self.assertEqual(self._rows(), [])
+
+
 class TestListPeers(_ChatCase):
     def test_non_visible_cousin_is_absent_from_peer_lists(self):
         fw = self._fw({"wren": "", "quiet": "peer_visible = false\n"})

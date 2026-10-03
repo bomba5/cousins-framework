@@ -358,8 +358,10 @@ runs), which the contract does not cover.
 - The [memory perimeter](../memory.md#the-perimeter) is not on the tool gate:
   the policy plugin enforces policy.toml only, so a subagent here is not
   refused a write to the install's `config/law.md`, a cousin's committed
-  `self-portrait.md` or a canonical `shared/<name>.md`. The framework's own
-  memory writers still refuse.
+  `self-portrait.md`, a canonical `shared/<name>.md`, its own configuration
+  or another cousin's home. The framework's own memory writers still
+  refuse. The runner says so at every start: a `no perimeter on this lane`
+  line on stderr and a `system` `perimeter` event.
 - Usage is recorded in `data/usage.db` with lane `opencode`, one row per
   result, and announced as a `usage` event, as on the SDK lane: the tokens
   the provider reported to opencode, every answer of the turn summed once,
@@ -489,8 +491,11 @@ none is a contract item:
 - The [memory perimeter](../memory.md#the-perimeter) is not on the tool gate:
   the pane has no live `PreToolUse` veto (see "Known gaps on tmux"), so a
   subagent in the pane is not refused a write to the install's
-  `config/law.md`, a cousin's committed `self-portrait.md` or a canonical
-  `shared/<name>.md`. The framework's own memory writers still refuse.
+  `config/law.md`, a cousin's committed `self-portrait.md`, a canonical
+  `shared/<name>.md`, its own configuration or another cousin's home. The
+  framework's own memory writers still refuse. The runner says so at every
+  start: a `no perimeter on this lane` line on stderr and a `system`
+  `perimeter` event.
 
 ## Known gaps on tmux
 

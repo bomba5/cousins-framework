@@ -239,6 +239,28 @@ On the `sdk` lane's tool surface the same shapes are a
 deny, and only for a subagent: a `PreToolUse` payload carrying `agent_id`
 cannot write them, while the primary session can, because editing the law
 and committing a portrait is the operator's own work. Reads always pass.
+A subagent is also kept off four surfaces that depend on who is writing,
+placed under the root the same way:
+
+- another cousin's proposal: anything in `shared/proposed/` but its own
+  cousin's `<slug>__*` files (a cousin proposes under its own name, with
+  `cousin-shared propose --slug <slug>`);
+- `shared/audit.jsonl`, the tier's append-only record, which only
+  `shared_tier` appends to;
+- its own cousin's configuration, which decides what the next session may
+  do: `policy.toml`, `cousin.toml`, `.mcp.json`, `mcp-registry.toml`,
+  `chat-hooks.json`, `.claude/settings.json` and
+  `.claude/settings.local.json` in the home (and the `.claude` directory
+  itself);
+- anything in another cousin's home, `<root>/cousins/<other>/`: to reach
+  that cousin, send it a message.
+
+The primary session keeps writing all four, and the framework's own
+writers are unchanged by them. Each refusal names the path, says whose it
+is and where the write belongs instead. `tests/runner/test_gate_allowlist.py`
+holds the whole allow list as one table (each surface, each actor, each
+way of writing), and asserts that every read of every path in it passes.
+
 `Write`, `Edit`, `MultiEdit` and `NotebookEdit` are checked on the path
 they name. A Bash command is checked on its write targets as written
 (redirects, the destination of `cp`, `mv`, `install` and `ln`, the
@@ -246,7 +268,9 @@ arguments of `tee`, `rm`, `unlink`, `truncate`, `chmod`, `chown`, `shred`
 and `touch`, `sed -i` files and `dd of=`, in each command of a chain), so
 a path behind a variable, a glob, `find -exec` or a relative `cd` is not
 seen: that half is best-effort. The `opencode` and `tmux` lanes have no
-such gate.
+such gate, and their runner says so at every start: a `no perimeter on
+this lane` line on stderr and a `system` `perimeter` event on the
+[stream](glossary.md#stream).
 
 To close more on the primary session too, `policy.toml` has no rule per
 path: `deny_bash_patterns` can match a path in a Bash command, and `Write`

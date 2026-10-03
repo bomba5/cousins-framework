@@ -796,5 +796,62 @@ class TestTheSurface(DreamCase):
         self.assertEqual(piece.through["lines"], 1)
 
 
+# ---- the seam with a live session ---------------------------------------------
+
+class TestALiveSessionIsToldAboutAPass(DreamCase):
+    """The other half of the seam. A pass writes `dream` as the source of
+    every claim and mark (asserted above, in the writer's own tests) and
+    memory_watch reads that string to decide what counts as written from
+    outside; the two halves are asserted in different files and neither
+    test fails when the string is renamed. A rename on either side leaves a
+    pass writing into a session that is never told, silently: the note is
+    the only path a dream-written claim takes to a live session, so it is
+    pinned here from the writer's side, through the real operations."""
+
+    def setUp(self):
+        super().setUp()
+        from cousin_lib.runner import memory_watch
+        self.watch = memory_watch
+
+    def session(self):
+        """A live session's baseline, taken before the pass writes."""
+        return self.watch.MemoryWatch(self.home)
+
+    def test_a_claim_the_pass_wrote_reaches_the_session_and_is_named(self):
+        self.raw("2026-10-01", ("kestrel", "the barn is blue"))
+        self.dream()
+        watcher = self.session()
+        record = self.run_op("remember", {"topic": "kestrel",
+                                          "fact": "the barn has a door"})
+        heard = watcher.check()
+        self.assertEqual([memory.entry_id(e) for e in heard],
+                         [record["created"]])
+        self.assertTrue(self.watch.foreign(heard[0]))
+        # and the note says who wrote it: an unnamed "?" is the same seam,
+        # one layer down
+        self.assertIn("(by dreaming,", self.watch.note(heard))
+
+    def test_a_mark_the_pass_wrote_reaches_the_session_as_a_retirement(self):
+        ids = self.raw("2026-10-01", ("kestrel", "the barn is blue"),
+                       ("kestrel", "the barn is blue too"))
+        self.dream()
+        watcher = self.session()
+        self.run_op("retire", {"entry_id": ids[0],
+                               "why": "the second says it in full"})
+        heard = watcher.check()
+        marks = [e for e in heard if memory.is_entry_mark(e)]
+        self.assertEqual([e["entry"] for e in marks], [ids[0]])
+        self.assertTrue(all(self.watch.foreign(e) for e in heard))
+        self.assertIn("(by dreaming,", self.watch.note(heard))
+        self.assertIn("retired", self.watch.note(heard))
+
+    def test_the_session_s_own_claim_is_never_echoed_back_to_it(self):
+        watcher = self.session()
+        memory.remember_entry(self.home, "kestrel", "a claim of my own",
+                              level="L3_COUSIN_CONCLUSION")
+        self.assertEqual(watcher.check(), [])
+        self.assertEqual(self.watch.note([]), "")
+
+
 if __name__ == "__main__":
     unittest.main()

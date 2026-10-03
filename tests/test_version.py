@@ -87,6 +87,16 @@ class Bump(unittest.TestCase):
         rc, out, _ = self.run_cli(["bump"])
         self.assertIn("0.2.0 -> 0.2.1", out)
 
+    def test_bump_picks_the_checkout_it_runs_in(self):
+        # a worktree's own pyproject, from a folder inside it; never the
+        # checkout the package runs from
+        inner = self.path.parent / "cousin_lib"
+        inner.mkdir()
+        self.assertEqual(version._default_pyproject(inner), self.path)
+        elsewhere = tempfile.TemporaryDirectory(); self.addCleanup(elsewhere.cleanup)
+        self.assertEqual(version._default_pyproject(elsewhere.name),
+                         version.CHECKOUT / "pyproject.toml")
+
     def test_a_malformed_version_is_rc_2_and_leaves_the_file(self):
         self.path.write_text('[project]\nname = "cousins-framework"\n'
                              'version = "one"\n')

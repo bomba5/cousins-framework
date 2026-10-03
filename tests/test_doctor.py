@@ -138,11 +138,25 @@ class TestMain(_RootCase):
 
     def test_json(self):
         self.home("wren", 0o750)
-        rc, out, _ = self.main("--json")
+        rc, out, _ = self.main("homes", "--json")
         self.assertEqual(rc, 1)
         [result] = json.loads(out)
         self.assertEqual(result["check"], "homes")
         self.assertFalse(result["ok"])
+
+    def test_every_check_runs_by_default_in_order(self):
+        self.home("wren", 0o700)
+        rc, out, _ = self.main("--json")
+        self.assertEqual(rc, 0)
+        self.assertEqual([r["check"] for r in json.loads(out)], list(doctor.CHECKS))
+        self.assertEqual(list(doctor.CHECKS), ["homes", "identity"])
+
+    def test_cousin_limits_homes_to_that_home(self):
+        self.home("wren", 0o755)
+        self.home("sam", 0o700)
+        rc, out, _ = self.main("homes", "--cousin", "sam")
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("OK    homes: 1 cousin home, none open"))
 
     def test_an_unknown_check_is_usage(self):
         with contextlib.redirect_stderr(io.StringIO()) as err, \

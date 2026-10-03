@@ -210,7 +210,9 @@ clock ticks until then. The supervisor's console listens on
 `127.0.0.1:8600` unless its unit carries `--console-host` and
 `--console-port` (the LAN drop-in in
 [install](install.md#reaching-the-console-from-the-lan)).
-`systemctl --user reload cousin-supervisor.service` is the rescan. Its stop
+The supervisor runs under umask 077 and so does everything it starts
+([commands](commands.md#running-cousins)): files the install writes are
+its user's alone. `systemctl --user reload cousin-supervisor.service` is the rescan. Its stop
 takes the unit's whole control group with it: the runners and their bridges
 stop with it. Moving an older install from the two separate units to the
 supervisor is in

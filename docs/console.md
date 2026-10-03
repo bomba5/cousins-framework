@@ -239,7 +239,9 @@ drift from what the runner accepts.
   model), effort, auto start, [rollover](glossary.md#rollover) percentage, side sessions
   (`[agent.sessions]`, `sdk` only; `operator` and `system` always stay on the
   primary), the reply gate (`reply_gate`, `sdk` only; see
-  [configuration](configuration.md#agent-runner)), the opencode keys (`small_model`, `shell_env`,
+  [configuration](configuration.md#agent-runner)), strict harness
+  (`strict_harness`; see [configuration](configuration.md#agent-strict_harness)),
+  the opencode keys (`small_model`, `shell_env`,
   `opencode_models_fetch`; `opencode_bin` read-only) and the tmux kind's
   `env_allow`, shown beside the names the pane always gets and the hard deny
   that always wins. A deprecated `api_key_file` shows a warning. "unset"

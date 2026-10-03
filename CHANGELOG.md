@@ -3,6 +3,38 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.16.0 - 2026-10-03
+
+### Added
+
+- **One lockfile for the agent harness.** `config/harness.lock.toml` names
+  the versions the framework is tested with: the Agent SDK, the Claude Code
+  CLI its wheel bundles, opencode and the model ids. The unit suite is red
+  while `docker/requirements.txt`, the Dockerfile's opencode stage, the
+  `sdk` extra, `DEFAULT_MODELS` or the README's opencode model disagree
+  with it, so a harness version changes in a pull request of its own.
+- **The runner checks the harness at start.** `cousin-runner` compares
+  what its kind runs (the installed SDK and its bundled CLI, `claude` on
+  PATH, the opencode binary) with the lock, once: a `harness` stream event
+  with the versions, and the cousin's `harness:<slug>` row in the health
+  record. A mismatch, or a CLI whose version cannot be read ("unpinned
+  CLI"), is a warning naming the installed and the locked version, and the
+  runner starts. The new `[agent] strict_harness = true` (default `false`)
+  refuses it instead, exit 2.
+- **A live harness matrix, opt-in.** `COUSIN_LIVE=1 python -m tests.live`
+  runs real turns on the host's login (the init tool list of a tool-less
+  session, the usage shape with thinking on, the transcript, every locked
+  model, one opencode turn) and prints a "tested with" block for a lock
+  bump's pull request. It never runs in public CI; without the variable
+  every item is a visible skip.
+
+### Install notes
+
+- **The `sdk` extra is pinned exactly.** `pip install -e ".[sdk]"` now
+  installs `claude-agent-sdk==0.2.163`, the version the lock names and the
+  image runs, instead of the newest 0.2.x of the day. A bare host on
+  another SDK version warns at every runner start until it reinstalls.
+
 ## 3.15.0 - 2026-10-03
 
 ### Added

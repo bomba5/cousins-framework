@@ -541,19 +541,17 @@ def runner_cli():
     """The CLI the runner's SDK starts, read without running anything: the
     SDK prefers its bundled binary, whose version it records. A model the
     bundled CLI is too old for fails every turn with an API 400."""
-    spec = importlib.util.find_spec("claude_agent_sdk")
-    if spec is None or not spec.origin:
+    from cousin_lib import harness_lock
+    own = harness_lock.sdk_cli()            # the runner's start check reads the same
+    if not own["installed"]:
         return "no claude-agent-sdk installed: the runner has no CLI"
-    try:
-        from claude_agent_sdk._cli_version import __cli_version__ as cli
-    except ImportError:
-        cli = None
     try:
         from claude_agent_sdk._version import __version__ as sdk_version
     except ImportError:
         sdk_version = "?"
-    if (Path(spec.origin).parent / "_bundled" / "claude").is_file():
-        return "Claude Code %s (bundled with claude-agent-sdk %s)" % (cli or "?", sdk_version)
+    if own["bundled"]:
+        return "Claude Code %s (bundled with claude-agent-sdk %s)" % (own["cli"] or "?",
+                                                                     sdk_version)
     return ("`claude` on PATH, version not read (claude-agent-sdk %s bundles none)"
             % sdk_version)
 

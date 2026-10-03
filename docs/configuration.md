@@ -10,9 +10,12 @@ When a file is missing, the thing it configures is off, and the code says so
 where it matters instead of guessing a value. When a file is there but
 broken, you get an error that names it. A typo never reads as "off".
 
-A fresh checkout's `config/` holds only `*.example` files. Git ignores
-everything else in there, so your real files (which can hold keys and
-tokens) never get committed. Copy an example to its real name and edit it.
+A fresh checkout's `config/` holds only `*.example` files, plus
+`harness.lock.toml`, which is not yours to edit: it names the agent harness
+versions the framework is tested with (see
+[`[agent] strict_harness`](#agent-strict_harness)). Git ignores everything
+else in there, so your real files (which can hold keys and tokens) never get
+committed. Copy an example to its real name and edit it.
 
 ## Which ones you need
 
@@ -943,6 +946,43 @@ is matched against, see [chat](chat.md)) and `policy.toml` (below). A
 `.secrets/api-key.env` left from 1.x is not configuration any more:
 `cousin-migrate` reads it once, to move a 1.x cousin's key into an
 `anthropic-key` account, and nothing else reads it.
+
+### [agent] strict_harness
+
+`config/harness.lock.toml` names the harness the framework is tested with:
+the Agent SDK (`claude-agent-sdk`), the Claude Code CLI its wheel bundles,
+the opencode release and the model ids. It ships with the code (the
+checkout, or `/opt/framework` in the image) and is read from there, never
+from an install's own `config/`; a version changes there in a release, not
+on your host. At every start `cousin-runner` compares what its kind runs
+with it, once:
+
+| kind | what is read |
+|---|---|
+| `sdk` | the installed `claude-agent-sdk` (its package metadata) and the CLI its wheel bundles (the version the wheel records; nothing runs). An SDK that bundles no CLI: `claude --version` on PATH |
+| `tmux` | `claude --version` on PATH, against the lock's CLI |
+| `opencode` | `<binary> --version`, the binary being `[agent] opencode_bin`, else `COUSIN_OPENCODE_BIN`, else `opencode` on PATH |
+| `fake` | nothing |
+
+A binary gets 5 seconds to print its version. One that fails, prints none
+or does not answer is an "unpinned CLI", a mismatch like any other, never a
+silent pass.
+
+The result is a `harness` [stream](glossary.md#stream) event right after the
+head `runner` event, `{"kind", "ok", "level", "locked", "installed",
+"problems", "message"}`, and the cousin's `harness:<slug>` row in the
+[health record](operations.md#health). On a match `level` is `info` and the
+message lists the versions. On a mismatch `level` is `warning`, the message
+names both versions (`claude-agent-sdk: installed 0.2.170, locked 0.2.163`),
+the same line goes to stderr, and the runner starts anyway.
+
+`strict_harness` (`true` or `false`, default `false`; the `sdk`, `tmux` and
+`opencode` lanes) turns that warning into a refusal: a mismatch is exit 2,
+`cousin-runner: the harness is not the locked one (harness.lock.toml):
+claude-agent-sdk: installed 0.2.170, locked 0.2.163; [agent] strict_harness
+= true refuses it`, and the supervisor leaves the cousin down until the
+versions match or the key is off. A missing lock refuses too. A value that
+is not `true` or `false` is exit 2 at start, like `reply_gate`.
 
 ### [agent] dreaming
 

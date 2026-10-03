@@ -1,0 +1,28 @@
+# The agent harness the framework is tested with: one file, read-only data.
+#
+# A harness version changes here, in a pull request of its own, never by
+# being discovered from a broken turn. The unit suite
+# (tests/test_harness_lock.py) is red while docker/requirements.txt,
+# the Dockerfile's opencode stage, pyproject.toml's sdk extra,
+# cousin_lib/config.py DEFAULT_MODELS or the README's opencode model
+# disagree with this file. cousin-runner compares what is installed with
+# it at every start (a `harness` event; [agent] strict_harness refuses a
+# mismatch). Bumping it: docs/development.md, "The harness lock".
+
+[sdk]
+# the Agent SDK (pip: claude-agent-sdk), and the Claude Code CLI its wheel
+# bundles (claude_agent_sdk._cli_version.__cli_version__)
+claude-agent-sdk = "0.2.163"
+bundled_cli = "2.1.286"
+
+[opencode]
+# the opencode release the default image pins (Dockerfile, opencode-fetch)
+version = "1.18.31"
+
+[models]
+# the Claude models tested on the locked CLI; DEFAULT_MODELS in
+# cousin_lib/config.py lists the same ids in the same order
+claude = ["claude-opus-5-5", "claude-opus-5", "claude-opus-5[1m]", "claude-fable-5-1",
+          "claude-sonnet-5", "claude-sonnet-5[1m]", "claude-haiku-4-5-20251001"]
+# the opencode model the README's quick start runs
+opencode_default = "opencode/big-pickle"

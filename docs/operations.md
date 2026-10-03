@@ -296,6 +296,7 @@ was last seen. One ok result resets the streak.
 | `dream-due:<slug>`, `dreaming:<slug>` | whether a dreaming pass is due, and each finished pass: `error` or `lost` fails, `done`, `no_change` and `budget` are ok |
 | `dreaming` | queueing the dreaming passes |
 | `meetings` | the meetings step |
+| `harness:<slug>` | written by the cousin's runner at its start, not by the daemon: whether what it runs (the Agent SDK and its CLI, `claude` on PATH, opencode) is the version `config/harness.lock.toml` names; failing names the installed and the locked version ([configuration](configuration.md#agent-strict_harness)) |
 
 A finished index refresh or dreaming pass is recorded when it finishes, not
 on every tick, so a pass that failed last night stays failing until the next

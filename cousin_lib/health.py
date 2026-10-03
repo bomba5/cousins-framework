@@ -5,7 +5,9 @@ and each one that fails only prints a line to the daemon's log. A thing
 that fails on every tick for an hour is then a hundred identical lines
 nobody reads. This module keeps the count instead: `<root>/data/health.json`,
 one entry per component key, written once per tick by the daemon
-(loops.loops_main) from the tick report's `health` list:
+(loops.loops_main) from the tick report's `health` list, and by each
+runner at its start (its `harness:<slug>` row, runner/main.harness_at_start;
+the writers take turns under data/health.json.lock):
 
     {"<key>": {"state": "ok" | "failing", "fails": <consecutive failures>,
                "since": <ts of the first failure in the current streak, or null>,
@@ -24,6 +26,8 @@ show: the store, the failing components first, and the supervisor's
 children that are not running (asked the way `cousin-supervisor status`
 asks; no supervisor is "not reachable", never a failure)."""
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import sys
@@ -61,14 +65,35 @@ def read(root):
 def _write(root, data):
     path = _path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = path.with_name("%s.%d.tmp" % (path.name, os.getpid()))
     tmp.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
     os.replace(tmp, path)
 
 
+@contextlib.contextmanager
+def _locked(root):
+    """The store's writers in turn: the loops daemon each tick, a runner
+    at its start (its `harness:<slug>` row). Each reads, folds and
+    writes under one flock, so neither drops the other's row."""
+    path = _path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name(path.name + ".lock"), "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
 def record(root, results, now=None):
     """Fold one round of results, [(key, ok, error_or_None)], into the
-    store and write it (tmp + replace). Returns the new store."""
+    store and write it (tmp + replace), under the store's lock. Returns
+    the new store."""
+    with _locked(root):
+        return _record(root, results, now)
+
+
+def _record(root, results, now):
     now = time.time() if now is None else now
     merged = {}
     for key, ok, error in results:

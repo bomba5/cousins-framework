@@ -15,6 +15,7 @@
 !hooks
 !plugins
 !config/*.example
+!config/harness.lock.toml
 !docker/entrypoint.sh
 !docker/requirements.txt
 **/__pycache__

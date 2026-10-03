@@ -64,6 +64,10 @@ either direction. So:
   test, so counting them counts tests that ran, not tests that passed, and
   a run stopped at a timeout or a moved branch leaves a prefix that reads
   like a whole suite.
+- The deciding run goes alone: no second suite beside it, and nothing of
+  yours spawning Python in a loop while it runs. The timing-sensitive
+  tests in the runner suite turn on CPU contention, so a verdict taken
+  from a busy box belongs to nobody.
 - Read the tail of a log for the line, never the middle for a count.
 - Piping the run into `grep`, `tail` or `tee` hands the row's exit code to
   that last command, not to the run: `false | tail -1` exits 0. With such a

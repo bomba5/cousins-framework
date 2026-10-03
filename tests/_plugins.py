@@ -102,10 +102,20 @@ for line in sys.stdin:
 '''
 
 
+_HANDED_OUT = set()
+
+
 def free_port():
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+    """A free local port no earlier call in this process returned: the
+    kernel may hand a just-closed port straight back, and two fake plugins
+    on one port make the second a load problem."""
+    while True:
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        if port not in _HANDED_OUT:
+            _HANDED_OUT.add(port)
+            return port
 
 
 def manifest(name="clock", *, port=None, mcp=True, service=True, console=True, placement=None,

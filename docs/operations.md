@@ -214,7 +214,7 @@ clock ticks until then. The supervisor's console listens on
 takes the unit's whole control group with it: the runners and their bridges
 stop with it. Moving an older install from the two separate units to the
 supervisor is in
-[the units](../systemd/README.md#one-unit-instead-of-two-the-supervisor).
+[the units](../systemd/README.md#an-install-that-runs-the-two-units-move-to-the-supervisor).
 
 One thing to know, in the container as on a bare host: the loops daemon
 delivers at least once, so a stop that lands in the middle of its tick can

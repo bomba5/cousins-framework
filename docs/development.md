@@ -106,6 +106,12 @@ The gate's generic checks run inside the suite (see below), so CI gates
 every commit. Your denylist of real names is never in CI, since it can't
 be in the repo.
 
+The checkout fetches the whole history and its tags (`fetch-depth: 0`),
+and the suite runs with `COUSIN_REQUIRE_TAGS=1`: `tests/test_docs_reference.py`
+compares each released CHANGELOG section with its tag, and there a clone
+without tags fails instead of skipping. Locally, with no tags, that one
+check skips and prints why.
+
 `.github/workflows/image.yml` runs on every push and pull request too. It
 builds the image from the checkout, runs the runner contract suite
 (`tests/runner/contract`) inside it, runs `tests.test_docker_files` on the
@@ -467,3 +473,13 @@ decide whether the version affects them. Reasoning belongs in the commit or
 the pull request, not here. `tests/test_version.py` fails if the
 current version has no `## <version>` heading there, and if the version
 isn't plain `major.minor.patch`.
+
+A released section is closed: once `v<version>` is tagged, its section
+stays the text that tag shipped, and a change that lands later goes under
+the version it lands in. `tests/test_docs_reference.py` compares each
+section with its own tag (sections older than the oldest tag with that
+tag); a section with no tag yet is unreleased and free to change. When a
+released section has to be corrected, the correction is one line in
+`tests/data/changelog_corrections.txt`: the version, the commit that
+corrected it, and why. The test then accepts that section only as that
+commit left it.

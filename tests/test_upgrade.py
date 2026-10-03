@@ -1,10 +1,13 @@
-"""cousin-upgrade's plan (cousin_lib/upgrade.py): every text from git,
-each home planned by template_sync's structural sync, nothing written."""
+"""cousin-upgrade (cousin_lib/upgrade.py): the plan, every text from
+git, each home planned by template_sync's structural sync, nothing
+written; and --apply-homes, which applies the homes' part with a backup,
+a strict check and a recorded state."""
 import contextlib
 import io
 import json
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import tomllib
@@ -152,7 +155,8 @@ class _Install(unittest.TestCase):
                 (home / "mcp-registry.toml").write_text(registry)
             self.homes[slug] = home
         (self.homes["toki"] / "data" / "template-sync.json").write_text(
-            json.dumps({"registry_to": "v3.10.0", "at": 1}))
+            json.dumps({"to": "3.10.0", "ref": "v3.10.0", "at": 1,
+                        "registry": "applied"}))
         patch = mock.patch.dict(template_sync._MIGRATIONS, MIGRATIONS)
         patch.start()
         self.addCleanup(patch.stop)
@@ -243,7 +247,7 @@ class TestPlan(_Install):
 
     def test_from_per_home_comes_from_template_sync_json(self):
         toki = self.home(self.plan(), "toki")
-        self.assertEqual(toki["from"], {"ref": "v3.10.0",
+        self.assertEqual(toki["from"], {"ref": "v3.10.0", "version": "3.10.0",
                                         "source": upgrade.STATE})
         self.assertEqual(toki["registry"]["retired"], [])
 
@@ -301,10 +305,16 @@ class TestCLI(_Install):
                                          *argv])
         return code, out.getvalue(), err.getvalue()
 
-    def test_without_dry_run_it_refuses(self):
+    def test_without_a_mode_it_refuses(self):
         code, out, err = self.run_cli()
         self.assertEqual(code, 2)
-        self.assertIn("apply path", err)
+        self.assertIn("--apply-homes", err)
+        code, out, err = self.run_cli("--dry-run", "--yes")
+        self.assertEqual(code, 2)
+        with contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit) as cm:
+            self.run_cli("--dry-run", "--apply-homes")
+        self.assertEqual(cm.exception.code, 2)
 
     def test_a_dry_run_prints_the_plan_and_writes_nothing(self):
         _release(self.repo, "3.9.0", registry=OLD_REGISTRY, chat="x",
@@ -341,6 +351,211 @@ class TestCLI(_Install):
         self.assertEqual(code, 1)
 
 
+class _Terminal(io.StringIO):
+    """A stdin that says it is a terminal, with the answer typed."""
+
+    def isatty(self):
+        return True
+
+
+class _Pipe(io.StringIO):
+    def isatty(self):
+        return False
+
+
+def _sha(repo, ref):
+    return subprocess.run(["git", "-C", str(repo), "rev-parse",
+                           "%s^{commit}" % ref], capture_output=True,
+                          text=True, check=True).stdout.strip()
+
+
+class TestApplyHomes(_Install):
+    """--apply-homes: the registry plan applied per home, a backup first,
+    the result checked strictly, the state recorded."""
+
+    BACKUP = "data/mcp-registry.toml.pre-3.10.0"
+
+    def setUp(self):
+        super().setUp()
+        self.original = {s: (h / "mcp-registry.toml").read_text()
+                         for s, h in self.homes.items() if s != "sam"}
+        wren = self.homes["wren"]
+        stale = mcp_server.mcp_json(wren, "wren", self.root)
+        stale["mcpServers"]["cousin"]["args"] = ["--registry", "/elsewhere"]
+        stale["mcpServers"]["other"] = {"command": "kept"}
+        (wren / ".mcp.json").write_text(json.dumps(stale, indent=2) + "\n")
+
+    def run_cli(self, *argv, stdin=None):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err), \
+                mock.patch.object(upgrade.sys, "stdin", stdin or _Pipe()):
+            code = upgrade.upgrade_main(["--root", str(self.root),
+                                         "--checkout", str(self.repo),
+                                         *argv])
+        return code, out.getvalue(), err.getvalue()
+
+    def apply(self, *argv):
+        with mock.patch.object(upgrade.version, "version",
+                               return_value="3.9.0"), \
+                mock.patch.object(upgrade.version, "CHECKOUT", self.repo):
+            return self.run_cli("--apply-homes", "--yes", *argv)
+
+    def registry(self, slug):
+        return tomllib.loads((self.homes[slug]
+                              / "mcp-registry.toml").read_text())
+
+    def state(self, slug):
+        return json.loads((self.homes[slug] / upgrade.STATE).read_text())
+
+    def test_apply_adds_migrates_and_keeps_the_homes_own_values(self):
+        code, out, err = self.apply()
+        self.assertEqual(code, 0, out + err)
+        wren = self.registry("wren")["tools"]
+        self.assertEqual(wren["memory"]["description"],
+                         "memory, as shipped now")
+        self.assertEqual(wren["memory"]["properties"]["topic"]["description"],
+                         "the topic, retired or not")
+        self.assertIn("why", wren["memory"]["properties"])
+        self.assertIn("legacy", wren)                   # reported, kept
+        kestrel = self.registry("kestrel")["tools"]["memory"]
+        self.assertEqual(kestrel["description"], "kestrel's own words")
+        self.assertIn("why", kestrel["properties"])
+        self.assertIn("wren           applied: added 1, migrated 2,"
+                      " retired 1 reported (tools.legacy), backup "
+                      + self.BACKUP, out)
+        self.assertIn("sam            skipped: no mcp-registry.toml", out)
+        self.assertIn("CLAUDE.md is reported only", out)
+
+    def test_a_backup_first_and_the_state_recorded(self):
+        self.apply()
+        wren = self.homes["wren"]
+        self.assertEqual((wren / self.BACKUP).read_text(),
+                         self.original["wren"])
+        self.assertEqual(self.state("wren"), {
+            "to": "3.10.0", "ref": _sha(self.repo, "v3.10.0"),
+            "at": self.state("wren")["at"], "registry": "applied"})
+        self.assertFalse((self.homes["sam"] / upgrade.STATE).exists())
+        mcp = json.loads((wren / ".mcp.json").read_text())["mcpServers"]
+        self.assertEqual(mcp["cousin"]["args"][1],
+                         str(wren / "mcp-registry.toml"))
+        self.assertEqual(mcp["other"], {"command": "kept"})
+
+    def test_a_second_run_is_in_step_and_keeps_the_backup(self):
+        self.apply()
+        applied = self.registry("wren")
+        for h in self.plan()["homes"]:
+            if h["slug"] != "sam":
+                self.assertEqual(h["registry"]["status"], "in step",
+                                 h["slug"])
+                self.assertEqual(h["from"]["source"], upgrade.STATE)
+        code, out, err = self.apply()
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("wren           in step\n", out)
+        self.assertEqual(self.registry("wren"), applied)
+        self.assertEqual(self.state("wren")["registry"], "in-step")
+        self.assertFalse((self.homes["wren"] / (self.BACKUP + ".2"))
+                         .exists())
+
+    def test_an_existing_backup_is_never_overwritten(self):
+        older = self.homes["wren"] / self.BACKUP
+        older.write_text("an older copy\n")
+        self.apply("--home", "wren")
+        self.assertEqual(older.read_text(), "an older copy\n")
+        self.assertEqual((self.homes["wren"] / (self.BACKUP + ".2"))
+                         .read_text(), self.original["wren"])
+
+    def test_a_failed_check_restores_the_copy_and_exits_1(self):
+        with mock.patch.object(upgrade.mcp_server, "list_tools",
+                               side_effect=mcp_server.RegistryError(
+                                   "tools.memory: broken")):
+            code, out, err = self.apply("--home", "wren")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("FAILED: RegistryError: tools.memory: broken; backup"
+                      " restored", out)
+        wren = self.homes["wren"]
+        self.assertEqual((wren / "mcp-registry.toml").read_text(),
+                         self.original["wren"])
+        self.assertEqual((wren / self.BACKUP).read_text(),
+                         self.original["wren"])
+        state = self.state("wren")
+        self.assertTrue(state["registry"].startswith("failed: "))
+        self.assertEqual(state["from"], _sha(self.repo, "v3.9.0"))
+        again = self.home(self.plan(), "wren")
+        self.assertEqual(again["from"], {"ref": _sha(self.repo, "v3.9.0"),
+                                         "source": upgrade.STATE})
+        self.assertEqual(again["registry"]["status"], "changes")
+        self.assertEqual(again["registry"]["retired"], ["tools.legacy"])
+        self.assertTrue(any("planned again" in n for n in again["notes"]))
+        self.assertIn("/elsewhere", (wren / ".mcp.json").read_text())
+
+    def test_home_limits_the_set(self):
+        before = _snapshot(self.homes["kestrel"])
+        code, out, err = self.apply("--home", "wren", "--home", "testa")
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("kestrel", out)
+        self.assertEqual(_snapshot(self.homes["kestrel"]), before)
+        self.assertEqual(self.state("testa")["registry"], "applied")
+        code, out, err = self.apply("--home", "mallory")
+        self.assertEqual(code, 2)
+        self.assertIn("--home mallory: no such home", err)
+
+    def test_prune_retired_removes_only_the_retired(self):
+        code, out, err = self.apply("--home", "testa", "--prune-retired")
+        self.assertEqual(code, 0, out + err)
+        tools = self.registry("testa")["tools"]
+        self.assertNotIn("legacy", tools)
+        self.assertEqual(tools["memory"]["commands"]["search"]["argv"],
+                         ["search", "{topic}"])
+        self.assertNotIn("[tools.legacy",
+                         (self.homes["testa"] / "mcp-registry.toml")
+                         .read_text())
+        self.assertIn("pruned 1 (tools.legacy)", out)
+        self.assertEqual((self.homes["testa"] / self.BACKUP).read_text(),
+                         self.original["testa"])
+
+    def test_nothing_else_is_written(self):
+        before = _snapshot(self.top)
+        code, out, err = self.apply("--prune-retired")
+        self.assertEqual(code, 0, out + err)
+        after = _snapshot(self.top)
+        allowed = re.compile(r"^install/cousins/[a-z]+/(mcp-registry\.toml"
+                             r"|\.mcp\.json|data/template-sync\.json"
+                             r"|data/mcp-registry\.toml\.pre-3\.10\.0)$")
+        changed = sorted(k for k in set(before) | set(after)
+                         if before.get(k) != after.get(k))
+        self.assertTrue(changed)
+        self.assertEqual([k for k in changed if not allowed.match(k)], [])
+
+    def test_without_yes_and_no_terminal_it_refuses(self):
+        before = _snapshot(self.top)
+        code, out, err = self.run_cli("--apply-homes")
+        self.assertEqual(code, 2)
+        self.assertIn("pass --yes", err)
+        self.assertEqual(_snapshot(self.top), before)
+
+    def test_the_prompt_takes_y_and_anything_else_is_no(self):
+        before = _snapshot(self.top)
+        code, out, err = self.run_cli("--apply-homes", "--home", "wren",
+                                      stdin=_Terminal("n\n"))
+        self.assertEqual(code, 2)
+        self.assertIn("apply to 1 home? [y/N]", err)
+        self.assertEqual(_snapshot(self.top), before)
+        code, out, err = self.run_cli("--apply-homes", "--home", "wren",
+                                      stdin=_Terminal("y\n"))
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(self.state("wren")["registry"], "applied")
+
+    def test_json_reports_what_was_applied(self):
+        code, out, err = self.apply("--home", "sam", "--home", "wren",
+                                    "--json")
+        self.assertEqual(code, 0, err)
+        rows = {r["slug"]: r for r in json.loads(out)["applied"]}
+        self.assertEqual(rows["sam"]["registry"], "skipped")
+        self.assertEqual(rows["wren"]["registry"], "applied")
+        self.assertEqual(rows["wren"]["mcp_json"], "refreshed")
+
+
 class TestTemplateSyncText(unittest.TestCase):
     """template_sync takes the shipped registry and template as text."""
 
@@ -375,6 +590,24 @@ class TestTemplateSyncText(unittest.TestCase):
         out = template_sync._registry_sync(self.home, None, theirs=theirs)
         self.assertNotIn("tools.memory.properties.topic", out["corrected"])
         self.assertEqual(self.reg.read_text(), OLD_REGISTRY)
+
+    def test_prune_removes_retired_tables_and_keys_only(self):
+        base = OLD_REGISTRY.replace(
+            'description = "memory, as shipped first"\n',
+            'description = "memory, as shipped first"\nold = "gone"\n')
+        self.reg.write_text(base.replace('argv = ["search", "{topic}"]\n',
+                                         'argv = ["search", "{topic}"]\n'
+                                         'mine = true\n'))
+        out = template_sync._registry_sync(self.home, None, apply=True,
+                                           theirs=NEW_REGISTRY, base=base,
+                                           prune=True)
+        self.assertEqual(out["pruned"], ["tools.legacy",
+                                         "tools.memory.old"])
+        data = tomllib.loads(self.reg.read_text())
+        self.assertNotIn("legacy", data["tools"])
+        self.assertNotIn("old", data["tools"]["memory"])
+        self.assertTrue(data["tools"]["memory"]["commands"]["search"]
+                        ["mine"])
 
     def test_no_registry_says_so(self):
         out = template_sync._registry_sync(self.home, None,

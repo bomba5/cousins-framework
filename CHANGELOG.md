@@ -3,6 +3,30 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.18.0 - 2026-10-03
+
+### Added
+
+- **`cousin-upgrade --apply-homes` brings each home's registry and
+  `.mcp.json` to a release.** It computes the same plan as `--dry-run`, from
+  git, prints the homes' part and asks (`--yes` skips the question; without
+  a terminal and without `--yes` it exits 2). Per home: the registry is
+  copied to `data/mcp-registry.toml.pre-<version>` first (an existing copy
+  is never overwritten), then the structural sync adds the missing tables
+  and keys and migrates framework values, never a value of the home's own;
+  the result must parse strictly and build its tool definitions, else the
+  old bytes go back and the home is reported failed. `.mcp.json` is
+  refreshed when it would change, CLAUDE.md is still reported only, and the
+  code is not switched and nothing restarts. `--home SLUG` limits the set,
+  `--prune-retired` removes the entries the release retired instead of
+  reporting them. Exit 0 all done, 1 a home is left for a person, 2
+  refused.
+- **Each home records what its registry was synced to.**
+  `data/template-sync.json` holds the release, its commit, when, and
+  whether the registry was applied, in step or failed (with the commit it
+  started from). The plan starts each home there: an applied home plans as
+  in step, a failed one is planned again from where it was.
+
 ## 3.17.0 - 2026-10-03
 
 ### Added

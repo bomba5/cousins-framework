@@ -725,13 +725,48 @@ configuration when no supervisor answers), the caller's own runner last and
 detached. A dirty checkout is reported, not refused. `--json` prints the same
 plan as JSON, `-v`/`--full` prints each diff, `--root` picks the install and
 `--checkout` the git checkout to read releases from (default: the one
-running). Without `--dry-run` it exits 2: the apply path comes in a later
-release. Exit 0 the plan was computed, 1 it could not be (no release tag, not
-a git checkout), 2 refused.
+running), `--home SLUG` (repeatable) limits the homes. Exit 0 the plan was
+computed, 1 it could not be (no release tag, not a git checkout), 2 refused.
+
+`cousin-upgrade --apply-homes` applies the homes' part of the same plan: each
+home's `mcp-registry.toml` and `.mcp.json` are brought to the target. The
+code is not switched and nothing restarts (that comes in a later release).
+It prints the homes' plan and asks `apply to N homes? [y/N]`; `--yes` skips
+the question, and without a terminal to ask at, `--yes` is required (else
+exit 2, nothing written). Per home:
+
+- The registry is copied to `data/mcp-registry.toml.pre-<version>` before
+  the first write; a copy already there is kept and the new one gets a `.2`
+  (`.3`, ...) suffix.
+- The structural sync adds the tables and keys the release has and the home
+  lacks, and migrates framework values (an exact value an earlier release
+  shipped). A value the home or the operator set is never changed. The
+  entries the release retired are reported and kept; `--prune-retired`
+  removes them (and only them).
+- The file is replaced atomically, then must parse strictly and build every
+  tool definition. If it does not, the old bytes go back and the home is
+  reported failed with the reason.
+- `.mcp.json` is refreshed when it would change (its `cousin` entry, as
+  `cousin-spawn <slug> --repair-settings` does; other servers are kept).
+  CLAUDE.md is reported only; `cousin-spawn <slug> --sync-template` shows its
+  diff and `--apply` writes it.
+- `data/template-sync.json` records `{"to": "<version>", "ref": "<commit>",
+  "at": <epoch seconds>, "registry": "applied" | "in-step" | "failed: <why>"}`,
+  a failed home also `"from"`, the commit it was planned from. The next plan
+  starts the home there: an applied home plans as in step, a failed one is
+  planned again.
+
+A home with no registry is skipped. The report says per home: applied (keys
+added, values migrated, retired entries reported or pruned, the backup), in
+step, skipped or failed. `--home SLUG` limits the set, `--json` prints the
+plan and the results. Exit 0 all done, 1 a home is left for a person (a
+failed registry, a `.mcp.json` that could not be refreshed), 2 refused (no
+`--yes` and no terminal, the question answered no, an unknown `--home`).
 
 ```
 cousin-upgrade --dry-run
 cousin-upgrade --dry-run --to v3.17.0 --full
+cousin-upgrade --apply-homes --to v3.18.0 --home wren --yes
 ```
 
 `cousin-gate` scans a tree you are about to publish for private addresses,

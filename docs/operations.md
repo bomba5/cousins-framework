@@ -477,9 +477,17 @@ console's top bar shows the one the console process is running.
 the changelog between the running version and the newest release tag (or
 `--to <tag>`), whether the dependencies changed, the seeded files, each
 cousin's registry, `.mcp.json` and CLAUDE.md against the new release, and the
-restarts in order. It writes nothing. The apply path (the registry changes,
-the code switch and the restarts) comes in a later release; until then the
-steps above are the upgrade ([commands](commands.md#maintenance)).
+restarts in order. It writes nothing.
+
+After the code steps above, `cousin-upgrade --apply-homes --to <tag>` brings
+each cousin's registry and `.mcp.json` to that release: it asks first (or
+takes `--yes`), keeps a copy of each registry in the home's
+`data/mcp-registry.toml.pre-<version>`, never changes a value the cousin or
+you set, and puts a registry back as it was when the result does not check.
+Each home's `data/template-sync.json` records what it got, so a second run
+says "in step". A cousin picks the new registry up at its next start. The
+code switch and the restarts are not part of it yet: the steps above remain
+the upgrade ([commands](commands.md#maintenance)).
 
 ## After a reboot
 

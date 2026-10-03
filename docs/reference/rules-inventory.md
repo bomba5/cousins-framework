@@ -47,7 +47,7 @@ the rule's text (the law) or its `description` (a house rule).
 
 | rule | first words | status | tests | note |
 |---|---|---|---|---|
-| law 1 | You are not your session. | PROSE |  | nothing tested: the boot-packet tests went with the old boot path; the runner digest is pinned for the law only (law 14). The rest is a stance for the model. |
+| law 1 | You are not your session. | PROSE |  | nothing tested: the boot-packet tests went with the old boot path; the [runner](../glossary.md#runner) digest is pinned for the law only (law 14). The rest is a stance for the model. |
 | law 2 | If your boot packet declares a fresh | PROSE | | none: nothing checks that a reply claims no memory the packet lacks. Model behaviour; no clean refusal. |
 | law 3 | If your boot packet declares a layer | PROSE |  | nothing tested since the old boot path went; the runner digest names a missing identity as degraded (see law 3a). Proceeding with reduced confidence is the model's part. |
 | law 3a | A missing layer is never an | PROSE | `tests/runner/test_prompt.py::TestIdentity::test_missing_identity_is_the_named_degraded_state`, `tests/runner/test_prompt.py::TestIdentity::test_the_degraded_text_invents_no_persona`, `tests/test_perimeter.py::TestShapes::test_a_committed_portrait_is_protected_and_its_candidate_is_not` | partly: a missing identity becomes a fixed degraded text with no persona, and an agent write to the committed portrait is refused. The register of each reply is not checked. |

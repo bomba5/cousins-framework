@@ -51,6 +51,9 @@ class FakeOps:
     def commit(self, home, pass_id, through):
         self.calls.append(("commit", through))
 
+    def release_stale(self, home, max_age):
+        self.calls.append(("release_stale", max_age))
+
     def abandon(self, home, pass_id, reason):
         self.calls.append(("abandon", reason))
 
@@ -188,6 +191,8 @@ class TestPass(DreamCase):
         self.assertEqual([c["entry_ids"] for c in end["changes"]], [["abc"]])
         self.assertTrue(client.results[1].isError)        # refused, told as a tool error
         self.assertIn(("commit", "e42"), ops.calls)
+        # a dead pass's attempt is taken back before the slice
+        self.assertEqual(ops.calls[0], ("release_stale", dreaming.PASS_TIMEOUT_S + 60))
         self.assertEqual(end["tokens"], 500)              # one response, counted once
         self.assertEqual(end["summary"], "done")
         self.assertEqual(client.prompt, "consolidate: the slice")
@@ -240,6 +245,24 @@ class TestPass(DreamCase):
         dreaming._write(self.home, {"pass_id": "p0", "event": "start",
                                     "started": time.time() - dreaming.PASS_TIMEOUT_S - 120})
         self.assertEqual(dreaming.passes(self.home)[0]["result"], "lost")
+
+    def test_a_lost_pass_is_read_and_undone_from_its_journal(self):
+        ops = FakeOps()
+        dreaming._write(self.home, {"pass_id": "p0", "event": "start",
+                                    "started": time.time() - dreaming.PASS_TIMEOUT_S - 120})
+        journal = self.home / "data" / "dreams" / "journal" / "p0.jsonl"
+        journal.parent.mkdir(parents=True)
+        journal.write_text(json.dumps({"op": "retire", "entry_ids": ["abc"],
+                                       "mark_id": "m-abc"}) + "\n")
+        rec = dreaming.passes(self.home)[0]
+        self.assertEqual((rec["result"], len(rec["changes"])), ("lost", 1))
+        out = dreaming.undo(self.home, "p0", by="ana", ops=ops)
+        self.assertEqual(out, [{"op": "unretire", "entry_ids": ["abc"]}])
+
+    def test_a_running_pass_is_never_undone(self):
+        dreaming._write(self.home, {"pass_id": "p0", "event": "start", "started": time.time()})
+        with self.assertRaisesRegex(ValueError, "still running"):
+            dreaming.undo(self.home, "p0", ops=FakeOps())
 
     def test_undo_reverses_a_pass_once(self):
         ops = FakeOps()

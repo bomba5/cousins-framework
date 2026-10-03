@@ -3,6 +3,30 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.9.2 - 2026-10-03
+
+### Fixed
+
+- **A pass that dies mid-run no longer stops dreaming for that cousin.**
+  A pass killed at the harness's timeout, by a loops restart or by a
+  reboot never gave its attempt back, and every later pass refused
+  behind it. A held attempt older than the age at which `passes()` calls
+  a pass `lost` is now released before the next slice
+  (`dream_memory.release_stale`); the cursor stays, and what the dead pass
+  changed stays on its journal.
+- **A lost pass can be undone.** A pass with no end line listed no
+  changes, so the console offered no undo and `undo` refused it. A lost
+  pass now reads its changes from its journal, in the view and for undo.
+  A pass that is still running is never undone.
+- **New memory is dreamed after a walk that reached an archive.** The
+  pass walked hot day files first and the monthly archives last, so a
+  slice that ran to the end of the store left the cursor in an archive,
+  and every new day file sorted behind it: each later pass found nothing
+  new. The walk is now oldest first (`YYYY-MM` archives before the
+  month's remaining `YYYY-MM-DD` days). A cursor whose day raw_fold has
+  folded away resumes at the start of that month's archive: the month is
+  dreamed again rather than the day's remaining lines skipped.
+
 ## 3.9.1 - 2026-10-03
 
 ### Fixed

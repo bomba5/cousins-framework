@@ -1290,7 +1290,9 @@ function MemoryMaintenance({ slug, ov, flash, onChanged }) {
 
 // Dreaming (cousin_lib/dreaming.py): the cousin's setting, a pass on
 // demand, and every pass newest first with what it changed. A pass is
-// reversible: undo retires what it added and the marks it made.
+// reversible: undo moves the lines it wrote (claims and marks) to the
+// trash, so its retired claims are live again; a lost pass reads its
+// changes from its journal.
 const DREAM_RESULT_TONE = { done: "ok", no_change: "", budget: "warn", error: "bad", lost: "bad", running: "" };
 
 function DreamsView({ slug, reload, flash, onChanged, operator }) {

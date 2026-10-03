@@ -163,7 +163,10 @@ remembered through the same path `cousin-memory remember` uses) are taken
 when the model has them. It writes `STATUS.md`'s open loops, then
 `data/active-threads.md` when given, then the memories, then
 `data/handoff.md` last (the write order the module docstring calls the
-ritual), and returns one line naming what it wrote and how many memories.
+ritual), and returns one line naming what it wrote and how many memories,
+then any memory written at a lower level than asked (law 10: an uncited
+`framework` or `tool` level is written as `conclusion`, with its
+`demoted:` note) and any memory it could not write, with the reason.
 
 A `kind = "job"` registry tool (its `gen`, `status` and `result`
 commands, wrapping a slow shelled-out command as a tracked background

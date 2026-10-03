@@ -27,7 +27,10 @@ Three more checks keep the table honest:
 """
 import ast
 import asyncio
+import contextlib
 import inspect
+import io
+import json
 import os
 import pathlib
 import re
@@ -37,9 +40,13 @@ from unittest import mock
 
 from cousin_lib import perimeter
 from cousin_lib.runner import hooks, policy
+from cousin_lib.runner import main as runner_main
+from cousin_lib.runner import status
+from cousin_lib.runner.fake import FakeRunner
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream
 from tests._hermetic import HermeticCase
+from tests.runner._home import temp_home
 
 SLUG = "wren"           # the cousin whose session this is
 OTHER = "sam"           # another cousin on the same install
@@ -351,3 +358,44 @@ class TestTheGateKnowsWhoWrites(GateCase):
         self.assertEqual(check.call_args.kwargs["slug"], SLUG)
         self.assertEqual(pathlib.Path(check.call_args.kwargs["home"]), self.home)
         self.assertEqual(pathlib.Path(check.call_args.kwargs["root"]), self.R)
+
+
+class TestLanes(HermeticCase):
+    """The gate runs on the sdk lane only. The opencode and tmux kinds
+    say so at start, so the docs' claim and the running code agree."""
+
+    def _start_as(self, kind):
+        home = temp_home(self, runner="fake")
+        stderr = io.StringIO()
+        with mock.patch.object(FakeRunner, "kind", kind), \
+                contextlib.redirect_stderr(stderr):
+            rc = runner_main.runner_main(["--home", str(home), "--once"])
+        self.assertEqual(rc, 0, stderr.getvalue())
+        events = [json.loads(line) for line in
+                  status.primary_stream(home).read_text().splitlines()]
+        found = [e["payload"] for e in events if e["kind"] == "system"
+                 and e["payload"].get("subtype") == "perimeter"]
+        return stderr.getvalue(), found
+
+    def test_an_ungated_kind_names_the_gap_at_start(self):
+        for kind in ("opencode", "tmux"):
+            with self.subTest(kind=kind):
+                err, found = self._start_as(kind)
+                self.assertIn("no perimeter on this lane", err)
+                self.assertEqual(len(found), 1)
+                self.assertEqual(found[0]["kind"], kind)
+                self.assertIn("no perimeter on this lane", found[0]["line"])
+                self.assertIn("the %s kind" % kind, found[0]["line"])
+
+    def test_the_gated_lane_says_nothing(self):
+        for kind in ("sdk", "fake"):
+            with self.subTest(kind=kind):
+                err, found = self._start_as(kind)
+                self.assertNotIn("no perimeter", err)
+                self.assertEqual(found, [])
+
+    def test_every_kind_is_either_gated_or_named(self):
+        # a new runner kind has to say which it is; `fake` is the tests'
+        from cousin_lib.delivery import RUNNER_KINDS
+        self.assertEqual(sorted(perimeter.UNGATED_KINDS),
+                         sorted(k for k in RUNNER_KINDS if k not in ("sdk", "fake")))

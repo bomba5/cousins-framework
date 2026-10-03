@@ -109,6 +109,24 @@ ARGUMENT_COMMANDS = ("tee", "rm", "unlink", "truncate", "chmod", "chown",
                      "shred", "touch")
 
 
+# The runner kinds with no tool gate: the perimeter's shapes are checked
+# only by the sdk lane's PreToolUse callback (runner.hooks.gate). The
+# runner says so at start (runner.main), so the gap is named where it
+# starts to matter and not only in docs/memory.md.
+UNGATED_KINDS = ("opencode", "tmux")
+
+
+def lane_warning(kind):
+    """The start-up line for a runner kind with no perimeter, or None."""
+    if kind not in UNGATED_KINDS:
+        return None
+    return ("no perimeter on this lane: the %s kind has no tool gate, so a"
+            " subagent's write to the law, a portrait, canonical shared memory,"
+            " the cousin's own configuration or another cousin's home is not"
+            " refused; only the framework's own writers check it"
+            " (docs/memory.md, The perimeter)" % kind)
+
+
 class PerimeterRefused(Exception):
     """A write to a protected surface was refused; the message names the
     shape and says where the write belongs instead."""

@@ -246,7 +246,9 @@ arguments of `tee`, `rm`, `unlink`, `truncate`, `chmod`, `chown`, `shred`
 and `touch`, `sed -i` files and `dd of=`, in each command of a chain), so
 a path behind a variable, a glob, `find -exec` or a relative `cd` is not
 seen: that half is best-effort. The `opencode` and `tmux` lanes have no
-such gate.
+such gate, and their runner says so at every start: a `no perimeter on
+this lane` line on stderr and a `system` `perimeter` event on the
+[stream](glossary.md#stream).
 
 To close more on the primary session too, `policy.toml` has no rule per
 path: `deny_bash_patterns` can match a path in a Bash command, and `Write`

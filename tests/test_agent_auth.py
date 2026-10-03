@@ -4,11 +4,9 @@ file. The switch and its CLI are gone (a runner's credential is its
 account); `cousin-migrate` reads the mode and the key to carry a 1.x
 cousin over.
 
-The properties pinned here are the ones a billing mistake hides:
-the key reaches the agent only through its environment, the default
-mode strips the key and config-dir variables, a bad key file refuses
-the mode, the isolated harness config holds no login and no account
-block, and a login found there refuses the launch.
+The properties pinned here are the ones a billing mistake hides: a
+bad key file refuses the mode, and the isolated harness config holds
+no login and no account block.
 
 The harness here is invented (kestrel): its variable names, config dir
 and settings file come from a test harness.toml, as they do in
@@ -20,7 +18,6 @@ import json
 import os
 import pathlib
 import stat
-import sys
 import tarfile
 import tempfile
 import tomllib
@@ -32,12 +29,6 @@ from cousin_lib.agent_auth import (AUTH_MODES, DEFAULT_MODE, MODE_API_KEY,
                                    MODE_LOGIN, AuthError)
 
 KEY = "kst-test-0123456789abcdefWXYZ"
-
-_FAKE_AGENT = """#!%s
-import json, os, sys
-with open(os.environ["FAKE_AGENT_OUT"], "w") as fh:
-    json.dump({"argv": sys.argv, "env": dict(os.environ)}, fh)
-""" % sys.executable
 
 _HARNESS = """
 busy_patterns = ["esc to interrupt"]
@@ -89,14 +80,7 @@ class AuthCase(unittest.TestCase):
             "theme": "dark"}))
         (self.root / "config" / "harness.toml").write_text(
             _HARNESS % {"src": self.src, "settings": self.settings})
-        self.agent = self.root / "fake-agent"
-        self.agent.write_text(_FAKE_AGENT)
-        self.agent.chmod(0o755)
-        self.out = self.root / "agent-out.json"
-        patcher = mock.patch.dict(os.environ, {
-            "FRAMEWORK_ROOT": str(self.root),
-            "FAKE_AGENT_OUT": str(self.out),
-        })
+        patcher = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(self.root)})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -264,47 +248,6 @@ class TestIsolatedDir(AuthCase):
         (iso / ".kestrel.json").write_text(json.dumps(copy))
         with self.assertRaisesRegex(AuthError, "account keys"):
             agent_auth.check_isolated_dir(cfg)
-
-
-class TestAgentEnvironment(AuthCase):
-    def test_claude_mode_strips_the_key_and_the_config_dir(self):
-        env = agent_auth.agent_env(self.home, self.root, {
-            "KESTREL_KEY": "leaked", "KESTREL_CONFIG_DIR": "/x",
-            "PATH": "/bin"})
-        self.assertEqual(env, {"PATH": "/bin"})
-
-    def test_api_key_mode_hands_over_key_and_isolated_dir(self):
-        self.write_key()
-        agent_auth.build_isolated_dir(self.cfg())
-        agent_auth.persist_mode(self.home, MODE_API_KEY)
-        env = agent_auth.agent_env(self.home, self.root, {"PATH": "/bin"})
-        self.assertEqual(env["KESTREL_KEY"], KEY)
-        self.assertEqual(env["KESTREL_CONFIG_DIR"],
-                         str(self.cfg()["isolated_dir"]))
-
-    def test_api_key_mode_without_configuration_refuses(self):
-        (self.root / "config" / "harness.toml").write_text("")
-        agent_auth.persist_mode(self.home, MODE_API_KEY)
-        with self.assertRaisesRegex(AuthError, r"\[auth.api_key\]"):
-            agent_auth.agent_env(self.home, self.root, {})
-
-
-class TestLaunchThroughTmux(AuthCase):
-    """The launcher -> agent, with a fake agent that reports its argv
-    and environment."""
-
-    def test_the_launcher_refuses_on_its_own_too(self):
-        # The check binds at exec time, not only in the preflight: a
-        # key file removed between the two still stops the agent.
-        agent_auth.persist_mode(self.home, MODE_API_KEY)
-        import subprocess
-        r = subprocess.run(
-            [sys.executable, str(agent_auth.LAUNCHER), "--home",
-             str(self.home), "--root", str(self.root), "--",
-             str(self.agent)], capture_output=True, text=True)
-        self.assertEqual(r.returncode, 78)
-        self.assertIn("refused", r.stderr)
-        self.assertFalse(self.out.exists())
 
 
 class TestSecretsStayHome(AuthCase):

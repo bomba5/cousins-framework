@@ -244,8 +244,8 @@ def run_pass(home, root, *, trigger="manual", model=None, budget=BUDGET_TOKENS,
 
 
 async def _session(env, model, prompt, server, budget, client_factory):
-    """(tokens, summary, over_budget). tools=[]: the dream server's tools
-    are the only ones the session has."""
+    """(tokens, summary, over_budget). tools=[] and strict-mcp-config: the
+    dream server's tools are the only ones the session has."""
     from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, \
         ResultMessage, TextBlock
     cwd = tempfile.mkdtemp(prefix="cousin-dream-")
@@ -253,7 +253,10 @@ async def _session(env, model, prompt, server, budget, client_factory):
         cwd=cwd, model=model, env=env, setting_sources=[], tools=[],
         mcp_servers={"dream": server}, permission_mode="bypassPermissions",
         max_turns=MAX_TURNS,
-        extra_args={"no-session-persistence": None})
+        # strict-mcp-config: without it the CLI also attaches the account's
+        # claude.ai connectors (mail, drive, calendar), ~42k tokens of tool
+        # definitions under bypassPermissions; tools=[] does not stop them
+        extra_args={"no-session-persistence": None, "strict-mcp-config": None})
     client = (client_factory or (lambda o: ClaudeSDKClient(options=o)))(options)
     tokens, texts, over, seen = 0, [], False, set()
     await client.connect()

@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.9.1 - 2026-10-03
+
+### Fixed
+
+- **A dreaming pass has its memory tools and nothing else.** `tools=[]`
+  and `setting_sources=[]` did not stop the CLI from attaching the
+  account's claude.ai connectors (mail, drive, calendar, docs): the first
+  real pass ran with 62 tools under `bypassPermissions`, and their ~42k
+  tokens of definitions, re-read every turn, spent the 32k budget before
+  the pass changed anything. The pass now runs with `--strict-mcp-config`:
+  4 tools, ~1.9k tokens of overhead. The review gate's reviewer and
+  `cousin-runner --check-auth --validate` get the same flag; they had the
+  connectors too, at ~42k tokens read per call.
+
 ## 3.9.0 - 2026-10-03
 
 ### Added

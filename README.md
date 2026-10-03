@@ -116,7 +116,7 @@ details.
 git clone https://github.com/bomba5/cousins-framework.git
 cd cousins-framework
 docker compose up -d --build                     # opencode, and semantic search
-docker compose exec framework cousin-console adduser ana
+docker compose exec framework cousin-console adduser ana   # asks for the password twice
 
 # an opencode account on its free models: no key
 docker compose exec -T framework sh -c 'cat >> config/accounts.toml' <<'EOF'
@@ -148,17 +148,19 @@ cd ~/cousins-framework
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[mcp,sdk]"
 cp config/harness.toml.claude-code.example config/harness.toml
-cousin-console adduser ana
+export FRAMEWORK_ROOT=$PWD      # every cousin-* command finds the install by it
+cousin-console adduser ana      # asks for the password twice
 
 # the supervisor: the console on 127.0.0.1:8600, the loops daemon and every
-# cousin; keep it running (a second terminal, or systemd as in install)
+# cousin. Run it in a second terminal, or in the background as here (stop it
+# with `kill %1`), or under systemd as in install
 cousin-supervisor run &
 
 # make your first cousin and start it
 cousin-spawn wren --name Wren --role "helps me around the house" \
     --voice "Short, plain and honest." --operator ana
-cousin-mcp approve wren
-cousin-tool-surface
+cousin-mcp approve wren      # trust the home and its MCP servers: nobody is there to answer
+cousin-tool-surface         # write the command list the cousin's CLAUDE.md points to
 cousin-spawn wren --start
 ```
 

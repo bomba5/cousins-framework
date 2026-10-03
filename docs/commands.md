@@ -23,7 +23,7 @@ export COUSIN_HOME=$FRAMEWORK_ROOT/cousins/wren
 
 ## Running cousins
 
-`cousin-spawn` creates a cousin from the template (home, `cousin.toml`,
+`cousin-spawn` creates a cousin from the template (home, mode 0700, `cousin.toml`,
 `CLAUDE.md`, MCP registration, harness hooks) and can start it. With `--start`
 alone on an existing cousin it starts it; `--runner sdk|fake|opencode|tmux` and `--account <name>` name its runner kind
 and account (`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER`,
@@ -223,7 +223,7 @@ runner holding the cousin's lock, it kills that cousin's pane (exit 0 whether
 or not one was there) instead of leaving an unsupervised turn running; with a
 runner holding the lock it refuses and says to stop the runner instead, which
 kills the pane itself when it was told to hold it. One runner per cousin: it holds a lock on
-`<home>/run/runner.lock` for its life. It reads `policy.toml` at start; a
+`<home>/run/runner.lock` for its life (a missing `run/` is made 0700 first). It reads `policy.toml` at start; a
 malformed policy is rc 2, and so is an MCP registry that does not parse or
 names a command the runner has no in-process handler for. `--home` may be
 relative: the runner makes it absolute and exports `COUSIN_HOME` (the home)

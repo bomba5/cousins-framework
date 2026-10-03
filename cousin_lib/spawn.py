@@ -39,6 +39,8 @@ from cousin_lib.template import TemplateError, render_template
 from cousin_lib.trace import traced_cli
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
+# a new home's mode: its owner's alone
+HOME_MODE = 0o700
 # A [runtime] value renders into the agent command and is then split
 # by shlex: anything a shell would treat as more than one word, or as
 # quoting, is refused before it is persisted. Brackets are admitted
@@ -283,7 +285,18 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
         claude_md = render_template(template_text, values)
     except TemplateError as err:
         raise SpawnError(str(err))
+    # The home is the owner's alone (0700, whatever the umask): other
+    # users on the host, or anything running as another uid, can neither
+    # list nor read it. Every cousin runs as one user today, so this does
+    # not separate cousins from each other. Made before the try: a home
+    # that appeared since the check above is not ours to remove.
     try:
+        home.parent.mkdir(parents=True, exist_ok=True)
+        home.mkdir(mode=HOME_MODE)
+    except OSError as err:
+        raise SpawnError("cannot create %s: %s" % (home, err))
+    try:
+        os.chmod(home, HOME_MODE)
         for sub in ("memory", "data", "notes", "scripts"):
             (home / sub).mkdir(parents=True)
         _write_cousin_toml(home, slug=slug, name=name, role=role,

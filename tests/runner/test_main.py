@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -749,6 +750,18 @@ class TestHoldLock(HermeticCase):
             rc, err = _run(["--home", str(home), "--once"])
         self.assertEqual(rc, 5)
         self.assertIn("runner.lock", err)
+
+    def test_a_missing_run_dir_is_made_0700_before_the_lock(self):
+        home = temp_home(self, runner="fake")
+        (home / "run").rmdir()
+        old = os.umask(0)
+        try:
+            with runner_main.hold_lock(home):
+                mode = stat.S_IMODE((home / "run").stat().st_mode)
+                self.assertTrue((home / "run" / "runner.lock").is_file())
+        finally:
+            os.umask(old)
+        self.assertEqual(mode, 0o700)
 
 
 class TestHoldLockRetry(HermeticCase):

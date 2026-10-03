@@ -91,7 +91,8 @@ class TestSdk(PluginMcpCase):
     def test_the_plugin_server_reaches_the_options_and_the_event(self):
         fake.enable(self.home, "clock")
         r = self.runner()
-        servers = r.options().mcp_servers
+        from tests.runner.test_mcp_json import servers_of   # the file's servers too
+        servers = servers_of(r.options())
         self.assertEqual(list(servers), ["cousin", "clock"])
         self.assertEqual(servers["clock"]["type"], "stdio")
         self.assertNotIn("alwaysLoad", servers["clock"])

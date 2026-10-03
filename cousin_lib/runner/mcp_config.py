@@ -17,17 +17,18 @@ still starts with `cousin`.
 
 `${VAR}` and `${VAR:-default}` are passed through UNEXPANDED: the agent
 CLI expands them itself, in command, args, env, url and headers, from
-its own environment (measured on the bundled CLI 2.1.281), and the SDK
-hands it the servers as a `--mcp-config` command-line argument, which
-the host's users can read. So a secret travels as its `${NAME}` only,
-and its value reaches the server through the CLI's environment. Two
-checks stay here, reading only whether a variable is set: a reference
-with no default to a variable unset in the runner's environment skips
-its entry (Claude Code refuses such a config), and a reference to one
-of the account variables (accounts.AUTH_VARS) skips its entry whatever
-it holds: the CLI's environment carries the cousin's own credential
-there, and a .mcp.json the model can edit must not route it to a
-server.
+its own environment (measured on the bundled CLI 2.1.281). The runner
+hands it these servers in a private file (sdk.SdkRunner._mcp_options),
+never on its argv, which the host's users can read. A secret is still
+best written as its `${NAME}`: its value then reaches the server through
+the CLI's environment, and .mcp.json, which the model can read and edit,
+holds the name only. Two checks stay here, reading only whether a
+variable is set: a reference with no default to a variable unset in the
+runner's environment skips its entry (Claude Code refuses such a
+config), and a reference to one of the account variables
+(accounts.AUTH_VARS) skips its entry whatever it holds: the CLI's
+environment carries the cousin's own credential there, and a .mcp.json
+the model can edit must not route it to a server.
 
 Plugins (cousin_lib/plugins.py): each plugin the cousin enables in its
 cousin.toml `[plugins] enabled` that declares [mcp] adds one stdio server

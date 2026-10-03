@@ -21,7 +21,7 @@ import tarfile
 import time
 
 from cousin_lib.config import FrameworkConfig, MissingConfigError
-from cousin_lib.hive import HiveStore
+from cousin_lib.hive import HiveStore, read_token_file, warn_token_flag
 from cousin_lib.template import TemplateError, render_template
 from cousin_lib.trace import traced_cli
 
@@ -201,10 +201,15 @@ def spawn_node_main(argv=None):
                         help="the queen as the NODE will reach it")
     parser.add_argument("--name", required=True)
     parser.add_argument("--role", required=True)
-    parser.add_argument("--token",
-                        help="a token already minted on a remote queen;"
-                             " without it one is minted in this root's"
-                             " queen store")
+    given = parser.add_mutually_exclusive_group()
+    given.add_argument("--token-file", metavar="PATH",
+                       help="read a token already minted on a remote queen"
+                            " from PATH (- for stdin); without it one is"
+                            " minted in this root's queen store")
+    given.add_argument("--token",
+                       help="deprecated: the token on the command line,"
+                            " where every local user can read it; use"
+                            " --token-file")
     parser.add_argument("--tell-home", action="store_true",
                         help="TELL_HOME=1 in node.env: the node's"
                              " [tell-home: ...] reaches the queen's"
@@ -224,6 +229,15 @@ def spawn_node_main(argv=None):
     parser.add_argument("--out", default=".",
                         help="where <slug>-node.tar.gz is written")
     args = parser.parse_args(argv)
+    token = args.token
+    if args.token_file is not None:
+        try:
+            token = read_token_file(args.token_file)
+        except ValueError as err:
+            print("cousin-spawn-node: %s" % err, file=sys.stderr)
+            return 2
+    elif token is not None:
+        warn_token_flag("cousin-spawn-node")
     try:
         root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
     except MissingConfigError as err:
@@ -233,7 +247,7 @@ def spawn_node_main(argv=None):
         result = build_node_archive(
             root, slug=args.slug, queen_url=args.queen_url,
             name=args.name, role=args.role, out=args.out,
-            token=args.token, tell_home=args.tell_home, port=args.port,
+            token=token, tell_home=args.tell_home, port=args.port,
             agent_cmd=args.agent_cmd,
             node_host="0.0.0.0" if args.listen_all else "127.0.0.1")
     except SpawnNodeError as err:

@@ -3,6 +3,42 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.13.0 - 2026-10-03
+
+### Fixed
+
+- **An sdk cousin's own MCP servers are no longer on the CLI's command
+  line.** The SDK wrote every server inline as `--mcp-config <json>`, so a
+  value written literally in `.mcp.json` (an `env` value, a header) was
+  readable by every local user (`ps`, `/proc/<pid>/cmdline`). The home's
+  and the plugins' servers now go to a private file,
+  `data/run/mcp-config.json` (0600 in a 0700 directory; a side session's
+  is `mcp-config-<kind>.json`), named by a second `--mcp-config`; only
+  `cousin`, a name, stays inline (the SDK serves an in-process server
+  only from there). The file is rewritten at every start and removed when
+  the runner stops. The tmux and opencode lanes never passed servers on
+  an argv.
+- **No value is on an argv when a tmux pane starts.** The pane ran
+  `exec env -i NAME=value ...`, so the allowlisted values sat on `env`'s
+  argv until its exec. The pane's first program is now a tiny
+  `python -I -S -c` (`tmux_pane.KEEP_ONLY`) that takes the names only,
+  keeps those of the login shell's environment, drops the rest and execs
+  the launcher: the same variables and values, none on a command line.
+
+### Added
+
+- **`--token-file PATH` for `cousin-spawn-node`, `cousin-hive send` and
+  `cousin-hive recall`** (`-` reads standard input). `send` and `recall`
+  also read `HIVE_TOKEN` when no token is given, as a node's `node.env`
+  sets it.
+
+### Deprecated
+
+- **`--token T` on `cousin-spawn-node`, `cousin-hive send` and
+  `cousin-hive recall`.** It puts the token on the command line, where
+  every local user can read it. It still works and prints a one-line
+  warning on stderr; removing it is a major change.
+
 ## 3.12.1 - 2026-10-03
 
 ### Removed

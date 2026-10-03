@@ -2,12 +2,14 @@
 Claude Code in a tmux session on the framework's own socket.
 
 What it may do is narrow on purpose. It starts the CLI with an
-allowlisted environment set INSIDE the pane (`exec env -i ...`), because
-tmux runs a command through the login shell, which rebuilds the
-environment. Only variable NAMES reach tmux: each
-is expanded by that login shell (`${NAME+"NAME=$NAME"}`), so no value, and
-no secret, is ever on a tmux command line (`#{pane_start_command}` keeps it
-for the pane's life); a denied name (DENY_PREFIXES, accounts.AUTH_VARS) is
+allowlisted environment set INSIDE the pane, because tmux runs a command
+through the login shell, which rebuilds the environment. Only variable
+NAMES are ever on a command line: the pane's first program (KEEP_ONLY, an
+`env -i` that takes names) keeps those of its environment, the login
+shell's, and drops the rest, so no value, and no secret, is on a tmux
+command line (`#{pane_start_command}` keeps it for the pane's life) or on
+any argv in the pane (`env -i NAME=value` would hold the values on one
+until its exec); a denied name (DENY_PREFIXES, accounts.AUTH_VARS) is
 refused. The framework's server starts with `-f /dev/null`, so no
 ~/.tmux.conf changes its shell or its window size. It types a row as one typed line
 (the sender's own words, outside `<pasted_content>`) plus a bracketed
@@ -26,6 +28,7 @@ import re
 import shlex
 import signal
 import subprocess
+import sys
 from pathlib import Path
 from typing import Protocol
 
@@ -69,18 +72,29 @@ def denied(name):
     return name.startswith(DENY_PREFIXES) or accounts.credential_name(name)
 
 
-def env_command(names, argv):
-    """The pane's command: `exec env -i` with each allowlisted NAME expanded
-    by the pane's login shell (an unset name is left out), plus TERM from
-    tmux, then argv. Raises ValueError on a denied or malformed name."""
+# The pane's first program: `env -i` given names, not values. It keeps the
+# named variables of its own environment (unset ones are left out), drops
+# every other and execs the rest of its argv. The values stay in process
+# environments, which only this user can read (/proc/<pid>/environ); on
+# an argv every local user can (/proc/<pid>/cmdline). -I -S: nothing of
+# the login shell's (no PYTHON* variable, no site hooks, no cwd on
+# sys.path) runs in it.
+KEEP_ONLY = ("import os,sys;n=sys.argv[1].split(',');a=sys.argv[2:];"
+             "os.execvpe(a[0],a,{k:os.environ[k] for k in n if k in os.environ})")
+
+
+def env_command(names, argv, *, python=None):
+    """The pane's command: KEEP_ONLY, run by `python` (default this
+    interpreter), with the allowlisted NAMES plus TERM from tmux, then
+    argv. Raises ValueError on a denied or malformed name."""
     names = [n for n in dict.fromkeys(names) if n != "TERM"]
     for n in names:
         if not _NAME.match(n):
             raise ValueError("not a variable name: %r" % (n,))
         if denied(n):
             raise ValueError("%s is denied in the pane's environment" % n)
-    words = ['${%s+"%s=$%s"}' % (n, n, n) for n in names + ["TERM"]]
-    return "exec env -i " + " ".join(words + [shlex.quote(a) for a in argv])
+    head = [python or sys.executable, "-I", "-S", "-c", KEEP_ONLY, ",".join(names + ["TERM"])]
+    return "exec " + " ".join(shlex.quote(str(a)) for a in head + list(argv))
 
 
 class Outcome(enum.Enum):

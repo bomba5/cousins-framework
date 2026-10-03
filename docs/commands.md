@@ -596,7 +596,9 @@ cousin-tracker add "move the photo archive" --domain infra --tag q4
 `cousin-hive` runs a standalone queen and manages node tokens. Subcommands:
 `serve`, `mint`, `revoke`, `forget`, `nodes`, `send`, `recall`,
 `import-legacy`. `serve` takes `--host` (0.0.0.0), `--port` (8101) and
-`--checkin-seconds`; `send` and `recall` take `--queen URL` and `--token T`;
+`--checkin-seconds`; `send` and `recall` take `--queen URL` and the token
+from `--token-file PATH` (`-` for stdin) or `HIVE_TOKEN` (`--token T` is
+deprecated: it puts the token on the command line);
 `import-legacy` takes the old queen's `--tokens` file. Most installs use the
 console as the queen instead. See
 [remote cousins](remote-cousins.md#cousin-hive) for every flag.

@@ -21,6 +21,64 @@ export FRAMEWORK_ROOT=$HOME/cousins-framework
 export COUSIN_HOME=$FRAMEWORK_ROOT/cousins/wren
 ```
 
+## Which commands you need
+
+Each command has one class, so you know which ones to learn first:
+
+- **core**: you use it from day one to run, keep and upgrade a cousin.
+  [Getting started](getting-started.md) uses only these.
+- **optional**: it belongs to a feature you can leave off
+  ([what is optional](getting-started.md#what-is-optional)).
+- **cousin**: a cousin runs it from its own session; you rarely type it.
+- **internal**: the framework runs it (the
+  [supervisor](glossary.md#supervisor), a timer, a session hook).
+- **developer**: for working on the framework itself.
+
+| command | class | what it is for |
+|---|---|---|
+| `cousin-account` | core | the accounts cousins run on, and whether each is logged in |
+| `cousin-backup` | core | snapshot one cousin's databases and memory |
+| `cousin-console` | core | the web console; `adduser` makes a login |
+| `cousin-doctor` | core | what in the install to fix by hand, with the fix; changes nothing |
+| `cousin-flip` | core | end a cousin's session and start it fresh ([flip](glossary.md#flip)) |
+| `cousin-health` | core | what has been failing, and for how long |
+| `cousin-loops` | core | the scheduler the supervisor runs; `flips` shows when each cousin flips |
+| `cousin-mcp` | core | a cousin's tools over MCP; `approve` records the harness's approval |
+| `cousin-memory` | core | search and write a cousin's memory |
+| `cousin-shared` | core | the [shared tier](glossary.md#shared-tier); `templates` compares the law and house rules with what a release ships |
+| `cousin-spawn` | core | make a cousin, and start it |
+| `cousin-supervisor` | core | the one process that runs the console, the loops daemon and every cousin |
+| `cousin-tool-surface` | core | write the list of commands a cousin reads instead of probing each `--help` |
+| `cousin-upgrade` | core | plan an upgrade, bring the homes to it, switch the code and restart |
+| `cousin-version` | core | the version and commit you run |
+| `cousin-watch` | core | a cousin's reasoning, live |
+| `cousin-cache-audit` | optional | the prompt cache hit rate, from the harness transcripts |
+| `cousin-chat-import` | optional | import a cousin's chat history from an older install |
+| `cousin-hive` | optional | the queen for cousins on other machines, and its node tokens |
+| `cousin-image` | optional | generate an image ([media](media.md)) |
+| `cousin-meeting` | optional | a chat with several cousins at once, in rounds |
+| `cousin-migrate` | optional | move a cousin from an older release, or to another runner kind |
+| `cousin-reincarnate` | optional | give a cousin a new role and keep its memory |
+| `cousin-spawn-node` | optional | build a cousin that runs on another machine |
+| `cousin-telegram` | optional | a cousin's chat on Telegram |
+| `cousin-transplant` | optional | move memory or bodies between two cousins |
+| `cousin-video` | optional | generate a video ([media](media.md)) |
+| `cousin-voice` | optional | generate speech ([media](media.md)) |
+| `cousin-callback` | cousin | a cousin's library of moments worth calling back to |
+| `cousin-chat` | cousin | message another cousin, list who can be reached |
+| `cousin-job` | cousin | register and track background jobs; the console's Jobs page shows them |
+| `cousin-reason` | cousin | write and list reasoning capsules |
+| `cousin-reply` | cousin | a cousin's answer to a person, in its chat history |
+| `cousin-schedule` | cousin | a one-shot prompt at a future time |
+| `cousin-self-portrait` | cousin | draft the cousin's self-portrait; a person commits it |
+| `cousin-tracker` | cousin | the install's list of work in flight; the console's Tracker page shows it |
+| `cousin-cycle` | internal | per-cousin session counters the boot packet reads |
+| `cousin-runner` | internal | drives one cousin; the supervisor starts one per cousin |
+| `cousin-session` | internal | a cousin's session start and end hooks |
+| `cousin-sweep` | internal | the weekly memory compaction, from its timer |
+| `cousin-sync-state` | internal | renders STATUS.md's open loops into `data/state.json` |
+| `cousin-gate` | developer | scan a tree for private data before you publish it |
+
 ## Running cousins
 
 `cousin-spawn` creates a cousin from the template (home, mode 0700, `cousin.toml`,

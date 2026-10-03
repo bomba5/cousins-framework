@@ -29,7 +29,8 @@ except a value still holding exactly what a past release shipped
 (_MIGRATIONS below): that one gets the current one, because it is the
 framework's own text, not the cousin's. Given the text the cousin was last
 synced from (`base`), a table or key that text had and the shipped one no
-longer has is reported as retired, never removed.
+longer has is reported as retired, and removed only when asked (`prune`,
+cousin-upgrade --prune-retired).
 
 `plan` and `_registry_sync` take the template and the shipped registry as
 text too, so cousin-upgrade can plan against a release before the
@@ -338,7 +339,37 @@ def _retired(base, theirs, mine):
     return out
 
 
-def _registry_sync(home, root, *, apply=False, theirs=None, base=None):
+def _prune(blocks, retired):
+    """`blocks` without the retired tables (each with the tables below
+    it) and keys; returns the dotted paths it removed."""
+    paths = {p for p, _ in blocks if p is not None}
+    tables = [r for r in retired if r in paths]
+    keys = {}
+    for r in retired:
+        if r not in paths:
+            table, _, key = r.rpartition(".")
+            keys.setdefault(table, set()).add(key)
+    removed = []
+    for i in range(len(blocks) - 1, -1, -1):
+        path, body = blocks[i]
+        if path is None:
+            continue
+        if any(path == t or path.startswith(t + ".") for t in tables):
+            del blocks[i]
+            continue
+        if path in keys:
+            entries = _entries(body)
+            gone = [k for k, _ in entries if k in keys[path]]
+            if gone:
+                blocks[i] = (path, [one for k, ls in entries
+                                    if k not in keys[path] for one in ls])
+                removed.extend("%s.%s" % (path, k) for k in gone)
+    removed.extend(tables)
+    return sorted(removed)
+
+
+def _registry_sync(home, root, *, apply=False, theirs=None, base=None,
+                   prune=False):
     """Bring the cousin's mcp-registry.toml up to the shipped one,
     additively at every level: a table it lacks is appended whole, and a
     key the shipped table has and its table lacks is added to that
@@ -347,12 +378,14 @@ def _registry_sync(home, root, *, apply=False, theirs=None, base=None):
     that one is corrected to the shipped value. `theirs` is the shipped
     registry's text (default: the install's, shipped_default_registry);
     `base`, when given, is the text the cousin was last synced from, and
-    what it had that `theirs` lacks is reported under "retired", never
-    removed. Returns {"path", "added", "corrected", "retired"}, lists of
-    dotted paths; "path" is None for a home with no registry."""
+    what it had that `theirs` lacks is reported under "retired", and
+    removed only with `prune`. Returns {"path", "added", "corrected",
+    "retired", "pruned"}, lists of dotted paths; "path" is None for a
+    home with no registry."""
     reg = Path(home) / "mcp-registry.toml"
     if not reg.is_file():
-        return {"path": None, "added": [], "corrected": [], "retired": []}
+        return {"path": None, "added": [], "corrected": [], "retired": [],
+                "pruned": []}
     if theirs is None:
         from cousin_lib.mcp_server import shipped_default_registry
         theirs = shipped_default_registry(root)
@@ -391,9 +424,10 @@ def _registry_sync(home, root, *, apply=False, theirs=None, base=None):
         lines[end:end] = [one for _, ls in extra for one in ls]
         mine[at] = (path, lines)
         added.extend("%s.%s" % (path, k) for k, _ in extra)
-    if not added and not corrected:
+    pruned = _prune(mine, retired) if prune and retired else []
+    if not added and not corrected and not pruned:
         return {"path": reg, "added": [], "corrected": [],
-                "retired": retired}
+                "retired": retired, "pruned": []}
     text = "".join(("" if p is None else "[%s]\n" % p) + "".join(b)
                    for p, b in mine)
     tomllib.loads(text)
@@ -402,7 +436,7 @@ def _registry_sync(home, root, *, apply=False, theirs=None, base=None):
         tmp.write_text(text)
         tmp.replace(reg)
     return {"path": reg, "added": added, "corrected": corrected,
-            "retired": retired}
+            "retired": retired, "pruned": pruned}
 
 
 def sync(home, root=None, *, apply=False):

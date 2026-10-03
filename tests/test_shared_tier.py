@@ -13,11 +13,14 @@ import unittest
 from unittest import mock
 
 from cousin_lib.shared_tier import (
+    NameRefused,
     PromoteRefused,
+    diff_proposal,
     list_shared,
     plan_bulk_propose,
     promote,
     propose,
+    read_shared,
     reject,
 )
 
@@ -159,6 +162,60 @@ class TestTheBoundary(TierCase):
         self.assertIn("shared-reviewers.json", str(ctx.exception))
 
 
+class TestPathShapedNames(TierCase):
+    """A slug or file name is one bare entry name. A "../" slug would
+    land the proposal outside shared/proposed/; a "../" file would read
+    another cousin's home. Both are refused before any path is built."""
+
+    BAD = ("../wren", "..", ".hidden", "a/b", "a\\b", "")
+
+    def test_propose_refuses_a_path_shaped_slug_and_writes_nothing(self):
+        for slug in self.BAD:
+            with self.subTest(slug=slug):
+                with self.assertRaises(NameRefused) as ctx:
+                    propose("norms.md", "x\n", slug=slug)
+                self.assertIn("slug", str(ctx.exception))
+                self.assertIn("bare name", str(ctx.exception))
+        self.assertFalse((self.root / "norms.md").exists())
+        self.assertFalse((self.root / "shared" / "proposed").exists())
+        self.assertEqual(self._audit_entries(), [])
+
+    def test_propose_refuses_a_path_shaped_file(self):
+        for file in ("../norms.md", "sub/norms.md", ".norms.md"):
+            with self.subTest(file=file):
+                with self.assertRaises(NameRefused):
+                    propose(file, "x\n", slug="wren")
+
+    def test_read_refuses_a_file_outside_shared(self):
+        other = self.root / "cousins" / "sam"
+        other.mkdir(parents=True)
+        (other / "STATUS.md").write_text("private\n")
+        (self.root / "shared").mkdir()
+        for file in ("../cousins/sam/STATUS.md", "..\\x.md", ".x.md"):
+            with self.subTest(file=file):
+                with self.assertRaises(NameRefused) as ctx:
+                    read_shared(file)
+                self.assertIn("file", str(ctx.exception))
+
+    def test_diff_refuses_a_path_shaped_file_or_slug(self):
+        with self.assertRaises(NameRefused):
+            diff_proposal("../cousins/sam/STATUS.md", "wren")
+        with self.assertRaises(NameRefused):
+            diff_proposal("norms.md", "../wren")
+
+    def test_promote_and_reject_refuse_path_shaped_names(self):
+        self._register_cousin("wren", "Wren")
+        self._reviewers(["Sam"])
+        with self.assertRaises(NameRefused):
+            promote("../x.md", proposer="wren", by="Sam")
+        with self.assertRaises(NameRefused):
+            reject("norms.md", proposer="../wren", by="Sam")
+
+    def test_a_bare_name_still_passes(self):
+        propose("norms.md", "x\n", slug="wren")
+        self.assertIn("x", diff_proposal("norms.md", "wren"))
+
+
 class TestBulkPropose(TierCase):
     def _home(self, scope=None, files=()):
         home = self.root / "cousins" / "wren"
@@ -229,6 +286,19 @@ class TestCli(TierCase):
             ["promote", "norms.md", "--proposer", "wren", "--by", "Wren"])
         self.assertEqual(rc, 3)
         self.assertIn("own proposal", err)
+
+
+    def test_a_path_shaped_name_is_a_usage_error_on_the_cli(self):
+        rc, _, err = self._main(["propose", "norms.md", "--slug", "../x"],
+                                stdin_text="x\n")
+        self.assertEqual(rc, 2)
+        self.assertIn("bare name", err)
+        self.assertFalse((self.root / "x__norms.md").exists())
+        for argv in (["read", "../cousins/sam/STATUS.md"],
+                     ["diff", "../x.md", "--slug", "wren"]):
+            rc, _, err = self._main(argv)
+            self.assertEqual(rc, 2, argv)
+            self.assertIn("refused", err)
 
 
 class TestMemoryCliWiring(TierCase):

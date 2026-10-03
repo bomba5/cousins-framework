@@ -98,51 +98,6 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestBootWarning(unittest.TestCase):
-    """The boot packet carries the reason, which is the whole point:
-    the harness says CONNECTION_CLOSED and nothing else, and a cousin
-    that cannot see why falls back to the CLIs and forgets."""
-
-    def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.root = pathlib.Path(tmp.name)
-        self.home = self.root / "cousins" / "wren"
-        self.home.mkdir(parents=True)
-        (self.root / "config").mkdir()
-        self.logs = self.root / "cache" / (re.sub(r"[^A-Za-z0-9]", "-", str(self.home))
-                                           ) / "mcp-logs-cousin"
-        self.logs.mkdir(parents=True)
-        (self.root / "config" / "harness.toml").write_text(
-            'mcp_logs_dir = "%s/cache/{home_encoded}/mcp-logs-{server}"\n'
-            % self.root)
-
-    def _write(self, name, lines):
-        (self.logs / name).write_text(
-            "".join(json.dumps(x) + "\n" for x in lines))
-
-    def test_a_failure_puts_the_servers_stderr_in_the_packet(self):
-        from cousin_lib.boot import _mcp_warning
-        self._write("2026-09-20T02-00-54-732Z.jsonl", _FAIL)
-        line = _mcp_warning(self.home)
-        self.assertIn("registry: meeting: no commands", line)
-        self.assertIn("FAILED", line)
-
-    def test_a_good_connection_says_nothing(self):
-        from cousin_lib.boot import _mcp_warning
-        self._write("2026-09-20T02-43-40-375Z.jsonl", _OK)
-        self.assertEqual(_mcp_warning(self.home), "")
-
-    def test_no_log_says_nothing(self):
-        from cousin_lib.boot import _mcp_warning
-        self.assertEqual(_mcp_warning(self.home), "")
-
-    def test_a_broken_log_directory_never_costs_a_boot(self):
-        from cousin_lib.boot import _mcp_warning
-        (self.root / "config" / "harness.toml").write_text("not = [toml\n")
-        self.assertEqual(_mcp_warning(self.home), "")
-
-
 _UNRECORDED = [
     {"debug": "Starting connection with timeout of 30000ms",
      "timestamp": "2026-04-18T11:42:50.265Z", "sessionId": "s3"},
@@ -200,61 +155,10 @@ class TestOutcomeVocabulary(unittest.TestCase):
         self.assertEqual(mcp_logs._outcome(_OK)["state"], "connected")
 
 
-class TestWarningSaysWhatItKnows(unittest.TestCase):
-    """The packet is assembled before the new session exists, so it can
-    only ever report a past one. It may name which, and may not predict
-    this one."""
-
-    def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.root = pathlib.Path(tmp.name)
-        self.home = self.root / "cousins" / "wren"
-        self.home.mkdir(parents=True)
-        (self.root / "config").mkdir()
-        self.logs = self.root / "cache" / (re.sub(r"[^A-Za-z0-9]", "-", str(self.home))
-                                           ) / "mcp-logs-cousin"
-        self.logs.mkdir(parents=True)
-        (self.root / "config" / "harness.toml").write_text(
-            'mcp_logs_dir = "%s/cache/{home_encoded}/mcp-logs-{server}"\n'
-            % self.root)
-
-    def _write(self, name, lines):
-        (self.logs / name).write_text(
-            "".join(json.dumps(x) + "\n" for x in lines))
-
-    def _toml(self, session_id):
-        (self.home / "cousin.toml").write_text(
-            '[runtime]\nsession_id = "%s"\n' % session_id)
-
-    def test_the_warning_names_the_session_it_is_about(self):
-        from cousin_lib.boot import _mcp_warning
-        self._write("2026-09-20T02-00-54-732Z.jsonl", _FAIL)
-        self.assertIn("s1", _mcp_warning(self.home))
-
-    def test_the_warning_does_not_predict_this_session(self):
-        from cousin_lib.boot import _mcp_warning
-        self._write("2026-09-20T02-00-54-732Z.jsonl", _FAIL)
-        self.assertNotIn("this session", _mcp_warning(self.home))
-
-    def test_an_unrecorded_attempt_does_not_read_as_failed(self):
-        from cousin_lib.boot import _mcp_warning
-        self._write("2026-04-18T11-42-50-265Z.jsonl", _UNRECORDED)
-        line = _mcp_warning(self.home)
-        self.assertNotIn("FAILED", line)
-        self.assertIn("2026-04-18T11:42:50.265Z", line)
-
-    def test_the_warning_is_scoped_to_the_dying_generation(self):
-        from cousin_lib.boot import _mcp_warning
-        self._write("2026-09-20T02-00-54-732Z.jsonl", _FAIL)
-        self._toml("s2")
-        self.assertEqual(_mcp_warning(self.home), "")
-
-
 class TestLastConnectionCLI(unittest.TestCase):
-    """`cousin-mcp --last-connection` is the reader the boot packet
-    points at, and it shares `_outcome`, so it inherits the same three
-    states and must not call an unrecorded outcome a failure either."""
+    """`cousin-mcp --last-connection` shares `_outcome`, so it inherits
+    the same three states and must not call an unrecorded outcome a
+    failure either."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -304,25 +208,3 @@ class TestLastConnectionCLI(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("no outcome recorded", text)
         self.assertNotIn("FAILED", text)
-
-
-class TestWarningWithNothingToScopeBy(TestWarningSaysWhatItKnows):
-    """A cousin with no persisted `runtime.session_id` - hand-made, or
-    being flipped for the first time - gives the warning nothing to
-    scope by, and the lookup falls back to the newest file. That is
-    the pre-1.6.0 reading, which can answer with an older generation's
-    record, so the line has to say it could not scope rather than
-    claim the generation that just died."""
-
-    def test_with_no_session_id_on_file_the_line_says_it_could_not_scope(self):
-        from cousin_lib.boot import _mcp_warning
-        self._write("2026-09-20T02-00-54-732Z.jsonl", _FAIL)
-        line = _mcp_warning(self.home)          # no cousin.toml at all
-        self.assertIn("s1", line)
-        self.assertIn("could not be scoped", line)
-
-    def test_a_scoped_line_makes_no_such_caveat(self):
-        from cousin_lib.boot import _mcp_warning
-        self._write("2026-09-20T02-00-54-732Z.jsonl", _FAIL)
-        self._toml("s1")
-        self.assertNotIn("could not be scoped", _mcp_warning(self.home))

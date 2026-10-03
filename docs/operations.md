@@ -381,9 +381,9 @@ cousin-tool-surface
 ```
 
 Writes `<root>/data/tool-surface.md`: one line per `cousin-*` command with
-the first line of its `--help`. The boot packet quotes it so a cousin knows
-what it can run. Without the file, every boot is marked degraded. The timer
-refreshes it daily; run it by hand after an upgrade that adds commands.
+the first line of its `--help`, a list a cousin can read to know what it can
+run. The timer refreshes it daily; run it by hand after an upgrade that adds
+commands.
 
 ## Upgrades
 
@@ -541,8 +541,7 @@ recover.
   [install](install.md#4-claude-code).
 
 **The cousin booted degraded**
-- Check: the boot packet header lists `DEGRADED layers`. A missing tool
-  surface means `cousin-tool-surface` hasn't run. The other layers
+- Check: the boot packet header lists `DEGRADED layers`. The layers
   (self-portrait, calibration, active state) each say how to fix them in
   their own section. See [lifecycle](reference/lifecycle.md).
 

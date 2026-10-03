@@ -53,15 +53,6 @@ class TestSpawnAndIdentity(NullOperatorCase):
         cousin_toml = (home / "cousin.toml").read_text()
         self.assertNotIn("[operator]", cousin_toml)  # ...which is absent
 
-    def test_boot_degrades_by_name_never_silently(self):
-        from cousin_lib.boot import assemble
-        home = self._spawn()
-        packet = assemble("wren", home, generation=1)
-        # No operator means no calibration - a NAMED degradation in
-        # the packet header, not a silent gap and not a default human.
-        self.assertIn("calibration", packet["degraded_sections"])
-        self.assertIn("DEGRADED layers:", packet["text"])
-
 
 class TestChatSurface(NullOperatorCase):
     def test_reply_requires_an_explicit_recipient(self):

@@ -29,7 +29,7 @@ DEGRADED layers: task_packet
 
 | layer | where | built from | when it's empty |
 |---|---|---|---|
-| Framework Law | system prompt | `<root>/config/law.md`, the same for every cousin; seeded from `templates/law.md` on the [supervisor](../glossary.md#supervisor)'s first start | left out. On the boot-packet path it is a hard layer: `fit()` never cuts it, so a law too long for the total prints `LAW INCOMPLETE` in the packet (and a trace-ledger row) instead of arriving half read, and an empty one is **degraded** (`law`) |
+| Framework Law | system prompt | `<root>/config/law.md`, the same for every cousin; seeded from `templates/law.md` on the [supervisor](../glossary.md#supervisor)'s first start | left out. The system prompt is never cut, and `boot.fit()` treats the law as a hard layer it never cuts either |
 | Operator rules | system prompt | `<root>/shared/*.md`, the canonical tier only: entries with `kind: rule`, in full. Never pending proposals | left out, fine: a fresh install has no [shared tier](../glossary.md#shared-tier) |
 | Identity | system prompt | the authored parts of `CLAUDE.md` (the title line, `## Identity`, `## Voice` and what's below the template marker, minus the template's own text), then `<home>/self-portrait.md`, the committed portrait only (a candidate waiting for review doesn't count) | a fixed note that no identity is on disk and none should be invented, **degraded** (`identity`) |
 | Operator Calibration | digest | `memory/distilled/operator-calibration.md`, then the last 15 corrections from `data/corrections.jsonl`, newest first. The portrait's own calibration section is in the identity already | left out |
@@ -60,7 +60,7 @@ The system prompt is never cut. The digest has to fit in 8000 tokens, counted as
 | memories | 1000 | 4000 |
 | shared (the Shared Reference) | 400 | 1500 |
 
-First every layer is cut to its ceiling. The ceilings add up to more than the total, so if the digest is still too big, layers are cut to their floor one at a time in this order until it fits: memories, trace_summary, calibration, task_packet, active_state, shared. That is `boot.TRUNCATE_ORDER` (tool_surface, memories, trace_summary, calibration, task_packet, active_state, shared, self_portrait) without the layers the digest doesn't carry. A cut layer ends with `... (truncated, <layer>, budget hit)` and the marker counts inside the budget.
+First every layer is cut to its ceiling. The ceilings add up to more than the total, so if the digest is still too big, layers are cut to their floor one at a time in this order until it fits: memories, trace_summary, calibration, task_packet, active_state, shared. That is `boot.TRUNCATE_ORDER` (memories, trace_summary, calibration, task_packet, active_state, shared, self_portrait) without the layers the digest doesn't carry. A cut layer ends with `... (truncated, <layer>, budget hit)` and the marker counts inside the budget.
 
 Degraded is decided before any cutting, from each layer's own rule in the table, never by searching the text.
 

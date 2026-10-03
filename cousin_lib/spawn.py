@@ -9,7 +9,6 @@ import argparse
 import json
 import os
 import re
-import shlex
 import shutil
 import signal
 import subprocess
@@ -18,7 +17,6 @@ import tarfile
 import tempfile
 import time
 import tomllib
-import uuid
 from pathlib import Path
 
 from cousin_lib import agent_auth, memory
@@ -31,7 +29,6 @@ from cousin_lib.config import (
     CousinConfig,
     FrameworkConfig,
     MissingConfigError,
-    agent_config,
     expand_harness_path,
     harness_config,
 )
@@ -654,25 +651,6 @@ def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
             "left_in_place": left, **(skipped or {})}
 
 
-def _mint_session_id():
-    """Mint the new generation's session identity.
-
-    The id renders into a command string, so its charset ([a-z0-9-],
-    per the lifecycle spec) is a safety property - and the check lives
-    HERE, in the constructor, so it travels with the mint: a future
-    edit to the generation line faces the ValueError in the same
-    function rather than an assertion elsewhere that quietly stopped
-    matching (or vanished under -O). The format stays a real UUID
-    because agent harnesses that accept a session id typically
-    validate RFC4122; a bespoke constrained alphabet would satisfy the
-    charset and break the consumer."""
-    session_id = str(uuid.uuid4())
-    if not re.fullmatch(r"[a-z0-9-]+", session_id):
-        raise ValueError(
-            "minted session id violates its charset: %r" % session_id)
-    return session_id
-
-
 def _persist_runtime_line(home, key, value):
     """Write runtime.<key> into cousin.toml without disturbing anything
     else in the file: targeted line replace (function repl, so no
@@ -705,11 +683,6 @@ def _persist_runtime_line(home, key, value):
     tmp = path.with_suffix(".toml.tmp")
     tmp.write_text(new_text)
     os.replace(tmp, path)
-
-
-def _persist_session_id(home, session_id):
-    """The minted identity's write-back (see _mint_session_id)."""
-    _persist_runtime_line(home, "session_id", session_id)
 
 
 def read_runtime_value(home, key):
@@ -974,124 +947,12 @@ def persist_identity(home, key, value):
     return value
 
 
-def _resolve_root(home, root):
-    """The framework root a start needs for config/harness.toml: the
-    caller's, else FRAMEWORK_ROOT, else the home's grandparent (homes
-    live at <root>/cousins/<slug>)."""
-    if root is not None:
-        return Path(root)
-    env = os.environ.get("FRAMEWORK_ROOT")
-    if env:
-        return Path(env)
-    return Path(home).parent.parent
-
-
-def render_agent_cmd(agent_cmd, home, *, root=None):
-    """Render the {model} and {effort} placeholders of an agent command
-    for one cousin: cousin.toml [runtime], else config/harness.toml
-    [agent] default_model / default_effort. A placeholder with no value
-    in either file is a SpawnError naming both, never a guessed vendor
-    default. {session_id} is left for the spawn site (or flip) to mint.
-    Exposed so a flip can preflight the render before killing anything."""
-    root = _resolve_root(home, root)
-    config = CousinConfig.load(home)
-    try:
-        defaults = agent_config(root)
-    except MissingConfigError as err:
-        raise SpawnError(str(err))
-    values = {"model": config.model or defaults["default_model"],
-              "effort": config.effort or defaults["default_effort"]}
-    for key in _RUNTIME_KEYS:
-        placeholder = "{%s}" % key
-        if placeholder not in agent_cmd:
-            continue
-        if not values[key]:
-            raise SpawnError(
-                "the agent command carries %s but neither %s [runtime]"
-                " %s nor %s [agent] default_%s defines it; set one"
-                % (placeholder, Path(home) / "cousin.toml", key,
-                   root / "config" / "harness.toml", key))
-        agent_cmd = agent_cmd.replace(placeholder, values[key])
-    return agent_cmd
-
-
-# A clean stop (flip.close_session) ends the generation the way a flip
-# does and leaves the next generation's boot packet here. The next
-# start, whatever starts it, consumes it: a fresh session (never a
-# resume of the closed one) with the packet typed in once the agent is
-# up. A flip supersedes a pending packet with its own.
-PENDING_BOOT = "pending-boot.json"
-BOOT_SETTLE_SECONDS = 8
-
-
-def pending_boot_path(home):
-    return Path(home) / "data" / PENDING_BOOT
-
-
-def pending_boot(home):
-    """The pending packet's record ({generation, packet, written_at}),
-    or None when there is none or its packet file is gone."""
-    try:
-        data = json.loads(pending_boot_path(home).read_text())
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict) or not data.get("packet"):
-        return None
-    if not Path(data["packet"]).is_file():
-        return None
-    return data
-
-
-def _inject_pending_boot(home, config, *, tmux_bin, tmux_socket, settle):
-    """Type a pending packet into the just-started session and clear
-    it. Best-effort: a failure leaves the record for the next start and
-    never fails this one."""
-    pending = pending_boot(home)
-    if pending is None:
-        pending_boot_path(home).unlink(missing_ok=True)
-        return False
-    try:
-        text = Path(pending["packet"]).read_text()
-        from cousin_lib import delivery
-        time.sleep(settle)
-        item = delivery.Item(
-            thread_id=delivery.thread_id("system"), source="boot",
-            body="[cousin-start] the last session closed cleanly; boot packet"
-                 " follows. Do not announce the restart.\n" + text)
-        delivery.deliver(home, item, tmux_bin=tmux_bin, socket=tmux_socket)
-    except Exception:  # noqa: BLE001 - best-effort, see docstring
-        return False
-    pending_boot_path(home).unlink(missing_ok=True)
-    return True
-
-
-def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
-                 start_chat_server=None, root=None,
-                 record=True, note=None, boot_settle=BOOT_SETTLE_SECONDS):
-    """THE tmux-session-creation site - the only one in this codebase,
-    by spec. Any future respawn machinery calls this function.
-
-    agent_cmd is host configuration: what it means to 'run an agent'
-    (binary, flags, trust model) differs per install and is never
-    hardcoded here. Its {model} and {effort} placeholders render from
-    the cousin's [runtime], else the install's [agent] defaults
-    (render_agent_cmd); root locates config/harness.toml for those
-    defaults and falls back to FRAMEWORK_ROOT, then the home's
-    grandparent.
-
-    A successful start is recorded in the cousin's raw memory as an L1
-    event (framework:session) unless record is False - the flip records
-    its own, richer entry. note, when given, is appended to it.
-
-    A packet a clean stop left (pending_boot) is typed in after
-    boot_settle seconds; the caller is responsible for not resuming
-    the closed session.
-
-    On the runner lane (runner_lane) nothing here runs: the
-    cousin-supervisor is asked to start the cousin's runner, the one
-    launcher of a runner process, and agent_cmd, the tmux
-    arguments and start_chat_server are not used. No supervisor is
-    NoSupervisor; a refused start is a SpawnError with its reason.
+def start_cousin(home, *, root=None):
+    """Start a cousin: the cousin-supervisor is asked to start the
+    cousin's runner, the one launcher of a runner process. root is the
+    install whose supervisor holds the cousin, else the one the home
+    derives (_supervisor_root). No supervisor is NoSupervisor; a refused
+    start is a SpawnError with its reason.
 
     A cousin with no runner kind is refused with delivery.lane_refusal
     before anything runs: 2.0.0 has no legacy tmux lane."""
@@ -1099,105 +960,6 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
         return _start_runner(home, root)
     from cousin_lib import delivery
     raise SpawnError(delivery.lane_refusal(home))
-    config = CousinConfig.load(home)
-    agent_cmd = render_agent_cmd(agent_cmd, home, root=root)
-    # The auth mode's checks (key file, isolated harness config) run
-    # here so a refusal is this call's error, not a pane that closes;
-    # the launcher repeats them at exec time, where they bind.
-    launch_root = _resolve_root(home, root)
-    try:
-        agent_auth.preflight(home, launch_root)
-    except agent_auth.AuthError as err:
-        raise SpawnError("auth: %s" % err)
-    # The durable floor is a derived view of raw memory; the boot
-    # packet regenerates it, but only a flip assembles one. A plain
-    # start or a --resume at boot never did, so a cousin that was only
-    # ever resumed had no distilled views at all. Every
-    # start refreshes it. Best-effort: a failed distill never stops a
-    # start.
-    try:
-        from cousin_lib import distill
-        distill.distill(home)
-    except Exception:
-        pass
-    # The framework part of CLAUDE.md follows the template at every
-    # start and flip, before the agent reads it: otherwise a template
-    # change reaches only cousins spawned after it. The old file is
-    # kept in data/claude-md-backups/. Best-effort: a file that cannot
-    # be synced (no marker line) starts as it is.
-    try:
-        from cousin_lib import template_sync
-        template_sync.sync(home, launch_root, apply=True)
-    except Exception:
-        pass
-    # A {session_id} placeholder is rendered HERE, at the single
-    # spawn site, so a plain start (console, cousin-spawn --start) and
-    # a flip mint identity the same way. flip.py renders its own copy
-    # before calling in (it needs the id for the generation record),
-    # so by the time it arrives here the placeholder is already gone.
-    session_id = None
-    if "{session_id}" in agent_cmd:
-        session_id = _mint_session_id()
-        agent_cmd = agent_cmd.replace("{session_id}", session_id)
-    cmd = [tmux_bin]
-    if tmux_socket:
-        cmd += ["-S", tmux_socket]
-    cmd += [
-        "new-session", "-d", "-s", config.tmux_session,
-        "-c", str(home),
-        "-e", "COUSIN_HOME=%s" % home,
-        "/usr/bin/env", "COUSIN_HOME=%s" % home,
-    ] + agent_auth.launcher_argv(home, launch_root) + shlex.split(agent_cmd)
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
-                       check=False)
-    if r.returncode != 0:
-        raise SpawnError(
-            "tmux new-session failed (rc=%d): %s"
-            % (r.returncode, (r.stderr or "").strip()[:200])
-        )
-    if session_id is not None:
-        _persist_session_id(home, session_id)
-    if record:
-        text = "agent started"
-        if session_id is not None:
-            text += " on new session %s" % session_id[:8]
-        if note:
-            text += "; %s" % note
-        if pending_boot(home) is not None:
-            text += "; boot packet from the clean stop injected"
-        framework_event(home, "session", text)
-    if pending_boot_path(home).exists():
-        _inject_pending_boot(home, config, tmux_bin=tmux_bin,
-                             tmux_socket=tmux_socket, settle=boot_settle)
-
-
-def start_preflight(agent_cmd, *, tmux_bin="tmux", which=shutil.which):
-    """What a start needs from the host, checked with no side effects:
-    tmux (it hosts every agent session) and the agent command's
-    executable, resolved the way the session will resolve it. Returns
-    the failures as remediation lines; empty means go. The agent check
-    is best-effort by nature: only the first word is resolvable, and a
-    wrapper such as `env` passes it."""
-    failures = []
-    if which(tmux_bin) is None:
-        failures.append(
-            "tmux not found (%r on PATH): it hosts every cousin's agent"
-            " session; install it first (Debian/Ubuntu: sudo apt-get"
-            " install -y tmux)" % tmux_bin)
-    try:
-        argv = shlex.split(agent_cmd)
-    except ValueError as err:
-        failures.append("the agent command in config/agent-cmd does not"
-                        " parse: %s" % err)
-        return failures
-    head = argv[0] if argv else ""
-    if head and which(head) is None:
-        failures.append(
-            "agent command %r (config/agent-cmd) not found on PATH; install"
-            " the agent, or write its absolute path into config/agent-cmd"
-            " (services started by systemd do not see a login shell's"
-            " PATH)" % head)
-    return failures
 
 
 def _start_existing_runner(root, slug):
@@ -1218,7 +980,7 @@ def _start_existing_runner(root, slug):
         print("%s is already running (cousin-runner); nothing started" % slug)
         return 0
     try:
-        start_cousin(home, agent_cmd=None, root=root)
+        start_cousin(home, root=root)
     except SpawnError as err:
         print("cousin-spawn: start failed: %s" % err, file=sys.stderr)
         return 1
@@ -1434,7 +1196,7 @@ def spawn_main(argv=None):
     print("created %s at %s" % (out["slug"], out["home"]))
     if args.start:
         try:
-            start_cousin(out["home"], agent_cmd=None, root=root)
+            start_cousin(out["home"], root=root)
         except SpawnError as err:
             print("cousin-spawn: created but start failed: %s\n"
                   "the home is kept; fix the cause and start it with:"

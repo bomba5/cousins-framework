@@ -1,11 +1,10 @@
 """The tool-surface manifest.
 
 One line per console script (its name and the first line of its
-`--help`) written to <root>/data/tool-surface.md, which the boot packet
-quotes as its Tool Surface layer so a fresh generation knows its CLIs
-without re-discovering them. The script list is derived, never typed:
-from the installed package's entry points when it is installed, else
-from pyproject.toml in the checkout. A CLI cannot ship without a line
+`--help`) written to <root>/data/tool-surface.md, a list a cousin can
+read instead of re-discovering its CLIs. The script list is derived,
+never typed: from the installed package's entry points when it is
+installed, else from pyproject.toml in the checkout. A CLI cannot ship without a line
 here, and a line cannot name a CLI that does not exist.
 """
 import argparse

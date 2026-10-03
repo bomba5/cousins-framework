@@ -92,11 +92,13 @@ _PASS_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$")
 # ---- the cursor --------------------------------------------------------------
 
 def _key(month):
-    """Sort key of a cursor's file name. Daily files (`YYYY-MM-DD`) come
-    before the monthly archives (`YYYY-MM`) raw_fold folded them into,
-    which is the order `_files` walks them in. The length of the stem is
-    the only difference and `_STEM` has already refused anything else."""
-    return (1 if len(month) == 7 else 0, month)
+    """Sort key of a cursor's file name: the stem itself, which is
+    chronological. A monthly archive (`YYYY-MM`) holds the days raw_fold
+    folded out of that month and sorts before the month's remaining day
+    files (`YYYY-MM-DD`), and after every earlier month's. `_STEM` has
+    already refused anything else. Hot days first would strand the cursor:
+    once a walk ended in an archive, every new day file sorted behind it."""
+    return month
 
 
 def cursor(value, *, what="through"):
@@ -134,10 +136,9 @@ def _rel(home, path):
 
 
 def _files(home):
-    """The raw files a pass reads, in the order every other reader uses
-    (hot days first, then the monthly archives), minus the digests: a
-    digest summarises claims that already live in an archive, is not a
-    claim, and carries no id a claim could be named by.
+    """The raw files a pass reads, oldest first (`_key`), minus the
+    digests: a digest summarises claims that already live in an archive,
+    is not a claim, and carries no id a claim could be named by.
     [(stem, home-relative path, path)]"""
     from cousin_lib import memory_search
     out = []
@@ -145,7 +146,7 @@ def _files(home):
         if path.name.endswith("-digest.jsonl"):
             continue
         out.append((_stem(path), _rel(home, path), path))
-    return out
+    return sorted(out, key=lambda f: _key(f[0]))
 
 
 def _read_lines(path):
@@ -159,12 +160,17 @@ def _read_lines(path):
 
 
 def _index_of(files, month):
-    """Where in `files` a cursor's stem points: the file itself, else the
-    first file past it when it is gone (raw_fold folded the day it was in
-    into its month's archive), else len(files): the cursor is past the end
-    of the store."""
+    """Where in `files` a cursor's stem points: the file itself; else,
+    for a day raw_fold folded away, the start of its month's archive (it
+    sorts before the day, and where the day's lines sit inside it is not
+    known: re-dreaming the month costs tokens, skipping it would lose the
+    day's lines past the cursor); else the first file past it; else
+    len(files): the cursor is past the end of the store."""
     for i, (stem, _rel, _path) in enumerate(files):
         if stem == month:
+            return i
+    for i, (stem, _rel, _path) in enumerate(files):
+        if len(month) == 10 and stem == month[:7]:
             return i
     wanted = _key(month)
     for i, (stem, _rel, _path) in enumerate(files):
@@ -364,6 +370,28 @@ def abandon(home, pass_id, reason):
                        "reason": reason})
         _save(home, led)
     return {"abandoned": True, "reason": reason}
+
+
+def release_stale(home, max_age):
+    """Abandon an attempt held longer than `max_age` seconds: its pass
+    died without abandoning (killed at the harness's timeout, a loops
+    restart, a reboot), and every later slice_for and begin would refuse
+    behind it. What it changed stays, on its journal. None when nothing
+    was held, or what was held is not stale yet; else the released
+    attempt's pass id."""
+    with memory_lock.write_lock(home):
+        led = _load(home)
+        attempt = led.get("attempt") or {}
+        if not attempt.get("pass_id"):
+            return None
+        if time.time() - float(attempt.get("started") or 0.0) <= max_age:
+            return None
+        led["attempt"] = None
+        _history(led, {"pass_id": attempt["pass_id"], "started": attempt.get("started"),
+                       "ended": time.time(), "result": "abandoned",
+                       "reason": "lost: held past %ds with no end" % max_age})
+        _save(home, led)
+    return attempt["pass_id"]
 
 
 def _attempt(home, pass_id):

@@ -146,7 +146,20 @@ def passes(home, *, limit=50):
         if "result" not in rec:
             late = time.time() - rec.get("started", 0) > PASS_TIMEOUT_S + 60
             rec["result"] = "lost" if late else "running"
+            if late:
+                # no end line: what it changed is on its journal only
+                rec["changes"] = _journaled(home, rec["pass_id"])
     return out[:limit]
+
+
+def _journaled(home, pass_id):
+    """The change records a lost pass journaled (dream_memory.journal),
+    its own undo notes left out."""
+    try:
+        records = _memory_ops().journal(home, pass_id)
+    except Exception:  # noqa: BLE001 - a view never fails on a lost pass
+        return []
+    return [r for r in records if r.get("op") != "undone"]
 
 
 def last_start(home):
@@ -207,6 +220,11 @@ def run_pass(home, root, *, trigger="manual", model=None, budget=BUDGET_TOKENS,
     changes, end = [], dict(start, event="end")
     try:
         ops = ops or _memory_ops()
+        # a pass killed mid-run never gave its attempt back; past the age
+        # passes() calls it lost, the next pass takes it back
+        stale = getattr(ops, "release_stale", None)
+        if stale is not None:
+            end["released"] = stale(home, PASS_TIMEOUT_S + 60)
         piece = ops.slice_for(home, chars=SLICE_CHARS)
         end["through_before"] = getattr(piece, "through", None)
         # what a bounded slice saw and left out (topics seen / left, new
@@ -291,11 +309,14 @@ def undo(home, pass_id, *, by=None, ops=None):
     found = next((p for p in passes(home, limit=10000) if p["pass_id"] == pass_id), None)
     if found is None:
         raise ValueError("no dreaming pass %s" % pass_id)
-    if not found.get("changes"):
+    if found.get("result") == "running":
+        raise ValueError("pass %s is still running" % pass_id)
+    changes = found.get("changes")
+    if not changes:
         raise ValueError("pass %s changed nothing" % pass_id)
     if found.get("undone"):
         raise ValueError("pass %s is already undone" % pass_id)
-    reverted = ops.undo(home, pass_id, found["changes"])
+    reverted = ops.undo(home, pass_id, changes)
     _write(home, {"pass_id": pass_id, "event": "undo", "undone": time.time(),
                   "undone_by": by or "", "reverted": reverted})
     return reverted

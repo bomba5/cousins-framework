@@ -197,6 +197,26 @@ class TestTheCursorIsAStructuralRefusal(DreamCase):
                                                   "lines": 7})
 
 
+    def test_new_days_are_dreamed_after_a_walk_that_ended_in_an_archive(self):
+        archive = memory.raw_dir(self.home) / "archive"
+        archive.mkdir(parents=True)
+        with gzip.open(archive / "2026-08.jsonl.gz", "wt") as fh:
+            fh.write(json.dumps({"timestamp": "2026-08-20T10:00:00+00:00",
+                                 "topic": "kestrel", "content": "archived claim",
+                                 "truth_level": "L3_COUSIN_CONCLUSION",
+                                 "source": "remember"}) + "\n")
+        self.raw("2026-10-01", ("kestrel", "a day claim"))
+        piece = self.dream()
+        # oldest first: the archived month, then the day
+        self.assertLess(piece.text.index("archived claim"), piece.text.index("a day claim"))
+        self.assertEqual(piece.through, {"month": "2026-10-01", "lines": 1})
+        dream_memory.commit(self.home, self.pass_id, piece.through)
+        self.raw("2026-10-03", ("kestrel", "written after the pass"))
+        again = dream_memory.slice_for(self.home, chars=40000)
+        self.assertFalse(again.empty)
+        self.assertIn("written after the pass", again.text)
+
+
 class TestTheAttemptToken(DreamCase):
     def test_begin_without_a_slice_refuses(self):
         self.raw("2026-10-01", ("kestrel", "one"))
@@ -225,6 +245,21 @@ class TestTheAttemptToken(DreamCase):
         self.assertEqual(self.run_op("retire", {"entry_id": eid, "why": "dup"},
                                      pass_id="20261002T210000-def456")["op"],
                          "retire")
+
+    def test_a_stale_attempt_is_released_and_a_live_one_kept(self):
+        (eid,) = self.raw("2026-10-01", ("kestrel", "one"))
+        self.dream()
+        self.run_op("retire", {"entry_id": eid, "why": "dup"})
+        # the pass dies here: no commit, no abandon
+        self.assertIsNone(dream_memory.release_stale(self.home, 3600))
+        with self.assertRaisesRegex(ValueError, "one pass at a time"):
+            dream_memory.slice_for(self.home, chars=40000)
+        self.assertEqual(dream_memory.release_stale(self.home, -1), self.pass_id)
+        self.assertIsNone(dream_memory.committed(self.home))   # the cursor stays
+        dream_memory.slice_for(self.home, chars=40000)          # the next pass runs
+        # what the dead pass changed is still on its journal
+        self.assertEqual([r["op"] for r in dream_memory.journal(self.home, self.pass_id)],
+                         ["retire"])
 
     def test_an_operation_after_a_commit_writes_nothing(self):
         self.raw("2026-10-01", ("kestrel", "one"))

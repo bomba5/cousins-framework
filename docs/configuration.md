@@ -944,6 +944,28 @@ is matched against, see [chat](chat.md)) and `policy.toml` (below). A
 `cousin-migrate` reads it once, to move a 1.x cousin's key into an
 `anthropic-key` account, and nothing else reads it.
 
+### [agent] dreaming
+
+A background pass that consolidates the cousin's memory, off unless you turn
+it on. What a pass does, its log and how to undo one are in
+[memory](memory.md#dreaming).
+
+| key | default | meaning |
+|---|---|---|
+| `dreaming` | `"off"` | `off`, `nightly` (once a day at `dreaming_at`) or `rollover` (after each new generation). Any other value, or a `cousin.toml` that will not parse, reads as `off`: a pass never starts on a guess. |
+| `dreaming_at` | `"03:00"` | the host time of the nightly pass, `"HH:MM"` (24 h). A value that is not a time reads as `03:00`; the console refuses it. |
+
+Both keys apply on every lane, are set on the console's agent panel, and
+apply without a restart: the loops daemon reads them at every tick (30
+seconds) and runs due passes one at a time, each in a child process of its
+own, on the cousin's account. A worker (`type = "worker"`) never dreams.
+`nightly` is due at or after `dreaming_at` when no pass has started that
+day; any pass counts, one run from the console and one that failed
+included. `rollover` is due once after each generation bump: the bump
+writes `data/dream.request`, and the next tick runs a pass when that
+request is newer than the last pass. The console's **dreaming** view runs a
+pass on demand whatever the setting.
+
 ### [agent.sessions]
 
 Side sessions: a [thread](glossary.md#thread) kind that gets a session of its own, beside the

@@ -517,7 +517,10 @@ alone decides where the next slice starts. It ends with one of these results:
 - `no_change`: nothing to change, or nothing new since the last pass.
 - `budget`: it ran out of tokens and was stopped. What it had already
   changed stays (undo removes it), and the next pass is given the same
-  slice again.
+  slice again. A pass that ended on its own is not stopped after the
+  fact: the run's total (thinking included) is only known at its end, so
+  such a pass can finish a little over the budget, commits, and its
+  `tokens` says so.
 - `error`: it failed, a pass that could not start included. The next
   pass is given the same slice again. A failed nightly pass is not
   retried until the next night.

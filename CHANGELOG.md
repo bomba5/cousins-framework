@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.10.1 - 2026-10-03
+
+### Fixed
+
+- **A dreaming pass that ended on its own commits, even past its budget.**
+  A streamed message carries its response's usage from before the output
+  was written, so the in-flight check saw thinking tokens late, and only
+  the run's final total crossed the budget. The pass had read its whole
+  slice and made its changes, yet was recorded `budget` and abandoned,
+  and the next pass was handed the same slice and paid for it again (a
+  real pass on a dense home: 67k, then 41k for nothing). `budget` now
+  means the budget interrupted the pass; `tokens` still says what a pass
+  spent.
+
 ## 3.10.0 - 2026-10-03
 
 ### Changed

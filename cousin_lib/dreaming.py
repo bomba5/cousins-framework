@@ -267,7 +267,9 @@ def run_pass(home, root, *, trigger="manual", model=None, budget=BUDGET_TOKENS,
 
 async def _session(env, model, prompt, server, budget, client_factory):
     """(tokens, summary, over_budget). tools=[] and strict-mcp-config: the
-    dream server's tools are the only ones the session has."""
+    dream server's tools are the only ones the session has. over_budget
+    is True only when the budget interrupted the session; the budget is
+    the stop for a runaway pass, and `tokens` says what a pass spent."""
     from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, \
         ResultMessage, TextBlock
     cwd = tempfile.mkdtemp(prefix="cousin-dream-")
@@ -297,9 +299,14 @@ async def _session(env, model, prompt, server, budget, client_factory):
                     over = True
                     await client.interrupt()
             elif isinstance(msg, ResultMessage):
+                # the run's real total: a streamed message carries its
+                # response's usage from before the output (thinking
+                # included) was written, so the check above sees output
+                # late. Over by the total alone, the session still ended
+                # on its own: it read its whole slice, and abandoning it
+                # would hand the next pass the same slice to pay for again
                 total = _weighted(getattr(msg, "usage", None))
                 tokens = max(tokens, total)
-                over = over or tokens > budget
     finally:
         await client.disconnect()
     summary = " ".join(" ".join(texts[-1:]).split())[:500] if texts else ""

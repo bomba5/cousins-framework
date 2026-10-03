@@ -70,8 +70,9 @@ class FakeClient:
     """A session that calls the dream server's tools through MCP, as the
     CLI would, then answers with the given usage."""
 
-    def __init__(self, options, *, calls=(), usage=500, fail=None):
+    def __init__(self, options, *, calls=(), usage=500, total=None, fail=None):
         self.options, self.calls, self.usage, self.fail = options, calls, usage, fail
+        self.total = usage if total is None else total
         self.interrupted = False
 
     async def connect(self):
@@ -95,7 +96,7 @@ class FakeClient:
         yield AssistantMessage(content=[TextBlock("done")], model="sonnet",
                                usage=_usage(self.usage), message_id="m1")
         yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
-                            num_turns=1, session_id="s", usage=_usage(self.usage))
+                            num_turns=1, session_id="s", usage=_usage(self.total))
 
     async def interrupt(self):
         self.interrupted = True
@@ -217,6 +218,16 @@ class TestPass(DreamCase):
         self.assertTrue(client.interrupted)
         self.assertIn(("abandon", "budget"), ops.calls)
         self.assertNotIn("commit", [c[0] for c in ops.calls])
+
+    def test_a_session_that_ended_on_its_own_commits_over_budget(self):
+        # streamed messages under the budget, the run's total over it: the
+        # pass read its whole slice, so it commits and says what it spent
+        ops = FakeOps()
+        end, (client,) = self.run_pass(ops, total=dreaming.BUDGET_TOKENS + 5000)
+        self.assertFalse(client.interrupted)
+        self.assertEqual(end["result"], "no_change")
+        self.assertEqual(end["tokens"], dreaming.BUDGET_TOKENS + 5000)
+        self.assertIn(("commit", "e42"), ops.calls)
 
     def test_cache_reads_count_at_their_billed_weight(self):
         self.assertEqual(dreaming._weighted({"input_tokens": 100, "output_tokens": 50,

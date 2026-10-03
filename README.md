@@ -86,6 +86,19 @@ machine (in the container, on Docker). That is the trade this framework asks
 you to make. If you are not comfortable with an autonomous agent holding a
 shell on your box, continuously, this is not for you.
 
+Isolation is policy, not permission. Every cousin runs as the same OS user,
+so the operating system does not keep one cousin out of another's files.
+What separates them is the framework's policy: on the `sdk` lane the tool
+gate refuses a subagent's writes to the law, the portraits, canonical shared
+memory, its own cousin's configuration and other cousins' homes (in a Bash
+command it catches what it can parse), and reads always pass. The `opencode`
+and `tmux` lanes have no gate and say so at every start. Homes are created
+0700 and the supervisor runs everything under umask 077, which keeps other
+users on the host and other uids out, not one cousin from another: a
+cousin's own shell can still read another cousin's files. See
+[the perimeter](docs/memory.md#the-perimeter) and
+[`cousin-doctor homes`](docs/commands.md#maintenance).
+
 ## Claude logins and Anthropic's terms
 
 A cousin can run on a Claude subscription login, but Anthropic's terms do not

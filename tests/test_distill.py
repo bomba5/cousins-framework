@@ -106,6 +106,34 @@ class TestClassify(DistillCase):
             distill.classify({"topic": "the api key rotation"}),
             "project-facts.md")
 
+    def test_a_standing_instruction_is_an_operator_entry_with_a_preferences_word(self):
+        cases = (
+            ("rule: no em dashes", "L0_OPERATOR", True),
+            ("feedback: short statuses", "operator-stated", True),
+            ("tone with Priya", "L0_OPERATOR", True),
+            ("rulebook for the deploy", "L0_OPERATOR", False),   # whole words only
+            ("deploy window", "L0_OPERATOR", False),             # a fact, not a rule
+            ("feedback: short statuses", "L3_COUSIN_CONCLUSION", False),
+        )
+        for topic, level, expected in cases:
+            with self.subTest(topic=topic, level=level):
+                self.assertIs(distill.standing_instruction(
+                    {"topic": topic, "content": "x", "truth_level": level}), expected)
+
+    def test_operator_topics_are_newest_first_and_read_only(self):
+        _raw(self.home, "deploy window", "Tuesdays", timestamp="2026-09-01T10:00:00+00:00",
+             truth_level="L0_OPERATOR")
+        _raw(self.home, "rule: no em dashes", "ASCII hyphens only",
+             timestamp="2026-09-02T10:00:00+00:00", truth_level="L0_OPERATOR")
+        _raw(self.home, "retention window", "thirty days", timestamp="2026-09-03T10:00:00+00:00")
+        before = {p: p.read_text() for p in memory.distilled_dir(self.home).iterdir()}
+        topics = distill.operator_topics(self.home)
+        self.assertEqual([(t["topic"], t["rule"]) for t in topics],
+                         [("rule: no em dashes", True), ("deploy window", False)])
+        self.assertEqual(topics[0]["entry"]["content"], "ASCII hyphens only")
+        self.assertEqual({p: p.read_text() for p in memory.distilled_dir(self.home).iterdir()},
+                         before)
+
 
 class TestDistill(DistillCase):
     def test_newest_entry_per_topic_wins_and_history_is_counted(self):

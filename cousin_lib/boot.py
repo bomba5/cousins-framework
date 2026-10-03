@@ -48,7 +48,9 @@ LAYER_BUDGETS = {
     # index of the rest of the shared tier.
     "shared": (400 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
     "self_portrait": (800 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
-    "calibration": (300 * CHARS_PER_TOKEN, 800 * CHARS_PER_TOKEN),
+    # Whole entries, newest first (the runner's calibration packer): the
+    # floor is the old ceiling, so an overflow pass keeps what it used to.
+    "calibration": (800 * CHARS_PER_TOKEN, 2000 * CHARS_PER_TOKEN),
     "active_state": (500 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
     "task_packet": (500 * CHARS_PER_TOKEN, 2000 * CHARS_PER_TOKEN),
     "trace_summary": (500 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
@@ -167,13 +169,27 @@ def generation_started(home):
     return None
 
 
-def fit(sections, budgets, order, total_max):
+def _cut(cutters, name, text, max_chars, label):
+    """`text` cut to max_chars: by the layer's own cutter when it has one
+    (whole entries, never a slice), else by _truncate. A cutter that
+    returns more than it was given is sliced after all: the overflow loop
+    must see the layer at its budget or it picks it again, forever."""
+    cutter = (cutters or {}).get(name)
+    if cutter is None:
+        return _truncate(text, max_chars, label)
+    out = cutter(max_chars)
+    return out if len(out) <= max_chars else _truncate(out, max_chars, label)
+
+
+def fit(sections, budgets, order, total_max, cutters=None):
     """The budget engine. Every layer `budgets` names is cut to its
     maximum; then victims in `order`, first to last, are cut to their
     minimum, one per pass, until the total fits or every victim is at
     its minimum. Pure: returns a new dict and never mutates `sections`;
     a layer `budgets` does not name is never touched (the runner's law).
-    A layer in `HARD_LAYERS` is never cut.
+    A layer in `HARD_LAYERS` is never cut. `cutters` maps a layer to a
+    function of a character budget that rebuilds it within it (the
+    calibration layer drops whole entries); any other layer is sliced.
     The module docstring's rules hold here; the runner's state digest
     calls this with the numbers and order above."""
     out = dict(sections)
@@ -181,14 +197,14 @@ def fit(sections, budgets, order, total_max):
         if name in HARD_LAYERS:
             continue
         if name in out and len(out[name]) > max_chars:
-            out[name] = _truncate(out[name], max_chars, name)
+            out[name] = _cut(cutters, name, out[name], max_chars, name)
     while sum(len(v) for v in out.values()) > total_max:
         for victim in order:
             if victim not in out or victim not in budgets:
                 continue
             if len(out[victim]) > budgets[victim][0]:
-                out[victim] = _truncate(out[victim], budgets[victim][0],
-                                        victim + " (overflow)")
+                out[victim] = _cut(cutters, victim, out[victim], budgets[victim][0],
+                                   victim + " (overflow)")
                 break
         else:
             break  # everything at minimum; cannot shrink further
@@ -355,8 +371,10 @@ def _memories(home, max_chars):
                     entry = json.loads(line)
                 except ValueError:
                     continue
+                # a standing instruction is in the system prompt, whole
                 if not isinstance(entry, dict) or memory.view_noise(entry) \
-                        or memory.entry_id(entry) in hidden:
+                        or memory.entry_id(entry) in hidden \
+                        or distill.standing_instruction(entry):
                     continue
                 lines.append("- [%s] %s"
                              % (entry.get("topic", "?"),

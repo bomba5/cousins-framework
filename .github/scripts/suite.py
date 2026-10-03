@@ -253,6 +253,9 @@ def verify(records, count):
         problems.append("shard records %s, expected 1..%d once each" % (got, count))
     if any(r.get("of") != count for r in records):
         problems.append("a record was cut for another shard count")
+    pythons = sorted({str(r.get("python")) for r in records})
+    if len(pythons) > 1:
+        problems.append("the records come from more than one Python (%s)" % ", ".join(pythons))
     discovered = {tuple(r.get("discovered") or ()) for r in records}
     if len(discovered) > 1:
         problems.append("the shards discovered different modules")

@@ -205,7 +205,7 @@ class TestStore(_RootCase):
             self.assertEqual(health.read(self.root), {})
         health.record(self.root, [("tick", True, None)], now=5)
         self.assertEqual(json.loads(path.read_text())["tick"]["state"], "ok")
-        self.assertFalse(path.with_name("health.json.tmp").exists())
+        self.assertEqual(list(path.parent.glob("health.json*.tmp")), [])
 
     def test_a_component_not_seen_for_a_week_is_pruned(self):
         health.record(self.root, [("loop:wren|gone", False, "x"), ("tick", True, None)], now=0)

@@ -15,8 +15,9 @@ the lock; an account on the other lane, an opencode cousin with no
 `[agent] model` or one whose config names the subscription bridge; a
 malformed policy.toml, an MCP registry that does not parse or names a
 command with no in-process handler, an [agent] effort outside the
-levels), and a tmux runner that gave up on its pane (five failed starts
-in a row or too many pane losses; its reason in
+levels, a harness that is not config/harness.lock.toml's under
+[agent] strict_harness = true), and a tmux runner that gave up on its
+pane (five failed starts in a row or too many pane losses; its reason in
 data/run/tmux-giving-up.json): the supervisor leaves 2 down, never
 restarted; 3 when the runner gave up
 (its worker ended, e.g. it could not connect, or `--once` found it
@@ -37,6 +38,12 @@ login (an exit would restart-loop a cousin nobody can log in).
 `--check-auth [--validate]` runs before the lock, the runner and the
 environment export: a check works beside a live cousin and never
 becomes one.
+
+Before the runner starts, what its kind runs (the Agent SDK and the CLI
+it bundles, `claude` on PATH, the opencode binary) is compared once with
+config/harness.lock.toml (harness_at_start): a `harness` event right
+after the head says the versions, and a mismatch is a warning naming
+both, which [agent] strict_harness = true turns into exit 2.
 """
 import argparse
 import contextlib
@@ -123,6 +130,62 @@ def commit_attribution_of(agent, root):
         raise RunnerError(str(err))
 
 
+def strict_harness_of(agent):
+    """[agent] strict_harness, checked like reply_gate: a value that is
+    not true or false is configuration (RunnerError, exit 2)."""
+    strict = agent.get("strict_harness", False)
+    if not isinstance(strict, bool):
+        raise RunnerError("cousin.toml [agent] strict_harness must be true or false, got %r"
+                          % strict)
+    return strict
+
+
+def harness_at_start(home, kind):
+    """What this runner kind runs against config/harness.lock.toml
+    (cousin_lib.harness_lock.check), once, before the runner starts: the
+    result for the `harness` event, or None for a kind with no harness.
+    The result is also the cousin's `harness:<slug>` row in the health
+    record. A mismatch (or a version that cannot be read) is a warning
+    on stderr and the runner starts; with [agent] strict_harness = true
+    it is a RunnerError (exit 2) naming the installed and the locked
+    version. A check that cannot run is a mismatch, never a crash."""
+    from cousin_lib import harness_lock
+    agent = _agent_table(home)
+    strict = strict_harness_of(agent)
+    try:
+        result = harness_lock.check(kind, agent)
+    except Exception as err:  # noqa: BLE001 - the check never fails a start by itself
+        problem = "harness check failed: %s: %s" % (type(err).__name__, err)
+        result = {"kind": kind, "ok": False, "locked": {}, "installed": {},
+                  "problems": [problem], "message": problem}
+    if result is None:
+        return None
+    _record_harness_health(home, result)
+    if not result["ok"]:
+        if strict:
+            raise RunnerError("the harness is not the locked one (%s): %s;"
+                              " [agent] strict_harness = true refuses it"
+                              % (harness_lock.LOCK_PATH.name, result["message"]))
+        print("cousin-runner: warning: the harness is not the locked one (%s): %s"
+              % (harness_lock.LOCK_PATH.name, result["message"]), file=sys.stderr)
+    return result
+
+
+def _record_harness_health(home, result):
+    """The check as one component of the health record (cousin_lib.health),
+    `harness:<slug>`; a record that cannot be written says nothing."""
+    try:
+        from cousin_lib import health
+        try:
+            slug = tomllib.loads((Path(home) / "cousin.toml").read_text())["cousin"]["slug"]
+        except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+            slug = Path(home).name
+        health.record(root_for(home), [("harness:%s" % slug, result["ok"],
+                                        None if result["ok"] else result["message"])])
+    except Exception:  # noqa: BLE001 - the record is a view, never a reason to stop
+        pass
+
+
 def account_for(home):
     """The account this cousin runs on, checked before anything starts: an
     unknown account, a secret file that is open to group or others, not
@@ -197,6 +260,7 @@ def runner_for(home, *, kind=None):
     if not isinstance(agent.get("reply_gate", True), bool):
         raise RunnerError("cousin.toml [agent] reply_gate must be true or false, got %r"
                           % agent["reply_gate"])
+    strict_harness_of(agent)
     from cousin_lib.runner import sessions
     from cousin_lib.runner.policy import Policy
     policy = Policy.load(home)
@@ -463,7 +527,13 @@ def runner_main(argv=None):
                 return 2
             for name in AUTH_ENV:
                 os.environ.pop(name, None)
-            return _serve(runner, args.once)
+            try:
+                harness = harness_at_start(
+                    args.home, args.runner or _agent_table(args.home).get("runner"))
+            except RunnerError as err:
+                print("cousin-runner: %s" % err, file=sys.stderr)
+                return 2
+            return _serve(runner, args.once, harness=harness)
     except LockHeld as err:
         print("cousin-runner: %s" % err, file=sys.stderr)
         return LOCK_HELD_EXIT
@@ -549,7 +619,7 @@ def _name_removed_keys(runner):
           file=sys.stderr)
 
 
-def _serve(runner, once):
+def _serve(runner, once, harness=None):
     stop = threading.Event()
 
     def _signal(signum, frame):
@@ -595,6 +665,11 @@ def _serve(runner, once):
                                         "unsupported": list(runner.unsupported()),
                                         "commit_attribution": commit_attribution_of(
                                             _agent_table(runner.home), runner.root)})
+        if harness is not None:
+            # the versions this runner runs (harness_at_start), right after
+            # the head: a mismatch is a warning with both versions
+            runner.stream.append("harness", dict(harness, level="info" if harness["ok"]
+                                                 else "warning"))
         _name_removed_keys(runner)
         runner.start()
         policy = getattr(runner, "policy", None)

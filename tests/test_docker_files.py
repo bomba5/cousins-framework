@@ -53,7 +53,8 @@ _PINNED_BASE = re.compile(r"^python:3\.13-slim@sha256:[0-9a-f]{64}$")
 # then the binary it copies). The binary's sha256 is the live install's
 # pinned copy's; the tarball's was computed once from the registry's file,
 # whose sha512 matched the registry's dist.integrity.
-_OPENCODE_VERSION = "1.18.31"
+_OPENCODE_VERSION = tomllib.loads((_REPO / "config" / "harness.lock.toml").read_text())[
+    "opencode"]["version"]          # the harness lock is the one source
 _OPENCODE_TGZ = ("https://registry.npmjs.org/opencode-linux-x64/-/"
                  "opencode-linux-x64-%s.tgz" % _OPENCODE_VERSION)
 _OPENCODE_TGZ_SHA256 = "6d89da252a8b030d923e728396dc34465cf6095101b78222b0ee337b68140dea"
@@ -637,6 +638,7 @@ class TestDockerignore(unittest.TestCase):
                      "cousin_lib/spawn.py", "cousin_lib/console_static/index.html",
                      "templates/cousin-CLAUDE.template.md", "templates/hive-node/README.md",
                      "hooks/pre_compact.sh", "config/harness.toml.example",
+                     "config/harness.lock.toml",
                      "config/mcp-registry.toml.example", "docker/entrypoint.sh",
                      "docker/requirements.txt"):
             self.assertFalse(_dockerignored(path, self.patterns), path)
@@ -741,7 +743,9 @@ class TestImage(unittest.TestCase):
         for present in ("cousin_lib", "templates", "hooks", "pyproject.toml", "LICENSE"):
             self.assertIn(present, top)
         self.assertTrue(ast.literal_eval(lines[1]))
-        self.assertTrue(all(n.endswith(".example") for n in ast.literal_eval(lines[1])), lines[1])
+        self.assertTrue(all(n.endswith(".example") or n == "harness.lock.toml"
+                            for n in ast.literal_eval(lines[1])), lines[1])
+        self.assertIn("harness.lock.toml", ast.literal_eval(lines[1]))
         self.assertEqual(ast.literal_eval(lines[2]), ["entrypoint.sh", "requirements.txt"])
 
     def test_the_entrypoint_runs_under_the_image_shell(self):

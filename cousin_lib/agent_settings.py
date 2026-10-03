@@ -79,6 +79,11 @@ SCHEMA = {
     "commit_attribution": {"type": "bool", "lanes": ALL, "default": None,
                            "hint": "the harness's own attribution on commits and PRs;"
                                    " unset is the install default"},
+    # runner/main.harness_at_start: a harness that is not
+    # config/harness.lock.toml's refuses the start instead of warning
+    "strict_harness": {"type": "bool", "lanes": ("sdk", "opencode", "tmux"), "default": False,
+                       "hint": "refuse to start on a harness version that is not the locked"
+                               " one (a warning otherwise)"},
     # dreaming.py: a background memory pass; the pass runs in a process of
     # its own on the cousin's account, so every runner kind can have it
     "dreaming": {"type": "choice", "lanes": ALL, "default": "off", "restart": False,

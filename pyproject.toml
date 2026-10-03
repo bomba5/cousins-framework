@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cousins-framework"
-version = "3.15.0"
+version = "3.16.0"
 description = "Persistent, co-located AI agents: identity, memory, lifecycle, inter-agent chat"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -58,7 +58,9 @@ cousin-migrate = "cousin_lib.migrate:migrate_main"
 # (registry, schemas, argv assembly, provisioning, approval) is stdlib.
 mcp = ["mcp>=1.2,<2"]
 # The runner's SDK lane. Imported lazily in cousin_lib/runner/sdk.py only.
-sdk = ["claude-agent-sdk>=0.2.159,<0.3"]
+# Exact: the version config/harness.lock.toml names, the one tested (an
+# application, not a library; tests/test_harness_lock.py keeps them equal).
+sdk = ["claude-agent-sdk==0.2.163"]
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]

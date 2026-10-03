@@ -109,7 +109,7 @@ class Describe(_Case):
         self.assertIn("tmux", d["kinds"])
         self.assertEqual(set(d["settings"]),
                          {"runner", "account", "auto_start", "model", "effort", "env_allow",
-                          "commit_attribution", "dreaming", "dreaming_at"})
+                          "commit_attribution", "strict_harness", "dreaming", "dreaming_at"})
         self.assertEqual(d["settings"]["env_allow"]["value"], ["LANG"])
         self.assertEqual(d["settings"]["effort"]["value"], "high")
         self.assertEqual(d["settings"]["account"]["choices"], ["host", "fleet"])   # no key account
@@ -322,6 +322,19 @@ class CheckNew(_Case):
         self.assertIn("model", cm.exception.errors)
         agent_settings.check_new(self.root, {"runner": "opencode", "account": "oc",
                                              "model": "openai/gpt-5"})
+
+    def test_strict_harness_is_a_bool_on_every_lane_that_runs_a_harness(self):
+        for kind in ("sdk", "opencode", "tmux"):
+            self.assertIn("strict_harness", agent_settings.lane_keys(kind), kind)
+        self.assertNotIn("strict_harness", agent_settings.lane_keys("fake"))
+        home = self.cousin('runner = "sdk"\n')
+        d = agent_settings.describe(home, self.root)["settings"]["strict_harness"]
+        self.assertEqual((d["value"], d["set"]), (False, False))
+        self.assertEqual(agent_settings.validate(home, self.root, {"strict_harness": True}),
+                         {"strict_harness": True})
+        with self.assertRaises(agent_settings.SettingsError) as ctx:
+            agent_settings.validate(home, self.root, {"strict_harness": "true"})
+        self.assertIn("strict_harness", ctx.exception.errors)
 
     def test_lane_keys_follow_the_kinds(self):
         self.assertIn("effort", agent_settings.lane_keys("sdk"))

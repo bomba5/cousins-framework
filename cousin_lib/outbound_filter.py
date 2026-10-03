@@ -14,6 +14,7 @@ and because noise buries real hits.
 import json
 import os
 import re
+import tomllib
 from pathlib import Path
 
 
@@ -79,3 +80,39 @@ class OutboundPolicy:
         hits = self.scan(text, surface=surface)
         if hits:
             raise FilterBlocked(hits, context=context)
+
+
+def private_cousins(framework_root):
+    """{slug: display name} for each cousin law 11 protects: its
+    cousin.toml says `[memory] scope = "private"` in so many words. An
+    unset scope is private for nomination (plan_bulk_propose excludes
+    it) but does not make a private cousin: which cousins the operator
+    keeps out of other cousins' reach is a choice the operator writes
+    down. A cousin.toml that does not parse is skipped."""
+    base = Path(framework_root) / "cousins"
+    found = {}
+    if not base.is_dir():
+        return found
+    for entry in sorted(base.iterdir()):
+        try:
+            data = tomllib.loads((entry / "cousin.toml").read_text())
+        except (OSError, ValueError):
+            continue
+        cousin = data.get("cousin") or {}
+        slug = cousin.get("slug")
+        if not isinstance(slug, str) or not slug:
+            continue
+        if (data.get("memory") or {}).get("scope") == "private":
+            found[slug] = str(cousin.get("name") or slug.capitalize())
+    return found
+
+
+def law11_names(framework_root):
+    """Every name law 11 keeps out of text other cousins read: each
+    private cousin's slug and display name (private_cousins), and the
+    slugs config/outbound-filter.json lists as protected. Works with no
+    policy file: the protected set comes from the cousin configs."""
+    names = set(OutboundPolicy.load(framework_root).protected)
+    for slug, name in private_cousins(framework_root).items():
+        names.update((slug, name))
+    return {n for n in names if isinstance(n, str) and n.strip()}

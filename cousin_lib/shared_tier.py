@@ -24,6 +24,30 @@ class PromoteRefused(Exception):
     """Promotion cannot proceed; the message says why and how to fix."""
 
 
+class ProposeRefused(Exception):
+    """A proposal a rule refuses (law 11). The message names the rule
+    and never the protected name: the caller may carry it on into text
+    other cousins read."""
+
+
+class NameRefused(ValueError):
+    """A slug or file name shaped like a path: it would leave shared/
+    (a "../" slug escapes proposed/, a "../" file reads another home)."""
+
+
+def _bare(value, what):
+    """Refuse a slug or file name that is not one bare entry name: no
+    "/" or "\\", no leading "." (so no "..", no dotfile), not empty. The
+    same shape jobs.record_job_result refuses for a job owner."""
+    text = value if isinstance(value, str) else ""
+    if not text or "/" in text or "\\" in text or "\0" in text \
+            or text.startswith("."):
+        raise NameRefused(
+            "%s %r refused: it must be a bare name, with no '/' or '\\'"
+            " and no leading '.'" % (what, value))
+    return text
+
+
 # The house rules a fresh install ships with (docs/house-rules.md): every
 # *.md directly in it is seeded; examples/ below it never is.
 HOUSE_RULES = Path(__file__).resolve().parents[1] / "templates" / "shared"
@@ -201,10 +225,13 @@ def list_shared():
 
 
 def read_shared(file):
+    _bare(file, "file")
     return (_shared_root() / file).read_text()
 
 
 def diff_proposal(file, slug):
+    _bare(file, "file")
+    _bare(slug, "slug")
     canonical = _shared_root() / file
     proposed = _shared_root() / "proposed" / _proposed_name(slug, file)
     base = (canonical.read_text().splitlines(keepends=True)
@@ -215,10 +242,46 @@ def diff_proposal(file, slug):
                                         tofile=proposed.name))
 
 
+def _check_law11(file, body, *, slug, reason=""):
+    """Law 11: a private cousin is never named in shared memory. Every
+    cousin reads shared/proposed/, its file names and the audit log, so
+    a private cousin may not propose at all (its slug would head the
+    file name), and no proposal may name one (whole word, any case) in
+    its file name, reason or body. The protected set is
+    outbound_filter.law11_names: derived from the cousin configs, so it
+    holds with no filter file. The refusal names the rule and the field,
+    never the name."""
+    from cousin_lib.outbound_filter import OutboundPolicy, law11_names
+    root = _shared_root().parent
+    names = law11_names(root)
+    if not names:
+        return
+    folded = {n.lower() for n in names}
+    if slug.lower() in folded:
+        raise ProposeRefused(
+            "refused by law 11: the proposing slug is a private cousin's,"
+            " and a proposal would put it in shared/proposed/, which every"
+            " cousin reads; a private cousin does not propose to the"
+            " shared tier")
+    policy = OutboundPolicy(protected=names)
+    for field, text in (("file name", Path(file).stem), ("reason", reason),
+                        ("body", body)):
+        if policy.scan(text or "", surface="shared"):
+            raise ProposeRefused(
+                "refused by law 11: the proposal's %s names a private"
+                " cousin, and a private cousin is never named in shared"
+                " memory; remove the name and propose again" % field)
+
+
 def propose(file, body, *, slug, reason="", force=False):
     """The single entry path: a candidate lands in proposed/, never in
     canonical, with the proposer's slug in the filename. Replacing an
-    existing proposal requires force and both writes are audited."""
+    existing proposal requires force and both writes are audited.
+    A slug or file shaped like a path is refused (NameRefused), and so
+    is a proposal law 11 forbids (ProposeRefused, _check_law11)."""
+    _bare(slug, "slug")
+    _bare(file, "file")
+    _check_law11(file, body, slug=slug, reason=reason)
     proposed_dir = _shared_root() / "proposed"
     proposed_dir.mkdir(parents=True, exist_ok=True)
     target = proposed_dir / _proposed_name(slug, file)
@@ -308,6 +371,8 @@ def _check_reviewer(proposer, by):
 def promote(file, *, proposer, by):
     """Reviewed promotion: the proposal becomes canonical, atomically,
     with the reviewer on the audit record."""
+    _bare(file, "file")
+    _bare(proposer, "proposer")
     _check_reviewer(proposer, by)
     source = _shared_root() / "proposed" / _proposed_name(proposer, file)
     if not source.exists():
@@ -321,6 +386,8 @@ def promote(file, *, proposer, by):
 def reject(file, *, proposer, by, reason=""):
     """Rejection removes the proposal; the reason survives on the
     audit record even though the content does not."""
+    _bare(file, "file")
+    _bare(proposer, "proposer")
     _check_reviewer(proposer, by)
     source = _shared_root() / "proposed" / _proposed_name(proposer, file)
     if not source.exists():
@@ -378,8 +445,9 @@ def plan_bulk_propose(home, slug):
 def shared_main(argv=None):
     """Console entry point: cousin-shared list/read/diff/propose/
     promote/reject/templates. Exit codes: 0 ok, 1 not found (templates:
-    a seeded file does not match what ships), 2 usage, 3 refused by the
-    boundary."""
+    a seeded file does not match what ships), 2 usage (including a slug
+    or file shaped like a path), 3 refused by the boundary (the review
+    rule, or law 11 on a proposal)."""
     import argparse
     import sys
 
@@ -457,6 +525,12 @@ def shared_main(argv=None):
     except PromoteRefused as err:
         print("cousin-shared: %s" % err, file=sys.stderr)
         return 3
+    except NameRefused as err:
+        print("cousin-shared: %s" % err, file=sys.stderr)
+        return 2
+    except ProposeRefused as err:
+        print("cousin-shared: %s" % err, file=sys.stderr)
+        return 3
     except FileExistsError as err:
         print("cousin-shared: %s" % err, file=sys.stderr)
         return 1
@@ -468,11 +542,17 @@ def shared_main(argv=None):
 
 def commit_bulk_propose(plan, slug):
     """Write the planned proposals into the queue. Only ever writes to
-    proposed/; the approval path is untouched."""
+    proposed/; the approval path is untouched. A file a rule refuses
+    (law 11) is skipped and listed in plan["refused"] with the reason."""
     count = 0
+    plan.setdefault("refused", [])
     for item in plan["propose"]:
         body = Path(item["path"]).read_text(errors="replace")
-        propose(item["fname"], body, slug=slug,
-                reason="bulk-propose from memory/")
+        try:
+            propose(item["fname"], body, slug=slug,
+                    reason="bulk-propose from memory/")
+        except ProposeRefused as err:
+            plan["refused"].append((item["fname"], str(err)))
+            continue
         count += 1
     return count

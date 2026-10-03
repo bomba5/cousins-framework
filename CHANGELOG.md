@@ -3,6 +3,34 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.23.1 - 2026-10-03
+
+### Security
+
+- **`cousin-shared` refuses a path-shaped name.** A slug, proposer or
+  file name with `/` or `\` or a leading `.` is refused (exit 2; the
+  console answers 400). Before, a `../` slug wrote outside
+  `shared/proposed/` and a `../` file read another cousin's home.
+- **A cousin sends only under its own name.** `cousin-chat send --from`
+  and the `send` tool accept, for a local cousin, only the sender's own
+  name or slug; a name that is the target's operator or a framework
+  sender is refused for any target, so a cousin can no longer reach
+  correction capture or the login-code divert. To an external peer
+  `--from` may still be a free-form display name.
+- **A cousin closes only its own jobs.** The `job` tool's `done` and
+  `fail`, and `cousin-job done`, `fail` and `cancel` run as a cousin,
+  refuse a job another cousin started (exit 3); nothing is closed or
+  signalled. The console and a shell with no cousin home still close any
+  job.
+
+### Fixed
+
+- **Law 11 holds for shared-memory proposals with no filter file.**
+  `cousin-shared propose` refuses (exit 3) a proposal whose file name,
+  reason or body names a private cousin (`[memory] scope = "private"` set
+  in its `cousin.toml`, plus the filter file's protected slugs), and any
+  proposal from one. The refusal names the rule, never the name.
+
 ## 3.23.0 - 2026-10-03
 
 ### Added

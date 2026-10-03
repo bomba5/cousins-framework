@@ -71,5 +71,33 @@ class TestOutboundPolicy(unittest.TestCase):
             p.check("zorblatt", from_slug="a", dest_slug="b")  # no raise
 
 
+class TestLawElevenNames(unittest.TestCase):
+    """The names law 11 protects come from the cousin configs: a cousin
+    whose cousin.toml says [memory] scope = "private", by slug and by
+    display name, plus the filter file's protected slugs."""
+
+    def test_private_cousins_are_derived_from_their_configs(self):
+        from cousin_lib.outbound_filter import law11_names, private_cousins
+        tmp, root = _root({"protected": ["quill"]})
+        self.addCleanup(tmp.cleanup)
+        for slug, extra in (("toki", '[memory]\nscope = "private"\n'),
+                            ("sam", '[memory]\nscope = "shared"\n'),
+                            ("wren", "")):
+            home = root / "cousins" / slug
+            home.mkdir(parents=True)
+            (home / "cousin.toml").write_text(
+                '[cousin]\nslug = "%s"\n%s' % (slug, extra))
+        (root / "cousins" / "broken").mkdir()
+        (root / "cousins" / "broken" / "cousin.toml").write_text("[cousin\n")
+        self.assertEqual(private_cousins(root), {"toki": "Toki"})
+        self.assertEqual(law11_names(root), {"toki", "Toki", "quill"})
+
+    def test_no_cousins_and_no_file_protect_nothing(self):
+        from cousin_lib.outbound_filter import law11_names
+        tmp, root = _root(None)
+        self.addCleanup(tmp.cleanup)
+        self.assertEqual(law11_names(root), set())
+
+
 if __name__ == "__main__":
     unittest.main()

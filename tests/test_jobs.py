@@ -133,6 +133,24 @@ class TestCli(JobsCase):
         job = get_job(int(out.strip()))
         self.assertEqual((job["status"], job["exit_code"]), ("failed", 3))
 
+    def test_a_cousin_cannot_close_another_cousins_job(self):
+        job_id = register_job(kind="other", title="theirs", spawned_by="toki")
+        for argv in (["done", str(job_id)], ["fail", str(job_id)],
+                     ["cancel", str(job_id)]):
+            rc, _, err = self._main(argv)
+            self.assertEqual(rc, 3, argv)
+            self.assertIn("job #%d refused: it was started by toki, not by"
+                          " wren" % job_id, err)
+        self.assertEqual(get_job(job_id)["status"], "running")
+
+    def test_a_shell_with_no_cousin_home_closes_any_job(self):
+        job_id = register_job(kind="other", title="theirs", spawned_by="toki")
+        with mock.patch.dict(os.environ):
+            del os.environ["COUSIN_HOME"]
+            rc, _, err = self._main(["done", str(job_id)])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(get_job(job_id)["status"], "done")
+
     def test_done_on_missing_job_exits_one(self):
         rc, _, err = self._main(["done", "999"])
         self.assertEqual(rc, 1)

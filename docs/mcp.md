@@ -186,7 +186,10 @@ handled differently:
   server config as one of three shapes: stdio (`command`, `args`,
   `env`), `http` or `sse` (`url`, `headers`). `cousin` is reserved: an
   entry of that name is skipped, since the runner serves its own tools
-  in-process. `${VAR}` and `${VAR:-default}` pass through unexpanded for
+  in-process. These servers reach the agent CLI in a private file
+  (`data/run/mcp-config.json`, mode 0600), never inline on its command
+  line, which every local user can read; only `cousin`, a name, is
+  inline. `${VAR}` and `${VAR:-default}` pass through unexpanded for
   the agent CLI to expand from its own environment; a reference with no
   default to a variable unset in the runner's environment skips the
   entry (the CLI would refuse such a config), and a reference to one of

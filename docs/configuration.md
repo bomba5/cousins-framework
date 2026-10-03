@@ -1179,14 +1179,16 @@ the same tool list at every start.
   `args`, `env` values, `url` and `headers` values. The runner passes them
   through unexpanded and the agent CLI expands them from its own
   environment, which is the runner's (the supervisor's or `cousin-runner`'s,
-  not your shell's). This is on purpose: the SDK hands the servers to the CLI
-  as a `--mcp-config` command-line argument, which the host's users can
-  read, so only the `${NAME}` is on the command line and the value reaches
-  the server through the CLI's environment. Keep the secret in the runner's
-  environment and only its `${NAME}` in the file; a value written literally
-  in the file is on the command line too. A variable that is unset and has
-  no default skips that server, and the event names the variable. A
-  reference to an account variable (`ANTHROPIC_API_KEY`,
+  not your shell's). The runner hands the servers to the CLI in a private
+  file (`data/run/mcp-config.json`, mode 0600 in a 0700 directory, a side
+  session's `mcp-config-<kind>.json`), named by `--mcp-config`, never inline
+  on the CLI's command line, which the host's users can read; it is
+  rewritten at every start and removed when the runner stops. Still keep
+  the secret in the runner's environment and only its `${NAME}` in
+  `.mcp.json`: the file is plain text the model can read and edit, and a
+  stdio server's `args` (expanded) are on that server's own command line.
+  A variable that is unset and has no default skips that server, and the
+  event names the variable. A reference to an account variable (`ANTHROPIC_API_KEY`,
   `CLAUDE_CODE_OAUTH_TOKEN` and the rest of the list under
   [accounts.toml](#accountstoml)) skips its server even with a default: the
   CLI's environment holds the cousin's own credential under those names,

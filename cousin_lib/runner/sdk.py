@@ -28,6 +28,7 @@ the stream for the next turn to misread.
 import asyncio
 import collections
 import json
+import os
 import threading
 import contextlib
 import time
@@ -91,6 +92,12 @@ def _attribution_settings(commit_attribution):
 # The session a runner is (runner/sessions.py): the primary holds
 # the generation; a side session is named by the thread kind it answers.
 PRIMARY = "primary"
+# The home's and the plugins' MCP servers reach the CLI as a file
+# (_mcp_options): the SDK writes `mcp_servers` inline on the CLI's argv,
+# which every local user can read. The CLI merges every --mcp-config it is
+# given (measured on 2.1.281).
+MCP_CONFIG_FLAG = "mcp-config"                     # the CLI's flag, without its dashes
+MCP_CONFIG_FILE = ("data", "run", "mcp-config.json")
 
 
 class _NotWritten(Exception):
@@ -611,6 +618,7 @@ class SdkRunner:
         # model actually took in (see the module docstring).
         extra = {"replay-user-messages": None,
                  prompt.APPEND_FILE_FLAG: str(prompt.system_prompt_path(self.home))}
+        mcp_servers = self._mcp_options(server, extra)
         store_resume = resume
         if resume and self._resume_via_cli():
             # A login account, or a lane never recorded: the CLI's own --resume.
@@ -627,9 +635,49 @@ class SdkRunner:
                                       setting_sources=[], resume=store_resume,
                                       settings=_attribution_settings(self.commit_attribution),
                                       system_prompt=system_prompt, session_store=self.session_store,
-                                      mcp_servers=self._mcp_servers(server),
+                                      mcp_servers=mcp_servers,
                                       hooks=hook_table,
                                       extra_args=extra)
+
+    def _mcp_options(self, server, extra):
+        """The `mcp_servers` option, and the file flag added to `extra`.
+        Only `cousin` stays in the option, which the SDK writes inline on
+        the CLI's argv: the SDK serves an in-process server only from
+        there, and its config is a name. Every other server goes to a
+        private file (prompt.write_private: 0600 in a 0700 dir), rewritten
+        at every options() and named by a second --mcp-config, so a literal
+        secret in .mcp.json is on no argv. With none, there is no file."""
+        from cousin_lib.runner import prompt
+        servers = self._mcp_servers(server)
+        inline = {"cousin": servers.pop("cousin")}
+        if servers:
+            path = prompt.write_private(self.mcp_config_path(),
+                                        json.dumps({"mcpServers": servers}, indent=1) + "\n")
+            extra[MCP_CONFIG_FLAG] = str(path)
+        else:
+            self.drop_mcp_config()
+        return inline
+
+    def mcp_config_path(self):
+        """data/run/mcp-config.json for the primary; a side session keeps
+        its own, data/run/mcp-config-<kind>.json, so one session's end
+        never removes the file another's CLI is about to read. Absolute:
+        the CLI reads it whatever its cwd."""
+        path = self.home.joinpath(*MCP_CONFIG_FILE)
+        if self.session != PRIMARY:
+            path = path.with_name("mcp-config-%s.json" % self.session)
+        return Path(os.path.abspath(path))
+
+    def drop_mcp_config(self):
+        """Remove the servers' file: the loop's end and stop() call it, so
+        it lives as long as the CLI that reads it. A runner killed outright
+        leaves it (still 0600), and its next start rewrites it."""
+        try:
+            self.mcp_config_path().unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            self.stream.append("error", {"error": "mcp config file: %s" % exc})
 
     def _mcp_servers(self, server):
         """`cousin` first, then the home's .mcp.json servers by name, then
@@ -873,6 +921,7 @@ class SdkRunner:
         if self._thread is not None:
             self._thread.join(timeout)
         self.turn.end()
+        self.drop_mcp_config()       # a runner whose loop never ran (options() alone)
         with self._lock:
             if self.machine.state != "stopped":
                 self.machine.to("stopped")
@@ -1307,9 +1356,12 @@ class SdkRunner:
     def _run_loop(self):
         # asyncio.Runner's close cancels leftover tasks, finalizes async
         # generators and joins the default executor before closing the loop.
-        with asyncio.Runner() as runner:
-            self._loop = runner.get_loop()
-            runner.run(self._main())
+        try:
+            with asyncio.Runner() as runner:
+                self._loop = runner.get_loop()
+                runner.run(self._main())
+        finally:
+            self.drop_mcp_config()
 
     async def _main(self):
         watchdog = asyncio.ensure_future(self._stall_watch())

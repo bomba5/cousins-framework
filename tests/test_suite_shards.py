@@ -63,6 +63,22 @@ class TestVerify(unittest.TestCase):
         return [{"shard": 1, "of": 2, "discovered": found, "modules": ["a", "c"], "ok": True},
                 {"shard": 2, "of": 2, "discovered": found, "modules": ["b", "d"], "ok": True}]
 
+    def test_a_module_that_skips_itself_has_the_id_check_expects(self):
+        # check() lets these through: a module skipped whole at import (an
+        # optional dependency missing) is not a module that failed to load
+        import tempfile, sys as _sys
+        with tempfile.TemporaryDirectory() as tmp:
+            pathlib.Path(tmp, "test_gone.py").write_text(
+                "import unittest\nraise unittest.SkipTest('no optional dependency')\n")
+            _sys.path.insert(0, tmp)
+            try:
+                found = unittest.defaultTestLoader.discover(tmp, pattern="test*.py", top_level_dir=tmp)
+            finally:
+                _sys.path.remove(tmp)
+                _sys.modules.pop("test_gone", None)
+            ids = [t.id() for s in found for t in s]
+        self.assertEqual(ids, [suite.SKIPPED_MODULE + "test_gone"])
+
     def test_a_clean_run_has_no_problems(self):
         self.assertEqual(suite.verify(self.records(), 2), [])
 

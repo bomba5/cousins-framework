@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.16.1 - 2026-10-03
+
+### Fixed
+
+- **The console answers a route's refusal with its own status when it
+  runs as `python -m cousin_lib.console.app`**, the way the supervisor
+  and the image start it. The module ran twice, as `__main__` and as the
+  package module the routes import, so the server caught one `HttpError`
+  class and the routes raised the other: a wrong password, a missing
+  field or an unknown cousin came back as a 500. `cousin-console` was not
+  affected.
+
 ## 3.16.0 - 2026-10-03
 
 ### Added

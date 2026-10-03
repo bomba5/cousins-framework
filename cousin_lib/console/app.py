@@ -619,4 +619,8 @@ def console_main(argv=None):
 
 
 if __name__ == "__main__":  # pragma: no cover - the -m launcher
-    raise SystemExit(console_main())
+    # The package module's main, not this __main__ copy's: the route modules
+    # import cousin_lib.console.app, so a server built here would catch this
+    # copy's HttpError and answer theirs (a 401, a 404) as a 500.
+    from cousin_lib.console import app as _package
+    raise SystemExit(_package.console_main())

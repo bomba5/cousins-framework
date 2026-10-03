@@ -241,6 +241,8 @@ def cmd_run(args):
     print("shard %d/%d: %d of %d modules, %.0fs recorded"
           % (args.shard, args.of, len(mine), len(modules), load[args.shard - 1]),
           file=sys.stderr)
+    # read before the run: a suite drops each test once it has run it
+    stray_ids = sorted(t.id() for s in strays for t in _cases(s))
     # a module that failed to import fails every shard, never none
     suite = unittest.TestSuite([modules[m] for m in mine] + strays)
     result = _runner().run(suite)
@@ -250,7 +252,7 @@ def cmd_run(args):
         record = {"shard": args.shard, "of": args.of,
                   "python": "%d.%d" % sys.version_info[:2],
                   "discovered": sorted(modules), "modules": mine,
-                  "strays": sorted(t.id() for s in strays for t in _cases(s)),
+                  "strays": stray_ids,
                   "ran": result.testsRun, "failures": len(result.failures),
                   "errors": len(result.errors), "skipped": len(result.skipped),
                   "ok": result.wasSuccessful(), "seconds": seconds}

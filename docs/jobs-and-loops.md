@@ -86,7 +86,11 @@ processes in the job's own group that started after the job are ever
 signalled; nothing is killed by name.
 
 `cousin-job` needs `COUSIN_HOME` (to know who's asking) and a framework
-root (`FRAMEWORK_ROOT`, or a home under `<root>/cousins/`).
+root (`FRAMEWORK_ROOT`, or a home under `<root>/cousins/`). A cousin
+closes only the jobs it started: `done`, `fail` and `cancel` on another
+cousin's job are refused (exit 3) and nothing is signalled, from the
+CLI and from the MCP `job` tool alike. The operator closes any job from
+the console, or with `cousin-job` in a shell with no `COUSIN_HOME`.
 
 Housekeeping happens when the console lists jobs: anything still
 `running` after 24 hours is marked failed (its process most likely died

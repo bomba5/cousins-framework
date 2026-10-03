@@ -3,6 +3,25 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.25.1 - 2026-10-03
+
+### Changed
+
+- **The house rules in `templates/shared/` gained what installs had added
+  to them.** First principles applies in every domain, not only code;
+  SHOULD NOT has its own definition; the boot check covers every host and
+  the STATUS narrative is dated and never edited; each entry point gets a
+  test that runs it as a subprocess, and a probe is checked before a defect
+  is declared; elimination experiments are not evidence, and a degraded
+  surface that still works is a defect to report; a killed wrapper leaves
+  its children running. The seven now take about 5000 of the shared
+  layer's 6000 characters. An existing install keeps its own copies:
+  `cousin-shared templates --full` shows the difference.
+- **The README says isolation is policy, not permission.** Every cousin
+  runs as one OS user; the sdk lane's tool gate on a subagent is what
+  separates them, and 0700 homes and the 077 umask keep out other users
+  and uids, not one cousin from another.
+
 ## 3.25.0 - 2026-10-03
 
 ### Added

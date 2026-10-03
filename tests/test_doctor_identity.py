@@ -123,6 +123,50 @@ class TestLane(_Case):
             "The cousin-reply.py script is gone."))
         self.assertEqual(self.items(), [])
 
+    def test_a_line_about_a_commands_syntax_is_not_reported(self):
+        self.cousin("wren", portrait=(
+            "`cousin-chat send` takes the peer then the text and `cousin-reply` takes --user"
+            " first. Verify a CLI's shape from --help before piping.\n"
+            "cousin-reply reads its arguments from argv, not stdin.\n"
+            "The usage line of cousin-chat send names the flags.\n"))
+        self.assertEqual(self.items(), [])
+
+    def test_a_distinction_between_commands_is_kept_in_tool_terms(self):
+        self.cousin("wren", claude=self.below(
+            "`cousin-reply` is for the operator only, peers get `cousin-chat send`.",
+            "Every peer message reaches you via cousin-chat send.",
+            "All replies reach Ana via cousin-reply.",
+            "`cousin-chat send <peer>` = peer messages only."))
+        items = self.items()
+        self.assertEqual([(i["line"], i["match"]) for i in items],
+                         [(5, "cousin-reply"), (5, "cousin-chat send"), (6, "cousin-chat send"),
+                          (7, "cousin-reply"), (8, "cousin-chat send")])
+        send = ("rewrite the distinction in tool terms: `cousin-chat send` -> the"
+                " `mcp__cousin__send` tool")
+        both = ("rewrite the distinction in tool terms: `cousin-reply` -> the"
+                " `mcp__cousin__reply` tool, `cousin-chat send` -> the `mcp__cousin__send` tool")
+        self.assertEqual([i["fix"] for i in items], [both, both, send,
+                         "rewrite the distinction in tool terms: `cousin-reply` -> the"
+                         " `mcp__cousin__reply` tool", send])
+
+    def test_a_long_line_is_shown_around_its_match(self):
+        filler = "The garden notes go in the shed and the seed list stays current. " * 4
+        self.cousin("wren", claude=self.below(filler + "Reply with `cousin-reply --user Ana`. "
+                                              + filler))
+        [item] = self.items()
+        self.assertEqual(item["match"], "cousin-reply")
+        self.assertIn("Reply with `cousin-reply --user Ana`.", item["text"])
+        self.assertTrue(item["text"].startswith("...") and item["text"].endswith("..."))
+        self.assertEqual(len(item["text"]), identity_lint._MAX_SHOWN)
+
+    def test_a_match_near_the_end_of_a_long_line_cuts_only_the_start(self):
+        filler = "The garden notes go in the shed and the seed list stays current. " * 4
+        self.cousin("wren", claude=self.below(filler + "Reply with cousin-reply."))
+        [item] = self.items()
+        self.assertTrue(item["text"].startswith("..."))
+        self.assertTrue(item["text"].endswith("Reply with cousin-reply."))
+        self.assertEqual(len(item["text"]), identity_lint._MAX_SHOWN)
+
     def test_status_md_is_read_in_its_live_open_loops_only(self):
         self.cousin("wren", status="# Status\n\n## Open loops\n\n- reply with cousin-reply\n\n"
                                     "## Log\n\n- answer with cousin-reply\n")
@@ -187,6 +231,15 @@ class TestBilling(_Case):
         [item] = self.items()
         self.assertEqual(item["file"], "cousins/wren/self-portrait.md")
         self.assertIn("api_key_file", item["fact"])
+
+    def test_a_billing_claim_past_the_cut_is_shown(self):
+        filler = "Wren keeps the garden notes and the seed list for the household. " * 4
+        self.cousin("wren", api_key_file=".secrets/wren.env",
+                    portrait=filler + "It runs on the personal subscription.\n")
+        [item] = self.items()
+        self.assertEqual(item["match"], "on the personal subscription")
+        self.assertIn(item["match"], item["text"])
+        self.assertTrue(item["text"].startswith("..."))
 
     def test_the_same_claim_on_a_subscription_login_is_not_reported(self):
         self.cousin("wren", claude=self.TITLE)
@@ -280,6 +333,18 @@ class TestCheck(_Case):
         self.assertFalse(result["ok"])
         self.assertEqual(result["summary"],
                          "2 lines contradict the framework in 1 of 2 cousins (lane 1, tool 1)")
+
+    def test_summary_counts_one_claim_repeated_once_as_distinct(self):
+        self.accounts('[accounts.work]\nkind = "anthropic-key"\n')
+        self.cousin("wren", account="work",
+                    claude="# Wren - helper on a personal subscription\n",
+                    portrait="Runs on a Personal  Subscription.\nI use no API key.\n",
+                    status="# Status\n\n## Open loops\n\n- on a personal subscription\n")
+        self.cousin("sam", account="work", portrait="Sam is on a personal subscription.\n")
+        result = doctor.check_identity(self.root)
+        self.assertEqual(len(result["items"]), 5)
+        self.assertEqual(result["summary"], "5 lines contradict the framework in 2 of 2 cousins"
+                                            " (billing 5 (3 distinct))")
 
     def test_clean_identities_are_ok(self):
         self.cousin("wren", claude=self.below("I keep the garden notes."))

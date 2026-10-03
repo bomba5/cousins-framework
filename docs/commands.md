@@ -798,8 +798,21 @@ cousin-doctor
 
   A line is not reported when the phrase is negated or dated in its sentence
   (not, never, no longer, used to, was, replied, logged), names a fallback or
-  a condition, or claims both ways. A fact that cannot be read (an unknown
-  account, a registry that does not parse) skips its rule with a note.
+  a condition, or claims both ways. A `lane` line about a command's syntax
+  (its `--help`, arguments, flags, shape, usage) is not reported either. A
+  line that names two commands to state a distinction (only, vs, not, but ...),
+  says what "reaches you via" a command, or gives a command to the operator or
+  to peers ("`cousin-reply` = operator") is reported with a fix that keeps the
+  distinction: "rewrite the distinction in tool terms: `cousin-reply` ->
+  the `mcp__cousin__reply` tool, `cousin-chat send` -> the `mcp__cousin__send`
+  tool". A fact that cannot be read (an unknown account, a registry that does
+  not parse) skips its rule with a note.
+
+  A long line is shown cut to 200 characters around the matched phrase, with
+  `...` on each side cut; `--json` gives the phrase itself as `match`. The
+  summary counts findings per rule; when one claim is repeated (the same rule
+  and phrase in one cousin, say in `CLAUDE.md` and in the self-portrait), it
+  also counts the distinct claims: `billing 4 (1 distinct)`.
 
 ```
 cousin-doctor identity --cousin wren

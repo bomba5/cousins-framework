@@ -16,6 +16,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   it when it can) or its tools (an `mcp__cousin__` tool the registry does not
   serve), with the line number, the fact and its source, and the fix. Negated,
   dated, conditional and fallback lines are not reported.
+  Lines about a command's syntax are not reported, a line stating a
+  distinction between commands gets a fix that keeps it in tool terms, a long
+  line is shown around the matched phrase, and the summary counts a claim
+  repeated across files once more as distinct (`billing 4 (1 distinct)`).
 - **`cousin-doctor --cousin SLUG`** limits every check to one cousin.
 
 ## 3.25.1 - 2026-10-03

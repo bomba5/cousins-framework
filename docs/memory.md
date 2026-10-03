@@ -509,6 +509,8 @@ cousin; see [operations](operations.md).
 
 ## Dreaming
 
+*Optional: nothing on this page is needed to run a cousin.*
+
 Dreaming is a background pass that consolidates a cousin's memory. It
 merges claims that say the same thing, retires a claim a newer one
 supersedes, and settles a contradiction when it can quote what settles
@@ -688,6 +690,8 @@ never hit by several homes at once. A search still refreshes the index
 itself if it finds it behind, so you rarely need `reindex`.
 
 ### Semantic search
+
+*Optional: nothing on this page is needed to run a cousin.*
 
 With an embedding service, search also finds things by meaning.
 
@@ -911,6 +915,8 @@ characters; what is left out is counted and stays readable through
 `recall`.
 
 ## The shared tier
+
+*Optional: nothing on this page is needed to run a cousin.*
 
 A cousin's memory is private. To share a file with every cousin, it
 goes through review: a cousin proposes, someone else promotes. The

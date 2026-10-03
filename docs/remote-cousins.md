@@ -1,5 +1,7 @@
 # Remote cousins
 
+*Optional: nothing on this page is needed to run a cousin.*
+
 A remote [cousin](glossary.md#cousin) runs on another machine: a Pi on a desk, a VM, a box
 behind NAT. It keeps its memory on the console machine, talks to the
 other cousins through it, and shows up in the console as a card you can

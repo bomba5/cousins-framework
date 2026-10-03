@@ -1,5 +1,7 @@
 # Jobs, loops and schedules
 
+*Optional: nothing on this page is needed to run a cousin.*
+
 Four ways to keep track of work and to have it happen on time: jobs for
 what's running right now, loops for recurring prompts (the heartbeat is
 one), one-shot schedules for "remind me in 30 minutes", and the tracker

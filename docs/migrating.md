@@ -1,5 +1,7 @@
 # Migrating a cousin
 
+*Optional: nothing on this page is needed to run a cousin.*
+
 How to move a [cousin](glossary.md#cousin) you already have into an install: its home, its memory,
 its chat history, and, if you ran cousins on other machines under an older
 framework, the hive's tokens and memory. It assumes the target install is

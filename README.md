@@ -169,33 +169,50 @@ and how to remove it all again, is in [install](docs/install.md).
 
 ## Where to go next
 
+### Start here
+
+- [Getting started](docs/getting-started.md) - after a quick start: talking
+  to your cousin, its memory, its health, upgrades and backups, in an hour
 - [Install](docs/install.md) - the full setup, updates, uninstall
-- [The console](docs/console.md) - every page of the web UI
 - [Cousins](docs/cousins.md) - making them, starting them, how a cousin
   survives a new session
-- [Memory](docs/memory.md) - what a cousin remembers and how
-- [House rules](docs/house-rules.md) - the rules every cousin follows from day one
 - [Chat](docs/chat.md) - talking to cousins, and cousins talking to each
   other
+- [Memory](docs/memory.md) - what a cousin remembers and how
+- [The console](docs/console.md) - every page of the web UI
+- [Operations](docs/operations.md) - running it day to day, and fixing it
+
+### Optional
+
+Nothing in this group is needed to run a cousin. Each page says so at the top.
+
 - [Telegram](docs/telegram.md) - a cousin's chat on your phone: the bridge and its setup
 - [Meetings](docs/meetings.md) - a chat with several cousins at once, in rounds
-- [Jobs and loops](docs/jobs-and-loops.md) - background work and schedules
-- [MCP tools](docs/mcp.md) - the tools a cousin gets
-- [Plugins](docs/plugins.md) - tools, a service and a console tab the framework runs but does not ship
 - [Media](docs/media.md) - images, video and voice, if you want them
 - [Remote cousins](docs/remote-cousins.md) - a cousin on another machine,
   like a Pi on your desk
-- [Runners](docs/reference/runners.md) - the agent loops a cousin can run on
-  (the Claude Agent SDK, a tmux pane, opencode), how to pick one, and the
-  contract table
-- [Configuration](docs/configuration.md) - every config file and key
-- [Commands](docs/commands.md) - every `cousin-*` command
-- [Operations](docs/operations.md) - running it day to day, and fixing it
+- [Plugins](docs/plugins.md) - tools, a service and a console tab the framework runs but does not ship
+- [Jobs and loops](docs/jobs-and-loops.md) - background work and schedules
+  beyond the default heartbeat and daily flip
 - [Migrating](docs/migrating.md) - moving an existing cousin in
-- [Development](docs/development.md) - hacking on the framework
+- [Runners](docs/reference/runners.md) - the other agent loops a cousin can
+  run on (the Claude Agent SDK, a tmux pane, opencode), how to pick one, and
+  the contract table
 
-The dense stuff (every API route, the loop model, the boot sequence) is in
-[docs/reference](docs/reference/).
+### Reference
+
+- [Configuration](docs/configuration.md) - every config file and key
+- [Commands](docs/commands.md) - every `cousin-*` command, and which ones you need
+- [MCP tools](docs/mcp.md) - the tools a cousin gets
+- [House rules](docs/house-rules.md) - the rules every cousin follows from day one
+- [What the ceremony buys](docs/ceremony.md) - each ritual a cousin spends
+  turns on, and the setting that turns it down
+- [Claude logins and Anthropic's terms](docs/terms-risk.md) - the risk of
+  running a cousin on a subscription
+- [Glossary](docs/glossary.md) - the words these docs use in a sense of their own
+- [docs/reference](docs/reference/) - the dense stuff: every API route, the
+  loop model, the boot sequence
+- [Development](docs/development.md) - hacking on the framework
 
 ## License
 

@@ -51,6 +51,12 @@ again:
 - a rule you delete stays deleted, at every later start;
 - a rule a later release adds arrives at the first start after the upgrade.
 
+An upgrade never changes a seeded file, the law included: it may hold your
+edits. To see whether the version you upgraded to ships different text, run
+`cousin-shared templates` (`--full` for the diffs, from your file to the
+shipped one) and copy over what you want by hand. It reads only, and a file
+you deleted shows as `missing in install`.
+
 Seeded rules skip the propose and promote review: they come with the install,
 like a config default, and are canonical from the start. Nothing is queued
 for a reviewer and the review rule never sees them.

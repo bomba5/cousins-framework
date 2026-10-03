@@ -133,6 +133,54 @@ def seed_law(root, *, source=None):
     return True
 
 
+def _lines(path):
+    try:
+        return path.read_text(errors="replace").splitlines(keepends=True)
+    except OSError:
+        return None
+
+
+def compare_templates(root, *, law_source=None, rules_source=None):
+    """Compare each seeded file with the template it was seeded from,
+    for an upgrade that shipped new text the install never takes on its
+    own (seeding is once ever). Reads only. One row per file, law first:
+    path (relative to the root), status ("same", "differs", "missing in
+    install", or "not shipped any more" for a seeded file whose template
+    is gone) and diff, a unified diff from the install's file to the
+    shipped one for "differs" ("" otherwise). A file the operator added
+    to shared/ has no template and no row."""
+    law_source = LAW_TEMPLATE if law_source is None else Path(law_source)
+    rules_source = HOUSE_RULES if rules_source is None else Path(rules_source)
+    root = Path(root)
+    pairs = [(LAW_SEED_NAME, law_source if law_source.is_file() else None)]
+    shipped = {p.name: p for p in rules_source.glob("*.md") if p.is_file()}
+    seeded = {n for n in _seeded(root) if n and "/" not in n}
+    for name in sorted(set(shipped) | seeded):
+        pairs.append(("shared/" + name, shipped.get(name)))
+    rows = []
+    for rel, template in pairs:
+        ours = _lines(root / rel)
+        theirs = _lines(template) if template is not None else None
+        if theirs is None:
+            if ours is None:
+                continue
+            status, diff = "not shipped any more", ""
+        elif ours is None:
+            status, diff = "missing in install", ""
+        elif ours == theirs:
+            status, diff = "same", ""
+        else:
+            status = "differs"
+            diff = "".join(
+                line if line.endswith("\n")
+                else line + "\n\\ No newline at end of file\n"
+                for line in difflib.unified_diff(
+                    ours, theirs, fromfile=rel + " (install)",
+                    tofile=rel + " (shipped)"))
+        rows.append({"path": rel, "status": status, "diff": diff})
+    return rows
+
+
 def list_shared():
     root = _shared_root()
     canonical = sorted(p.name for p in root.glob("*.md") if p.is_file())
@@ -319,14 +367,27 @@ def plan_bulk_propose(home, slug):
 @traced_cli("cousin-shared")
 def shared_main(argv=None):
     """Console entry point: cousin-shared list/read/diff/propose/
-    promote/reject. Exit codes: 0 ok, 1 not found, 2 usage,
-    3 refused by the boundary."""
+    promote/reject/templates. Exit codes: 0 ok, 1 not found (templates:
+    a seeded file does not match what ships), 2 usage, 3 refused by the
+    boundary."""
     import argparse
     import sys
 
     parser = argparse.ArgumentParser(prog="cousin-shared")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list")
+    p = sub.add_parser(
+        "templates",
+        help="compare config/law.md and the seeded shared/ rules with"
+             " the templates this version ships",
+        description="Compare config/law.md and the seeded shared/ rules"
+                    " with the templates this version ships. Reads only:"
+                    " nothing is merged or written. Exit 0 when every"
+                    " file matches, 1 when any differs, is missing or is"
+                    " no longer shipped.")
+    p.add_argument("-v", "--full", action="store_true",
+                   help="print the unified diff (install to shipped)"
+                        " under each file that differs")
     p = sub.add_parser("read")
     p.add_argument("file")
     p = sub.add_parser("diff")
@@ -354,6 +415,14 @@ def shared_main(argv=None):
             print("pending proposals:")
             for name in state["pending"] or ["  (none)"]:
                 print("  %s" % name if not name.startswith(" ") else name)
+        elif args.cmd == "templates":
+            rows = compare_templates(FrameworkConfig.from_env().root)
+            for row in rows:
+                print("%-22s %s" % (row["status"], row["path"]))
+                if args.full:
+                    sys.stdout.write(row["diff"])
+            if any(row["status"] != "same" for row in rows):
+                return 1
         elif args.cmd == "read":
             sys.stdout.write(read_shared(args.file))
         elif args.cmd == "diff":

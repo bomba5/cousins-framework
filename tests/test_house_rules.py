@@ -11,6 +11,7 @@ import io
 import json
 import os
 import pathlib
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -239,6 +240,117 @@ class TestTheLaw(RootCase):
         self.assertEqual(code, 0)
         self.assertTrue(self.law().exists())
         self.assertIn("seeded the Framework Law", out.getvalue())
+
+
+class TestTheTemplateComparison(RootCase):
+    """An upgrade never touches a seeded file; compare_templates and
+    `cousin-shared templates` say where the install and what ships part,
+    and write nothing."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.ship = pathlib.Path(tmp.name)
+        (self.ship / "shared").mkdir()
+        (self.ship / "law.md").write_text("# Law\n\nOne.\nTwo.\n")
+        for name in ("a_same.md", "b_edited.md", "c_missing.md"):
+            (self.ship / "shared" / name).write_text("rule %s\n" % name)
+        shared_tier.seed_law(self.root, source=self.ship / "law.md")
+        shared_tier.seed_house_rules(self.root, source=self.ship / "shared")
+        (self.root / "config" / "law.md").write_text("# Law\n\nOne.\nThree.\n")
+        (self.root / "shared" / "b_edited.md").write_text("rule mine\n")
+        (self.root / "shared" / "c_missing.md").unlink()
+        (self.root / "shared" / "mine.md").write_text("my own rule\n")
+
+    def compare(self):
+        return shared_tier.compare_templates(
+            self.root, law_source=self.ship / "law.md",
+            rules_source=self.ship / "shared")
+
+    def snapshot(self):
+        return {p: (p.read_bytes(), p.stat().st_mtime_ns)
+                for p in sorted(self.root.rglob("*")) if p.is_file()}
+
+    def test_each_seeded_file_has_its_status(self):
+        rows = {r["path"]: r["status"] for r in self.compare()}
+        self.assertEqual(rows, {
+            "config/law.md": "differs",
+            "shared/a_same.md": "same",
+            "shared/b_edited.md": "differs",
+            "shared/c_missing.md": "missing in install",
+        })
+
+    def test_the_law_comes_first(self):
+        self.assertEqual(self.compare()[0]["path"], "config/law.md")
+
+    def test_a_difference_is_a_unified_diff_from_the_install_to_what_ships(self):
+        rows = {r["path"]: r["diff"] for r in self.compare()}
+        self.assertEqual(rows["config/law.md"], (
+            "--- config/law.md (install)\n"
+            "+++ config/law.md (shipped)\n"
+            "@@ -1,4 +1,4 @@\n"
+            " # Law\n"
+            " \n"
+            " One.\n"
+            "-Three.\n"
+            "+Two.\n"))
+        self.assertIn("-rule mine\n+rule b_edited.md\n", rows["shared/b_edited.md"])
+        self.assertEqual(rows["shared/a_same.md"], "")
+        self.assertEqual(rows["shared/c_missing.md"], "")
+
+    def test_a_missing_final_newline_is_marked(self):
+        (self.root / "shared" / "b_edited.md").write_text("rule mine")
+        diff = {r["path"]: r["diff"] for r in self.compare()}["shared/b_edited.md"]
+        self.assertIn("-rule mine\n\\ No newline at end of file\n+rule b_edited.md\n",
+                      diff)
+
+    def test_a_seeded_rule_no_longer_shipped_is_named(self):
+        (self.ship / "shared" / "a_same.md").unlink()
+        rows = {r["path"]: r["status"] for r in self.compare()}
+        self.assertEqual(rows["shared/a_same.md"], "not shipped any more")
+
+    def test_nothing_is_written(self):
+        before = self.snapshot()
+        self.compare()
+        with mock.patch.object(shared_tier, "LAW_TEMPLATE", self.ship / "law.md"), \
+                mock.patch.object(shared_tier, "HOUSE_RULES", self.ship / "shared"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            shared_tier.shared_main(["templates", "--full"])
+        self.assertEqual(self.snapshot(), before)
+
+    def run_cli(self, *argv):
+        with mock.patch.object(shared_tier, "LAW_TEMPLATE", self.ship / "law.md"), \
+                mock.patch.object(shared_tier, "HOUSE_RULES", self.ship / "shared"), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            code = shared_tier.shared_main(["templates", *argv])
+        return code, out.getvalue()
+
+    def test_the_cli_prints_a_line_per_file_and_exits_1_on_a_difference(self):
+        code, out = self.run_cli()
+        self.assertEqual(code, 1)
+        self.assertEqual(out.splitlines(), [
+            "differs                config/law.md",
+            "same                   shared/a_same.md",
+            "differs                shared/b_edited.md",
+            "missing in install     shared/c_missing.md",
+        ])
+
+    def test_the_cli_prints_the_diff_with_full(self):
+        code, out = self.run_cli("--full")
+        self.assertEqual(code, 1)
+        self.assertIn("differs                config/law.md\n"
+                      "--- config/law.md (install)\n", out)
+        self.assertIn("-Three.\n+Two.\n", out)
+        self.assertNotIn("---", self.run_cli()[1])
+
+    def test_the_cli_exits_0_when_everything_matches(self):
+        shutil.copy(self.ship / "law.md", self.root / "config" / "law.md")
+        for name in ("b_edited.md", "c_missing.md"):
+            shutil.copy(self.ship / "shared" / name, self.root / "shared" / name)
+        code, out = self.run_cli()
+        self.assertEqual(code, 0)
+        self.assertEqual({l.split()[0] for l in out.splitlines()}, {"same"})
 
 
 class TestTheDocs(unittest.TestCase):

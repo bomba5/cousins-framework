@@ -476,9 +476,12 @@ undone.
 A pass takes the next slice of raw memory: the lines no pass has taken
 yet, oldest first with the monthly archives included, up to 40,000
 characters of claims (about 10k tokens). When raw fold has folded away
-the day file dreaming had got to, the next pass starts at the beginning of
-that month's archive, so the month is read again rather than any of it
-skipped. Each claim is
+the day file dreaming had got to, the next pass starts inside that month's
+archive at the first line stamped on or after the day before it (a day of
+slack: day files are named in local time, lines stamped in UTC), so at most
+a day is read again and nothing is skipped. A first pass whose starting day
+was folded early (a compact with fewer hot days than 30) starts inside the
+archive the same way. Each claim is
 shown on one line with its time, truth level, id and topic, cut at 800
 characters. Monthly digests and the framework's own log (`episode:`,
 `job:`, `framework:`) are skipped, and the open

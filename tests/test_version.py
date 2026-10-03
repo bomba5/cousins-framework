@@ -185,3 +185,42 @@ class BadgeLinks(unittest.TestCase):
         app = (_REPO / "cousin_lib" / "console_static" / "app.jsx").read_text()
         self.assertIn("title={build.repo_url}", app)
         self.assertIn("title={build.commit_url}", app)
+
+
+class Announce(unittest.TestCase):
+    """Each long-running process says which release it runs, at its
+    start, under <root>/run/versions/: cousin-upgrade's restart check."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+
+    def test_announce_writes_pid_version_commit_and_checkout(self):
+        import os
+        path = version.announce(self.root, "runner:wren")
+        self.assertEqual(path, self.root / "run" / "versions" / "runner-wren.json")
+        said = version.announced(self.root, "runner:wren")
+        self.assertEqual(said["pid"], os.getpid())
+        self.assertEqual(said["version"], version.version())
+        self.assertEqual(said["commit"], version.git_commit())
+        self.assertEqual(said["checkout"], str(version.CHECKOUT))
+        self.assertEqual(said["name"], "runner:wren")
+        self.assertEqual(oct((self.root / "run").stat().st_mode & 0o777), "0o700")
+        self.assertEqual(sorted(p.name for p in path.parent.iterdir()),
+                         ["runner-wren.json"])     # no temp file left
+
+    def test_nothing_said_reads_none_and_a_failed_write_is_quiet(self):
+        self.assertIsNone(version.announced(self.root, "console"))
+        (self.root / "run").write_text("a file where the directory goes")
+        self.assertIsNone(version.announce(self.root, "console"))
+
+    def test_a_runner_announces_only_inside_an_install_and_not_once(self):
+        from cousin_lib.runner import main
+        home = self.root / "cousins" / "wren"
+        home.mkdir(parents=True)
+        self.assertIsNone(main._announce(home, False))       # no config/
+        (self.root / "config").mkdir()
+        self.assertIsNone(main._announce(home, True))
+        self.assertEqual(main._announce(home, False),
+                         self.root / "run" / "versions" / "runner-wren.json")

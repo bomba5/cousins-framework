@@ -10,6 +10,7 @@ import shutil
 import sqlite3
 import stat
 import sys
+import urllib.parse
 import tempfile
 import threading
 import time
@@ -245,7 +246,9 @@ class TestConfig(OpencodeCase):
         self.assertEqual(config["mcp"], {"cousin": {
             "type": "remote", "url": r._mcp.url,
             "headers": {"Authorization": "Bearer %s" % r._mcp.token}}})
-        self.assertNotIn(":3456", r._mcp.url)
+        # not the subscription bridge's port; a substring check failed on a
+        # random port such as 34567
+        self.assertNotEqual(urllib.parse.urlsplit(r._mcp.url).port, 3456)
         self.assertEqual(config["provider"], {"local": {
             "npm": "@ai-sdk/openai-compatible", "name": "local endpoint (lab)",
             "options": {"baseURL": ENDPOINT}, "models": {"m1": {"name": "m1"}}}})

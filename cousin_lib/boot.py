@@ -1,8 +1,11 @@
-"""Boot packet assembly.
+"""The boot packet's layers and budget engine.
 
-Deterministic composition of the cold-start packet a fresh session
-boots from, within a hard total budget. Three rules shape this module,
-each earned against a real incident in an earlier version:
+What a fresh session boots from is the runner's system prompt and its
+state digest (runner/prompt.py); the digest reads its layers through
+the readers here and fits them with fit(), within a hard total budget.
+The generation counter and its start record live here too. Three rules
+shape this module, each earned against a real incident in an earlier
+version:
 
 - The TOTAL ceiling governs. Per-layer maxima exist, but their sum is
   allowed to exceed the ceiling and the composed packet still may not:
@@ -19,22 +22,18 @@ each earned against a real incident in an earlier version:
   any total. A number for it would be wrong the day someone adds a
   rule, and a truncated law is a cousin that boots having never read the
   rules that bind it - including the two that keep one cousin's memory
-  out of another's. A law that does not fit the total is reported, not
-  trimmed (`LAW INCOMPLETE`), which is what the per-layer cap used to
-  do silently: the cap was applied by the loop that runs before the
-  overflow loop, so the one layer TRUNCATE_ORDER excludes was still cut
-  by the layer above it.
+  out of another's. The per-layer cap used to cut it silently: the cap
+  was applied by the loop that runs before the overflow loop, so the
+  one layer TRUNCATE_ORDER excludes was still cut by the layer above it.
 """
-import hashlib
 import json
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
-from cousin_lib import (capsule, corrections, distill, memory,
-                        self_portrait, status_sections, trace)
+from cousin_lib import capsule, distill, memory, status_sections
 from cousin_lib.config import FrameworkConfig
 
 CHARS_PER_TOKEN = 4
@@ -54,44 +53,18 @@ LAYER_BUDGETS = {
     "task_packet": (500 * CHARS_PER_TOKEN, 2000 * CHARS_PER_TOKEN),
     "trace_summary": (500 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
     "memories": (1000 * CHARS_PER_TOKEN, 4000 * CHARS_PER_TOKEN),
-    # The tool-surface manifest is a list, not prose: bounded in
-    # characters, and the first overflow victim.
-    "tool_surface": (300, 1500),
 }
 
 # Layers fit() may never cut, per-layer or by overflow. A law trimmed to
-# fit is a cousin that never read rules 9-14, and the total ceiling is
-# then reported as LAW INCOMPLETE rather than met by amputating the one
-# layer whose content is the framework's own.
+# fit is a cousin that never read rules 9-14: the total ceiling is not
+# met by amputating the one layer whose content is the framework's own.
 HARD_LAYERS = ("law",)
 
 # Overflow victims first to last; law is never truncated.
 TRUNCATE_ORDER = [
-    "tool_surface", "memories", "trace_summary", "calibration",
+    "memories", "trace_summary", "calibration",
     "task_packet", "active_state", "shared", "self_portrait",
 ]
-
-REQUIRED_BOOT_ACTIONS = """## 10. Required Boot Actions
-
-You must now (INTERNALLY, do not announce):
-1. Reconstruct the current objective in one mental paragraph.
-2. Identify the next action from active-threads.
-3. Verify boot completeness; declare degraded internally if a layer
-   is missing.
-4. Continue silently. Do NOT post a respawn announcement unless the
-   operator explicitly asked for a confirmation.
-5. Before exit, four writes in this order (the same order the flip
-   and the clean stop ask for): reconcile STATUS.md; write
-   data/active-threads.md, one bullet per in-flight thread; save what
-   the session learned that is not in memory yet (cousin-memory
-   remember / decide); LAST, data/handoff.md. The session ends as soon
-   as handoff.md changes, so anything after it can be lost.
-6. Memory writes default to the cousin-conclusion truth level (L3).
-   What the operator told you is operator-stated (L0): record it with
-   `cousin-memory remember "<topic>" "<fact>" --level operator --cite
-   "<where they said it>"`; unverified guesses go in at --level
-   hypothesis.
-"""
 
 
 def _read(path):
@@ -200,10 +173,9 @@ def fit(sections, budgets, order, total_max):
     minimum, one per pass, until the total fits or every victim is at
     its minimum. Pure: returns a new dict and never mutates `sections`;
     a layer `budgets` does not name is never touched (the runner's law).
-    A layer in `HARD_LAYERS` is never cut, so the caller's only job for
-    one is to report it: `hard_overflow`.
-    The module docstring's rules hold here, and both the boot
-    packet and the runner's state digest call this, so they cannot drift."""
+    A layer in `HARD_LAYERS` is never cut.
+    The module docstring's rules hold here; the runner's state digest
+    calls this with the numbers and order above."""
     out = dict(sections)
     for name, (_min, max_chars) in budgets.items():
         if name in HARD_LAYERS:
@@ -221,15 +193,6 @@ def fit(sections, budgets, order, total_max):
         else:
             break  # everything at minimum; cannot shrink further
     return out
-
-
-def hard_overflow(sections, total_max):
-    """`[(layer, chars)]` for every hard layer still over the total after
-    the soft layers have given everything they can, so the caller can say
-    so out loud. Called after fit(), which is what makes the answer
-    true; before it, every layer looks like an offender."""
-    return [(name, len(sections[name])) for name in HARD_LAYERS
-            if name in sections and len(sections[name]) > total_max]
 
 
 def _root(root=None):
@@ -261,53 +224,6 @@ def shared_parts(root=None):
         else:
             index.append("- `%s`: %s" % (path.name, fields.get("description") or path.stem))
     return rules, index
-
-
-TOOL_SURFACE_ABSENT = (
-    "(no tool-surface manifest at data/tool-surface.md - degraded;"
-    " run cousin-tool-surface, or enable its timer)")
-
-
-def _tool_surface():
-    """The manifest cousin-tool-surface writes under the framework
-    root, its own title line dropped (this section already has one).
-    Absent or empty means degraded: the cousin boots without knowing
-    its CLIs, and the fix is one command away."""
-    from cousin_lib.tool_surface import MANIFEST_RELPATH
-    text = _read(FrameworkConfig.from_env().root / MANIFEST_RELPATH)
-    lines = text.strip().splitlines()
-    if lines and lines[0].startswith("# "):
-        lines = lines[1:]
-    body = "\n".join(lines).strip()
-    return body or TOOL_SURFACE_ABSENT
-
-
-def _calibration_base(home):
-    """Distilled calibration file when present, else the committed
-    portrait's calibration section. Absent means degraded: a
-    persona-anchored cousin booting without calibration should know."""
-    distilled = _distilled_body(
-        Path(home) / "memory" / "distilled" / "operator-calibration.md")
-    if distilled:
-        return "## operator-calibration.md\n\n" + distilled
-    section = self_portrait.md_section(
-        _read(self_portrait.committed_path(home)), "Operator Calibration"
-    )
-    if section and "TODO" not in section:
-        return "## Operator Calibration (from self-portrait)\n" + section
-    return "(no operator calibration distilled yet - degraded)"
-
-
-def _calibration(home):
-    """The calibration base plus the recent-corrections summary when any
-    are recorded. Appended, never prepended: the degraded rule keys on
-    the section's first line, and corrections without a distilled
-    calibration are still a degraded boot."""
-    base = _calibration_base(home)
-    summary = corrections.summary_for_boot(home, n=15)
-    if summary == corrections.EMPTY_MARKER:
-        return base
-    return base + "\n\n" + summary
 
 
 def _staleness_header(home):
@@ -351,7 +267,7 @@ def _open_loops_section(status):
     """STATUS.md's live open loops, read the way the handoff writes them
     (cousin_lib.status_sections): the first bare "## Open loops" heading
     up to the next level-1 or level-2 heading; None when there is none.
-    The digest and the boot packet read the same section."""
+    The digest reads the same section."""
     return status_sections.open_loops_section(status)
 
 
@@ -401,7 +317,7 @@ def _distilled_body(path):
 
 def _memories(home, max_chars):
     """The durable floor (memory/distilled, regenerated from raw by
-    assemble), the newest reasoning capsules, recent raw-memory
+    its consumer, the state digest), the newest reasoning capsules, recent raw-memory
     entries (the decide bridge is their producer) and the memory index
     head. Empty is the legitimate
     starting condition of a new cousin."""
@@ -430,7 +346,7 @@ def _memories(home, max_chars):
             # no longer held by anything, so it is not counted
             waiting = review_gate.pending_ids(history)
             held = len({memory.entry_id(e) for e in history} & waiting)
-        except Exception:  # noqa: BLE001 - the packet still assembles
+        except Exception:  # noqa: BLE001 - the digest still composes
             hidden, held = set(), 0
         lines = []
         for path in sorted(raw_dir.glob("*.jsonl"))[-14:]:
@@ -477,20 +393,6 @@ def _frontmatter(text):
     return fields, text[m.end():]
 
 
-def _shared():
-    """The boot packet's shared layer: the rules, then the index."""
-    rules, index = shared_parts()
-    parts = []
-    if rules:
-        parts.append("Operator rules every cousin follows:")
-        parts.extend(rules)
-    if index:
-        parts.append("### Shared reference (read with `cousin-shared "
-                     "read <file>` when relevant)")
-        parts.append("\n".join(index))
-    return "\n\n".join(parts)
-
-
 def _is_degraded(name, content, sections):
     """Per-layer explicit rules; see the module docstring for why this
     is never a substring scan."""
@@ -498,9 +400,7 @@ def _is_degraded(name, content, sections):
         # Empty is the whole of it: an absent law file is an install
         # problem (seed_law never ran, or was deleted), and a cousin
         # booting with no Framework Law is the worst boot there is, so it
-        # is reported rather than filed as somebody else's problem. A law
-        # too LONG for the packet is a different failure and is reported
-        # as LAW INCOMPLETE from assemble, where the fitted sizes are.
+        # is reported rather than filed as somebody else's problem.
         return not content
     if name in ("shared", "trace_summary", "memories"):
         # The trace idle marker and empty memories are a new cousin's
@@ -515,9 +415,6 @@ def _is_degraded(name, content, sections):
     if name == "active_state":
         return not content or content.startswith(
             "(no active state - degraded boot)")
-    if name == "tool_surface":
-        return not content or content.startswith(
-            "(no tool-surface manifest")
     if name == "task_packet":
         if not content:
             return True
@@ -527,147 +424,3 @@ def _is_degraded(name, content, sections):
                 "(no active state - degraded boot)")
         return False
     return not content
-
-
-def _mcp_warning(home):
-    """One line about the MCP connection of the generation that just
-    died. The packet is assembled before the new session exists
-    (`flip` calls `assemble` at :346 and mints the id at :370), so
-    this can only ever report a PAST session. It names which one and
-    predicts nothing about the one now booting: the causes live in
-    files that outlive a session, so an unfixed one repeats, but a
-    repair between the two makes any forecast wrong.
-
-    Silent on a connection that worked, on a generation that left no
-    record, and on its own failure: a diagnostic must not cost a boot.
-    """
-    try:
-        from cousin_lib import mcp_logs
-        from cousin_lib.config import read_session_id
-        dying = read_session_id(home)
-        last = mcp_logs.last_connection(home, session_id=dying or None)
-    except Exception:
-        return ""
-    if not last or last["state"] == "connected":
-        return ""
-    when = last["when"] or "an unrecorded time"
-    who = last["session_id"] or "an unnamed session"
-    # No persisted id (a hand-made cousin, or a first flip) means the
-    # lookup fell back to the newest file, which is the pre-1.6.0
-    # reading and may belong to an older generation. Say so rather
-    # than claim a scope we did not have.
-    caveat = ("" if dying else
-              " This could not be scoped to the generation that just died,"
-              " because no `runtime.session_id` is on file, so it may belong"
-              " to an older one.")
-    if last["state"] == "unrecorded":
-        line = ("MCP: session %s attempted to connect your `cousin`"
-                " server at %s and no outcome was ever recorded" % (who, when))
-        if last["earlier"]:
-            line += (" (an earlier attempt in that session %s)"
-                     % last["earlier"])
-        return (line + ". That is unknown, not absent."
-                " `cousin-mcp --last-connection` reads the record and"
-                " `cousin-mcp --selftest` starts the server." + caveat)
-    reason = (last["reason"] or "no reason recorded").replace("\n", " ").strip()
-    return ("MCP: your `cousin` server FAILED to connect in session %s at"
-            " %s: %s. The causes live in files that outlive a session, so"
-            " one left unfixed repeats. `cousin-mcp --selftest` says"
-            " whether it is.%s" % (who, when, reason, caveat))
-
-
-def assemble(slug, home, *, generation=None):
-    """Compose the boot packet. Returns text, sizes, identity hashes,
-    generation, and the named degraded layers."""
-    home = Path(home)
-    if generation is None:
-        generation = read_generation(home)
-    portrait = _read(self_portrait.committed_path(home))
-    law = _read(_law_path())
-    status = _read(home / "STATUS.md")
-    handoff = _read(home / "data" / "handoff.md")
-    hashes = {
-        "identity_hash": hashlib.sha256(
-            (portrait + law).encode()).hexdigest()[:12],
-        "state_hash": hashlib.sha256(
-            (status + handoff).encode()).hexdigest()[:12],
-        "memory_snapshot": datetime.now(timezone.utc)
-        .isoformat(timespec="seconds"),
-    }
-    # The durable layer is a derived view of raw: regenerate it here so
-    # every packet reads a fresh floor without any cousin habit or
-    # timer (the consumer triggers the producer, like search
-    # self-heal). Best-effort: a failed distill boots a staler floor,
-    # never no boot.
-    try:
-        distill.distill(home)
-    except Exception:
-        pass
-    sections = {
-        "law": law.strip(),
-        "shared": _shared(),
-        "self_portrait": self_portrait.for_boot_packet(home).strip(),
-        "calibration": _calibration(home),
-        "active_state": _active_state(home),
-        "task_packet": _task_packet(home),
-        "trace_summary": trace.summary_for_boot(slug),
-        "memories": _memories(home, LAYER_BUDGETS["memories"][1]),
-        "tool_surface": _tool_surface(),
-    }
-    degraded = [k for k, v in sections.items()
-                if _is_degraded(k, v, sections)]
-    total_max = TOTAL_MAX_CHARS - len(REQUIRED_BOOT_ACTIONS) - 600
-    sections = fit(sections, LAYER_BUDGETS, TRUNCATE_ORDER, total_max)
-    # After fit, unlike the per-layer degraded list above: a hard layer's
-    # size only means anything once the soft layers have given everything
-    # they can, and the one question is whether it fits at all.
-    incomplete = hard_overflow(sections, total_max)
-    body = [
-        "BOOT PACKET FOR COUSIN: %s" % slug,
-        "Generation: %d" % generation,
-        "identity_hash: %s" % hashes["identity_hash"],
-        "state_hash: %s" % hashes["state_hash"],
-        "memory_snapshot: %s" % hashes["memory_snapshot"],
-    ]
-    if degraded:
-        body.append("DEGRADED layers: %s" % ", ".join(sorted(degraded)))
-    for layer, chars in incomplete:
-        body.append(
-            "%s INCOMPLETE: the %s layer is %d chars and this packet's "
-            "budget is %d. It is reported, never trimmed (a trimmed law is "
-            "a law half read), so read the whole of it at %s before "
-            "anything else; every other layer in this packet is complete."
-            % (layer.upper(), layer, chars, total_max, _law_path()))
-    warning = _mcp_warning(home)
-    if warning:
-        body.append(warning)
-    for number, title, key in (
-        (1, "Framework Law", "law"),
-        (2, "Shared Rules and Fleet Memory", "shared"),
-        (3, "Cousin Self-Portrait", "self_portrait"),
-        (4, "Operator Calibration", "calibration"),
-        (5, "Active State", "active_state"),
-        (6, "Current Task Packet", "task_packet"),
-        (7, "Recent Tool Trace Summary", "trace_summary"),
-        (8, "Retrieved Memories", "memories"),
-        (9, "Tool Surface", "tool_surface"),
-    ):
-        body.append("")
-        body.append("## %d. %s" % (number, title))
-        body.append(sections[key])
-    body.append("")
-    body.append(REQUIRED_BOOT_ACTIONS)
-    text = "\n".join(body)
-    for layer, chars in incomplete:
-        trace.log_call(slug, "boot", result_summary="%s INCOMPLETE: %s is"
-                       " %d chars over a %d-char budget"
-                       % (layer.upper(), layer, chars, total_max))
-    return {
-        "text": text,
-        "chars": len(text),
-        "approx_tokens": len(text) // CHARS_PER_TOKEN,
-        "hashes": hashes,
-        "generation": generation,
-        "degraded_sections": sorted(degraded),
-        "incomplete_layers": [name for name, _chars in incomplete],
-    }

@@ -81,7 +81,7 @@ Every tick does this, in this order:
 5. **Index and meetings.** Queue the memory index refresh for the cousins that need it, and run the meetings' tick.
 6. **Housekeeping.** Mark pending requests older than their TTL as `expired`, write `last_tick`, save the state.
 
-A failure inside one cousin (an exception, a bad file) is reported and the walk moves on to the next cousin. A broken one-shot store, index refresh or meetings store is reported and doesn't cost the loops their tick. Errors go to the daemon's stderr, prefixed `cousin-loops:`.
+A failure inside one cousin (an exception, a bad file) is reported and the walk moves on to the next cousin. A broken one-shot store, index refresh or meetings store is reported and doesn't cost the loops their tick. Errors go to the daemon's stderr, prefixed `cousin-loops:`. After each tick the daemon also writes what each step did to `data/health.json`, a count of consecutive failures per component that `cousin-health` prints ([operations](../operations.md#health)).
 
 ## Delivery
 
@@ -239,6 +239,7 @@ Neither kind starts a stopped cousin. A daily flip skips a cousin whose runner i
 |---|---|
 | `data/loops-state.json` | `last_tick`, `last_beat` per slug, `last_fires` per `slug\|loop`, `last_flips`, warning and report bookkeeping. The daemon's memory; losing it means every interval loop fires on the next tick |
 | `data/loops-fires.jsonl` | one `{"ts", "cousin", "loop"}` line per delivered loop fire. The console's drift chart reads it. Heartbeats aren't in it |
+| `data/health.json` | per component: ok or failing, consecutive failures, since when, the last error ([operations](../operations.md#health)) |
 | `data/loop-requests.db` | the request queue |
 | `data/scheduled.db` | one-shots |
 | `<home>/data/heartbeat-mtimes.json` | the heartbeat's view of the identity files |

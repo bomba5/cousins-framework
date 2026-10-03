@@ -127,6 +127,13 @@ class TestPerimeterHygiene(unittest.TestCase):
             self._ignored(self.gitignore, "config/embedding.toml"),
             "a credential-bearing config file would stage")
 
+    def test_the_harness_lock_is_the_one_non_example_config_tracked(self):
+        # read-only data the runner checks against, never a secret; its
+        # carve-out must not open the rest of config/
+        self.assertFalse(self._ignored(self.gitignore, "config/harness.lock.toml"))
+        for other in ("config/harness.toml", "config/accounts.toml", "config/x.lock.toml"):
+            self.assertTrue(self._ignored(self.gitignore, other), other)
+
     def test_a_private_home_under_cousins_is_ignored(self):
         self.assertTrue(
             self._ignored(self.gitignore,

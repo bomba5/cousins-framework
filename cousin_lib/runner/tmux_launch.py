@@ -1,8 +1,10 @@
 """The tmux kind's in-pane launcher.
 
-The pane's command is `exec env -i <env_base> <python> <this file> --home H
-[--fresh] -- claude ...`: tmux's own environment is rebuilt by the login
-shell, so the allowlist is applied INSIDE the pane, by `env -i`, and this
+The pane's command is `exec <python> -I -S -c <KEEP_ONLY> <env_base names>
+<python> <this file> --home H [--fresh] -- claude ...`
+(tmux_pane.env_command): tmux's own environment is rebuilt by the login
+shell, so the allowlist is applied INSIDE the pane, by KEEP_ONLY, which
+takes the names only and keeps the login shell's values, and this
 launcher then
 
   - reads the cousin's account (accounts.for_cousin) and adds its
@@ -41,7 +43,7 @@ EXIT_NOTE = ("data", "run", "tmux-launch-exit.txt")   # the last refusal, for th
 
 
 def env_base(shell_env, *, env_allow=()):
-    """The pane's `env -i` allowlist from the runner's environment: BASE_ENV,
+    """The pane's allowlist from the runner's environment: BASE_ENV,
     every LC_*, and the names `[agent] env_allow` lists; then the hard deny
     (tmux_pane.denied: CLAUDE*, ANTHROPIC*, an auth variable or a
     credential-shaped name), which beats env_allow."""
@@ -68,7 +70,7 @@ def env_allow_of(agent):
 
 
 def argv(*, home, session, model=None, effort=None, fresh, launcher=None):
-    """The pane's command after `env -i <base>`: this launcher (by default
+    """The pane's command after KEEP_ONLY and its names: this launcher (by default
     this file), run by absolute path, then the CLI's argv. `session` is
     (flag, id), TmuxRunner's shape: "--session-id" mints the session,
     "--resume" resumes it. `fresh` asks the launcher to append the context

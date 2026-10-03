@@ -1,0 +1,8 @@
+# Sanctioned corrections to released CHANGELOG sections, read by
+# tests/test_docs_reference.py. One line per corrected version:
+#   X.Y.Z <commit> <reason>
+# The test accepts a released section that differs from its tag only when
+# it is listed here and equals the section as of the listed commit, so a
+# later edit to the same section fails again. A new correction is a new
+# line with the commit that made it.
+3.9.0 45f0f8d an entry added to the released 3.7.0 section after its tag moved under 3.9.0, where the change landed, and a wrong module name in it fixed

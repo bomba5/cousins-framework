@@ -11,9 +11,11 @@ build/
 # this keeps them from ever reaching staging. The ignore excludes the
 # CONTENTS of config/ (not the directory) so the .example re-include
 # can fire - git does not descend into an excluded directory to reach
-# a carve-out. Safe example configs ship as config/*.example.
+# a carve-out. Safe example configs ship as config/*.example, and the
+# harness lock (read-only data, never a secret) as config/harness.lock.toml.
 config/*
 !config/*.example
+!config/harness.lock.toml
 cousins/
 # A cousin home's secrets (the api_key auth mode's key file), wherever
 # the home lives; the directory also carries its own "*" .gitignore.

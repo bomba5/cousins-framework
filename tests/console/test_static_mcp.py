@@ -33,7 +33,7 @@ class McpJsx(unittest.TestCase):
         self.assertGreaterEqual(self.src.count("etag: data.etag"), 3)
 
     def test_the_ui_says_why_a_secret_is_refused_and_why_the_handoff_is_kept(self):
-        self.assertIn("on its command line (--mcp-config)", self.src)
+        self.assertIn("in a private file, never on its command line", self.src)
         self.assertIn("which any user on this host can read", self.src)
         self.assertIn("every generation ends through it", self.src)
         self.assertIn("A guardrail, not a sandbox", self.src)

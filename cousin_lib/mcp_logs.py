@@ -104,13 +104,9 @@ def last_connection(home, root=None, *, session_id=None, server=SERVER_NAME):
 
     With session_id, only that session counts. The caller that wants
     this is one running INSIDE the session it asks about, where the id
-    is already known. The boot packet is not such a caller: it is
-    assembled before the new session is minted (`flip.assemble` at
-    :346, `_mint_session_id` at :370), so the most it can name is the
-    generation that just died, which is what it passes. Note that a
-    harness session can live for weeks and reconnect inside itself, so
-    an id scopes a span, not a boot: read `when` before treating an
-    answer as recent.
+    is already known. Note that a harness session can live for weeks and
+    reconnect inside itself, so an id scopes a span, not a boot: read
+    `when` before treating an answer as recent.
 
     Never raises on a missing or damaged log; a diagnostic that fails
     loudly on its own absence is worse than none.

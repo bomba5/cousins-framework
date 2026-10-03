@@ -32,7 +32,7 @@ edit a `.jsx` file and reload.
 | `cousin_lib/delivery.py` | the one way anything reaches a [cousin](glossary.md#cousin): a typed, thread-keyed `Item` handed to `deliver()`, which picks the backend. Producers never build an injector themselves |
 | `cousin_lib/gate/` | the contamination gate (`cousin-gate`) |
 | `templates/` | `cousin-CLAUDE.template.md` (every cousin's identity file) and `hive-node/` (the remote node runtime, installer and identity) |
-| `config/` | only `*.example` files are tracked. A live install's real configs sit next to them and are gitignored |
+| `config/` | only `*.example` files and `harness.lock.toml` (the tested harness versions, read-only data) are tracked. A live install's real configs sit next to them and are gitignored |
 | `systemd/` | user unit templates and their README |
 | `hooks/` | the shell hooks the agent harness runs at session start, stop and before compaction |
 | `examples/wren/` | a sample cousin home, rendered from the template |
@@ -40,7 +40,7 @@ edit a `.jsx` file and reload.
 
 `cousins/`, `data/` and `shared/` appear under the checkout once you run
 an install from it. They're gitignored, as are `config/*` (except the
-examples), `.secrets/` and `*-node.tar.gz`.
+examples and the harness lock), `.secrets/` and `*-node.tar.gz`.
 
 ## Running the tests
 
@@ -106,6 +106,12 @@ The gate's generic checks run inside the suite (see below), so CI gates
 every commit. Your denylist of real names is never in CI, since it can't
 be in the repo.
 
+The checkout fetches the whole history and its tags (`fetch-depth: 0`),
+and the suite runs with `COUSIN_REQUIRE_TAGS=1`: `tests/test_docs_reference.py`
+compares each released CHANGELOG section with its tag, and there a clone
+without tags fails instead of skipping. Locally, with no tags, that one
+check skips and prints why.
+
 `.github/workflows/image.yml` runs on every push and pull request too. It
 builds the image from the checkout, runs the runner contract suite
 (`tests/runner/contract`) inside it, runs `tests.test_docker_files` on the
@@ -130,8 +136,8 @@ quick start block, the job fails until
 ## The image's pins
 
 The Dockerfile's inputs are pinned, so a build of one checkout installs the
-same packages on any day. pyproject.toml keeps its ranges for pip users; only
-the image is locked.
+same packages on any day. pyproject.toml keeps ranges for pip users, except
+the `sdk` extra, which is exact (see [The harness lock](#the-harness-lock)).
 
 - **The base image**: one global `ARG PYTHON_IMAGE`, every `FROM` names it.
   Its default is the tag with its multi-arch index digest (not a
@@ -158,6 +164,82 @@ the image is locked.
   sdk extra and the backend, every pin hashed.
 - **The opencode binary**: its version and two sha256s in the
   `opencode-fetch` stage (see the comment there).
+
+## The harness lock
+
+The agent harness is a toolchain: the Agent SDK, the Claude Code CLI its
+wheel bundles, opencode and the model ids. `config/harness.lock.toml` names
+the versions the framework is tested with, and a version changes there, in
+a pull request of its own, never by being found out from a broken
+[turn](glossary.md#turn).
+
+`tests/test_harness_lock.py` (the unit suite, every pull request, no
+network) is red while any other place disagrees with the lock:
+
+| place | what must equal the lock |
+|---|---|
+| `docker/requirements.txt` | the `claude-agent-sdk==` pin: `[sdk] claude-agent-sdk` |
+| `Dockerfile` | the `opencode-fetch` stage's `version=`: `[opencode] version` |
+| `pyproject.toml` | the `sdk` extra, exactly `claude-agent-sdk==<[sdk] claude-agent-sdk>` |
+| `cousin_lib/config.py` | `DEFAULT_MODELS`, the same ids in the same order: `[models] claude` |
+| `README.md` | the opencode quick start's `--model`: `[models] opencode_default` |
+
+`tests/test_docker_files.py` reads its opencode version from the lock too.
+At start, `cousin-runner` compares what is installed with the lock: a
+`harness` event, a warning on a mismatch, a refusal under `[agent]
+strict_harness` ([configuration](configuration.md#agent-strict_harness)).
+
+### Bumping it
+
+1. Change the lock and every place in the table above in one pull request:
+   `docker/requirements.txt` by re-resolving it (`sh docker/lock.sh`, after
+   the `sdk` extra moved), `[sdk] bundled_cli` from the new wheel
+   (`claude_agent_sdk/_cli_version.py`), the opencode version and its two
+   sha256s in the Dockerfile. The unit suite says what is still behind.
+2. Install the new versions on a host with a login (`pip install -e
+   ".[mcp,sdk]"`, the pinned opencode) and run the live matrix there.
+3. Paste its "tested with" block into the pull request's description.
+
+### The live matrix
+
+`tests/live/` tests what the harness does, not the arguments the framework
+passes it. It needs a login and spends a few small model turns, so it is
+opt-in and never in public CI: without `COUSIN_LIVE=1` every item is a
+skip that says so (and the unit suite checks no workflow sets the
+variable).
+
+```sh
+COUSIN_LIVE=1 python -m tests.live
+```
+
+runs it on this host's default account and prints the block: the locked and
+the installed versions, then one line per item, `pass`, `FAIL`, `ERROR` or
+`skipped: <why>`. The exit status is the test run's (0 every item passed, 1
+otherwise), so it gates without a pipe. The items: 0 the installed versions
+are the lock's; 1 a session started with `tools=[]` and no MCP server lists
+exactly the expected tools in its init message (none: a connector that
+attaches anyway is red); 2 a turn with thinking on has the usage keys
+`usage.py` reads and no thinking count apart from `output_tokens`; 3 a
+session's transcript file grows with each turn and holds the prompt; 4 every
+model in `[models] claude` answers one turn on the locked CLI; 5 `opencode
+--version` is the lock's and one turn on `[models] opencode_default` returns
+text (`OPENCODE_BIN`, else `COUSIN_OPENCODE_BIN`, else `opencode` on PATH;
+skipped without one). `COUSIN_LIVE_MODEL` picks the model of items 1 to 3.
+
+Prove item 1 can fail before trusting it green: run it with a tool injected,
+and it must fail naming that tool.
+
+```sh
+COUSIN_LIVE=1 COUSIN_LIVE_INJECT_TOOL=Bash python -m unittest tests.live.test_matrix -k test_1
+```
+
+Item 6, the README's bare-host quick start, is manual: on a host with
+Claude Code logged in, in a fresh clone and a fresh venv, run the README's
+"Quick start: bare host" block as written, then check `pip show
+claude-agent-sdk` prints the lock's version, the first cousin answers in the
+console, and its runner's [stream](glossary.md#stream) has a `harness` event with
+`"ok": true`.
+Note the result as item 6 in the block.
 
 ## The contamination gate
 
@@ -245,8 +327,10 @@ mean a file is good; that's still review.
   comes with a test. A bug fix comes with a test that fails without the
   fix.
 - **Generic names in code.** No real people, cousins or hosts in code,
-  comments, tests or docs. Use the cast above everywhere. The gate will
-  catch the rest.
+  comments, tests, docs or commit messages. Use the cast above
+  everywhere. The gate will catch the rest: `cousin-gate --git-visible`
+  for the tree and `cousin-gate --commits origin/main..HEAD` for the
+  messages, both with your denylist from outside the tree.
 - **CLI exit codes.** 0 for success, 1 for a failure while doing the
   work, 2 for bad usage or configuration. Some commands add their own
   (`cousin-reply` uses 3 for a message the outbound filter blocked).
@@ -404,3 +488,13 @@ decide whether the version affects them. Reasoning belongs in the commit or
 the pull request, not here. `tests/test_version.py` fails if the
 current version has no `## <version>` heading there, and if the version
 isn't plain `major.minor.patch`.
+
+A released section is closed: once `v<version>` is tagged, its section
+stays the text that tag shipped, and a change that lands later goes under
+the version it lands in. `tests/test_docs_reference.py` compares each
+section with its own tag (sections older than the oldest tag with that
+tag); a section with no tag yet is unreleased and free to change. When a
+released section has to be corrected, the correction is one line in
+`tests/data/changelog_corrections.txt`: the version, the commit that
+corrected it, and why. The test then accepts that section only as that
+commit left it.

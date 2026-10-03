@@ -1,6 +1,6 @@
 """Corrections capture: detection classes, the jsonl store, the boot
 summary, and the two integration points (chat server on an operator
-send; boot's calibration layer).
+send; the state digest's calibration layer).
 
 The detection tests are re-expressed from an earlier version's own
 unit tests for this module; the patterns are generic English and carry
@@ -15,8 +15,8 @@ import unittest
 from unittest import mock
 
 from cousin_lib import corrections
-from cousin_lib.boot import assemble
 from cousin_lib.config import CousinConfig
+from cousin_lib.runner import prompt
 from cousin_lib.server import chat_api
 
 
@@ -127,19 +127,18 @@ class TestRecordAndSummary(StoreCase):
             (self.home / "data" / "corrections.jsonl").exists())
 
 
-class TestBootCalibration(unittest.TestCase):
+class TestDigestCalibration(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = pathlib.Path(tmp.name)
         self.home = self.root / "cousins" / "testa"
         (self.home / "data").mkdir(parents=True)
-        (self.home / "memory").mkdir()
+        (self.home / "memory" / "distilled").mkdir(parents=True)
         (self.root / "config").mkdir()
         (self.root / "config" / "law.md").write_text("1. Law.\n")
-        (self.home / "self-portrait.md").write_text(
-            "# Cousin Self-Portrait: testa\n## Voice\nPlain.\n"
-            "## Operator Calibration\nShort statuses.\n")
+        (self.home / "memory" / "distilled" / "operator-calibration.md").write_text(
+            "Short statuses.\n")
         (self.home / "STATUS.md").write_text(
             "# STATUS\n\n## Open loops\n\n- one\n")
         patcher = mock.patch.dict(os.environ,
@@ -147,38 +146,37 @@ class TestBootCalibration(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def _digest(self):
+        return prompt.state_digest(self.home, root=self.root, slug="testa",
+                                   generation=1)
+
     def _calibration_section(self, text):
-        start = text.index("## 4. Operator Calibration")
-        end = text.index("## 5. Active State")
+        start = text.index("Operator Calibration")
+        end = text.index("Active State")
         return text[start:end]
 
     def test_calibration_carries_the_summary_when_present(self):
         corrections.record(self.home, user="Sam",
                            text="don't lead with the caveat",
                            kind="negative_directive")
-        pkt = assemble("testa", self.home, generation=1)
-        section = self._calibration_section(pkt["text"])
+        digest = self._digest()
+        section = self._calibration_section(digest["text"])
         self.assertIn("Short statuses.", section)
         self.assertIn("# Recent operator corrections (last 1)", section)
         self.assertIn("lead with the caveat", section)
-        self.assertNotIn("calibration", pkt["degraded_sections"])
+        self.assertNotIn("calibration", digest["degraded_sections"])
 
     def test_no_corrections_leaves_calibration_untouched(self):
-        pkt = assemble("testa", self.home, generation=1)
-        section = self._calibration_section(pkt["text"])
+        section = self._calibration_section(self._digest()["text"])
         self.assertNotIn("Recent operator corrections", section)
         self.assertNotIn("no corrections recorded", section)
 
-    def test_degraded_calibration_still_surfaces_corrections(self):
-        # A missing portrait section is still degraded (the flag is a
-        # per-layer rule), but recorded corrections are calibration
-        # data and must not vanish with it.
-        (self.home / "self-portrait.md").write_text(
-            "# Cousin Self-Portrait: testa\n## Voice\nPlain.\n")
+    def test_no_distilled_calibration_still_surfaces_corrections(self):
+        # Recorded corrections are calibration data and must not vanish
+        # with a missing distilled calibration.
+        (self.home / "memory" / "distilled" / "operator-calibration.md").unlink()
         corrections.record(self.home, user="Sam", text="stop", kind="halt")
-        pkt = assemble("testa", self.home, generation=1)
-        self.assertIn("calibration", pkt["degraded_sections"])
-        self.assertIn("[halt]", self._calibration_section(pkt["text"]))
+        self.assertIn("[halt]", self._calibration_section(self._digest()["text"]))
 
 
 class TestChatSendRecords(unittest.TestCase):

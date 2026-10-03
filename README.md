@@ -88,12 +88,12 @@ shell on your box, continuously, this is not for you.
 
 Isolation is policy, not permission. Every cousin runs as the same OS user,
 so the operating system does not keep one cousin out of another's files.
-What separates them is the framework's policy: on the `sdk` lane the tool
+What separates them is the framework's policy: on the `sdk` [lane](docs/glossary.md#lane) the tool
 gate refuses a subagent's writes to the law, the portraits, canonical shared
 memory, its own cousin's configuration and other cousins' homes (in a Bash
 command it catches what it can parse), and reads always pass. The `opencode`
 and `tmux` lanes have no gate and say so at every start. Homes are created
-0700 and the supervisor runs everything under umask 077, which keeps other
+0700 and the [supervisor](docs/glossary.md#supervisor) runs everything under umask 077, which keeps other
 users on the host and other uids out, not one cousin from another: a
 cousin's own shell can still read another cousin's files. See
 [the perimeter](docs/memory.md#the-perimeter) and

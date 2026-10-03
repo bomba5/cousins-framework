@@ -93,3 +93,31 @@ class TestThroughTheHooks(WatchCase):
         again = asyncio.run(cbs["UserPromptSubmit"](
             {"hook_event_name": "UserPromptSubmit", "prompt": "and?"}, None, {}))
         self.assertEqual(again, {})
+
+    def test_a_claim_a_dreaming_pass_wrote_reaches_the_next_prompt(self):
+        """The seam end to end, from the writer's side: the entry is
+        stamped by dream_memory's own operation, not written here as a
+        dict, so a rename of the source string on either half of the seam
+        (the pass that stamps `dream`, the watch that reads it) stops the
+        note reaching a live session instead of failing quietly."""
+        from cousin_lib import dream_memory
+        memory.ensure_layout(self.home)
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root,
+                              machine=StateMachine(on_change=lambda *a: None),
+                              stream=EventStream(self.home, "mw"), recall=lambda body: (None, 0),
+                              memory_watch=memory_watch.MemoryWatch(self.home))
+        pass_id = "20261003T040000-seam1"
+        dream_memory.slice_for(self.home, chars=40000)
+        dream_memory.begin(self.home, pass_id)
+        record = next(o for o in dream_memory.OPERATIONS
+                      if o["name"] == "remember")["fn"](
+            self.home, pass_id, {"topic": "kestrel", "fact": "the barn has a door"})
+        out = asyncio.run(cbs["UserPromptSubmit"](
+            {"hook_event_name": "UserPromptSubmit", "prompt": "go on"}, None, {}))
+        context = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("the barn has a door", context)
+        self.assertIn(record["created"], context)      # keyed by entry id
+        self.assertIn("by dreaming", context)
+        again = asyncio.run(cbs["UserPromptSubmit"](
+            {"hook_event_name": "UserPromptSubmit", "prompt": "and?"}, None, {}))
+        self.assertEqual(again, {})

@@ -256,6 +256,7 @@ class TestTheDefaultReviewer(_Base):
         opts = made[1].options
         self.assertEqual((opts.tools, opts.mcp_servers, opts.max_turns), ([], {}, 1))
         self.assertIn("no-session-persistence", opts.extra_args)
+        self.assertIn("strict-mcp-config", opts.extra_args)       # no claude.ai connectors
         self.assertEqual(opts.model, "claude-haiku-4-5-20251001")
         self.assertEqual(str(opts.cwd), str(self.home / "data" / "review-cwd"))
         self.assertIn("ledger fact 3", str(made[1].queries))

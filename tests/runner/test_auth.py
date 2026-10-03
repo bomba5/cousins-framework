@@ -676,6 +676,7 @@ class TestValidate(HermeticCase):
         self.assertIsNone(o.resume); self.assertFalse(o.hooks)
         self.assertIn("no-session-persistence", o.extra_args)    # no transcript left behind
         self.assertIsNone(o.extra_args["no-session-persistence"])
+        self.assertIn("strict-mcp-config", o.extra_args)         # no claude.ai connectors
         self.assertNotEqual(o.cwd, str(home)); self.assertFalse(os.path.exists(o.cwd))
         self.assertEqual(list((home / "data").iterdir()), [])     # the cousin's runner never ran
 

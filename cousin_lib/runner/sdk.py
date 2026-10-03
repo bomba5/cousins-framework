@@ -2535,7 +2535,7 @@ class SdkRunner:
         options = sdk.ClaudeAgentOptions(cwd=str(cwd), model=model, env=env,
                                          setting_sources=[], tools=[], mcp_servers={},
                                          max_turns=1,
-                                         extra_args={"no-session-persistence": None})
+                                         extra_args=dict(BARE_SESSION_ARGS))
         client = self.client_factory(options)
         await client.connect()
         try:
@@ -2956,6 +2956,13 @@ class _ScrubbedAuthEnv:
         return False
 
 
+# A throwaway session that answers with text only (the review gate's
+# reviewer, validate): no transcript, and no MCP server but the ones it is
+# given. Without strict-mcp-config the CLI attaches the account's claude.ai
+# connectors whatever mcp_servers says, ~42k tokens read on every call.
+BARE_SESSION_ARGS = {"no-session-persistence": None, "strict-mcp-config": None}
+
+
 def validate_account(account, root, *, model=None, effort=None, timeout=90.0,
                      client_factory=None, commit_attribution=True):
     """`cousin-runner --check-auth --validate`: ONE smallest model
@@ -2982,7 +2989,7 @@ def validate_account(account, root, *, model=None, effort=None, timeout=90.0,
     options = sdk.ClaudeAgentOptions(cwd=cwd, model=model, effort=effort, env=env,
                                      setting_sources=[], tools=[], mcp_servers={}, max_turns=1,
                                      settings=_attribution_settings(commit_attribution),
-                                     extra_args={"no-session-persistence": None})
+                                     extra_args=dict(BARE_SESSION_ARGS))
     factory = client_factory or (lambda o: sdk.ClaudeSDKClient(options=o))
 
     async def one_turn():

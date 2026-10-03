@@ -194,6 +194,8 @@ class TestPass(DreamCase):
         # the session has no built-in tools: memory operations only
         self.assertEqual(client.options.tools, [])
         self.assertEqual(list(client.options.mcp_servers), ["dream"])
+        # and the CLI attaches nothing else (the account's claude.ai connectors)
+        self.assertIn("strict-mcp-config", client.options.extra_args)
         self.assertEqual(client.options.model, dreaming.DEFAULT_MODEL)
         (rec,) = dreaming.passes(self.home)
         self.assertEqual((rec["result"], rec["trigger"], len(rec["changes"])),

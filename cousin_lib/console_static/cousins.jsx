@@ -56,11 +56,7 @@ function CousinsView({ cousins, setCousins, setActiveCousin }) {
       const { r, d } = action === "start"
         ? await apiSend("POST", `/api/cousins/${c.slug}/start`)
         : await apiSend("POST", `/api/cousins/${c.slug}/stop`);
-      if (r.ok && d.ok && d.status === "closing") {
-        // A clean stop: the cousin writes its handoff and memory first
-        // (up to five minutes); the row turns stopped when it is done.
-        flash(`stopping ${c.slug}: saving handoff and memory first`, 5000);
-      } else if (r.ok && d.ok) {
+      if (r.ok && d.ok) {
         flash((action === "start" ? "started " : "stopped ") + c.slug + (d.status === "already running" ? " (already running)" : ""));
       } else {
         flash("failed: " + (d.error || `HTTP ${r.status}`), 4000);

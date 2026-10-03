@@ -43,7 +43,17 @@ The rules, each with its source of truth:
 
 Precision over recall: a line whose clause negates or dates the phrase
 (not, never, no longer, used to, was, replied, logged ...), names a
-fallback or a condition, or makes claims both ways, is not reported."""
+fallback or a condition, or makes claims both ways, is not reported; nor
+is a line about a command's syntax (its --help, arguments, flags, shape,
+usage), which describes the CLI rather than tells the cousin to run it.
+A line that names commands to state a distinction (two of them with only,
+vs, not, but ...; "reaches you via"; a command given to the operator or
+to peers) is reported with a fix that keeps the distinction in tool terms.
+
+Each finding carries the matched phrase (`match`), and its shown line is
+windowed around it, so the phrase is visible on a long line. The summary
+counts findings per rule and, where one claim repeats, the distinct claims
+(same rule, same matched phrase, same cousin)."""
 import re
 from pathlib import Path
 
@@ -73,6 +83,15 @@ _HEDGE = re.compile(
 _FALLBACK = re.compile(
     r"\bfall(?:s|ing)?[ -]?back\b|\bfallback\b"
     r"|\b(?:fails?|failed|errors?|missing|unavailable|down|broken)\b", re.I)
+# A line about how a command is called describes the CLI, it is no habit.
+_USAGE = re.compile(r"--help\b|\b(?:arguments?|argv|flags?|syntax|shape|usage|verify)\b", re.I)
+# Two commands set against each other, or the channel something arrives on:
+# the line states a distinction the tools state too.
+_CONTRAST = re.compile(r"\b(?:only|vs|versus|not|instead|while|whereas|but)\b", re.I)
+_REACH_VIA = re.compile(r"\breach(?:es)?\s+(?:[\w'-]+\s+){1,2}?(?:via|through)\b", re.I)
+# A command assigned to an audience: "`X` = operator", "X for peers only".
+_AUDIENCE = re.compile(r"(?:\bfor\s+(?:the\s+|my\s+|your\s+)?|=\s*|\bonly\b.{0,40}?)"
+                       r"\b(?:operators?|peers?)\b|\b(?:operators?|peers?)\s+only\b", re.I)
 _CONDITION = re.compile(r"\b(?:when|while|if|unless|until|during|without|before|after)\b", re.I)
 _BOUNDARY = re.compile(r"[.;!?](?:\s|$)")
 
@@ -316,12 +335,36 @@ def _hedged(line, start):
     return bool(_HEDGE.search(_clause_before(line, start)))
 
 
-def _finding(facts, path, lineno, line, rule, fact, fix):
+def _snippet(line, span):
+    """The stripped line, cut to _MAX_SHOWN around `span` (the match) with
+    an ellipsis on each side cut, so the match is always shown."""
     text = line.strip()
-    if len(text) > _MAX_SHOWN:
-        text = text[:_MAX_SHOWN - 3] + "..."
+    if len(text) <= _MAX_SHOWN:
+        return text
+    lead = len(line) - len(line.lstrip())
+    start = min(max(span[0] - lead, 0), len(text))
+    end = min(max(span[1] - lead, start), len(text))
+    if end - start > _MAX_SHOWN - 6:
+        lo, hi = start, end                   # the match alone is longer than the room
+    else:
+        lo = max(0, start - (_MAX_SHOWN - (end - start)) // 2)
+        hi = min(len(text), lo + _MAX_SHOWN)
+        lo = max(0, hi - _MAX_SHOWN)
+        lo += 3 if lo > 0 else 0
+        hi -= 3 if hi < len(text) else 0
+    return ("..." if lo > 0 else "") + text[lo:hi] + ("..." if hi < len(text) else "")
+
+
+def _finding(facts, path, lineno, line, span, rule, fact, fix):
     return {"cousin": facts.slug, "file": _rel(path, facts.root), "line": lineno,
-            "text": text, "rule": rule, "fact": fact, "fix": fix}
+            "text": _snippet(line, span), "match": line[span[0]:span[1]], "rule": rule,
+            "fact": fact, "fix": fix}
+
+
+def _claim_key(item):
+    """What makes two findings one claim: cousin, rule, the matched phrase
+    with case, punctuation and spacing normalised."""
+    return (item["cousin"], item["rule"], re.sub(r"[\W_]+", " ", item["match"].lower()).strip())
 
 
 def lane_findings(facts, path, numbered):
@@ -332,13 +375,14 @@ def lane_findings(facts, path, numbered):
                          % "|".join(re.escape(c) for c in sorted(clis, key=len, reverse=True)))
     out = []
     for lineno, line in numbered:
-        seen = set()
+        if _FALLBACK.search(line) or _USAGE.search(line):
+            continue
+        mentions = {}                         # every command the line names, hedged or not
         for m in pattern.finditer(line):
             if line[m.end():m.end() + 1] == "." and line[m.end() + 1:m.end() + 2].isalnum():
                 continue                      # a file name (cousin-reply.py), not a command
-            if _hedged(line, m.start()) or _FALLBACK.search(line):
-                continue
-            words = tuple(t.lower() for t in _CLI_TOKEN.findall(line[m.end():m.end() + 80])[:4])
+            tokens = list(_CLI_TOKEN.finditer(line, m.end(), m.end() + 80))[:4]
+            words = tuple(t.group(0).lower() for t in tokens)
             best = None
             for want, tool, command in clis[m.group(1)]:
                 if words[:len(want)] == want and (best is None or len(want) > len(best[0])):
@@ -347,20 +391,33 @@ def lane_findings(facts, path, numbered):
                 continue
             want, tool, command = best
             said = " ".join((m.group(1),) + want)
-            if said in seen:
-                continue
-            seen.add(said)
+            hedged = _hedged(line, m.start())
+            if said in mentions and (hedged or not mentions[said][5]):
+                continue                      # said already, unhedged the first time
             named = facts.tool_name(tool)
             use = ("the `%s` tool's `%s` command" % (named, command) if command
                    else "the `%s` tool" % named)
+            end = tokens[len(want) - 1].end() if want else m.end()
+            mentions[said] = (m.start(), end, said, tool, use, hedged)
+        mentions = sorted(mentions.values())
+        if not mentions:
+            continue
+        contrast = ((len(mentions) > 1 and _CONTRAST.search(line)) or _REACH_VIA.search(line)
+                    or _AUDIENCE.search(line))
+        for start, end, said, tool, use, hedged in mentions:
+            if hedged:
+                continue
             where = ("every runner lane serves it" if tool == "reply"
                      else "from %s" % facts.registry[1])
+            fix = ("rewrite the distinction in tool terms: %s" % ", ".join(
+                       "`%s` -> %s" % (s, u) for _s, _e, s, _t, u, _h in mentions)
+                   if contrast else "use %s instead of `%s`" % (use, said))
             out.append(_finding(
-                facts, path, lineno, line, "lane",
+                facts, path, lineno, line, (start, end), "lane",
                 "%s runs on the %s runner (cousin.toml [agent] runner), where `%s` is the"
                 " terminal lane's habit: %s replaces it (%s)" % (
                     facts.slug, facts.lane, said, use, where),
-                "use %s instead of `%s`" % (use, said)))
+                fix))
     return out
 
 
@@ -392,7 +449,7 @@ def billing_findings(facts, path, numbered):
                       else "the host login (no [agent] account)" if account.implicit
                       else "cousin.toml [agent] account, config/accounts.toml")
             out.append(_finding(
-                facts, path, lineno, line, "billing",
+                facts, path, lineno, line, m.span(), "billing",
                 "the line says %s (\"%s\"); %s runs on account %r, kind %s: %s (%s)" % (
                     claim, m.group(0), facts.slug, account.name, account.kind,
                     _billing_of(account), source),
@@ -435,7 +492,7 @@ def peer_findings(facts, path, numbered, others, fw):
             if _can_message(other, facts, fw) is not True:
                 continue
             out.append(_finding(
-                facts, path, lineno, line, "peer",
+                facts, path, lineno, line, m.span(), "peer",
                 "%s can message %s: %s's registry (%s) serves `send`, both are in each other's"
                 " peer list (cousin.toml [cousin] peer_visible) and %s takes delivery on the %s"
                 " runner" % (other.slug, facts.slug, other.slug, other.registry[1], facts.slug,
@@ -454,7 +511,7 @@ def tool_findings(facts, path, numbered):
             if m.group(1) in served or _hedged(line, m.start()):
                 continue
             out.append(_finding(
-                facts, path, lineno, line, "tool",
+                facts, path, lineno, line, m.span(), "tool",
                 "%s's cousin server serves no `%s`: its tools are %s (%s)" % (
                     facts.slug, m.group(1), ", ".join(sorted(served)), facts.registry[1]),
                 "name a tool it serves, or remove the line"))
@@ -494,8 +551,14 @@ def check_identity(root, homes, cousin=None):
     if not chosen:
         summary = "no cousin homes under %s" % (Path(fw.root) / "cousins")
     elif items:
-        counts = ", ".join("%s %d" % (r, sum(1 for i in items if i["rule"] == r))
-                           for r in RULES if any(i["rule"] == r for i in items))
+        counts = []
+        for r in RULES:
+            mine = [i for i in items if i["rule"] == r]
+            if mine:
+                distinct = len({_claim_key(i) for i in mine})
+                counts.append("%s %d%s" % (r, len(mine), "" if distinct == len(mine)
+                                           else " (%d distinct)" % distinct))
+        counts = ", ".join(counts)
         summary = "%d line%s contradict%s the framework in %d of %d cousin%s (%s)" % (
             len(items), "" if len(items) == 1 else "s", "s" if len(items) == 1 else "",
             len(cousins), n, "" if n == 1 else "s", counts)

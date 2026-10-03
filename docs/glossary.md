@@ -6,7 +6,7 @@ word means here and where the page that covers it is.
 ### boot packet
 
 the text a fresh session starts from: the framework law,
-the self-portrait, the active state, recent memory and the tool surface. It
+the self-portrait, the active state and recent memory. It
 is rebuilt from disk at every flip and rollover. See
 [reference/lifecycle.md](reference/lifecycle.md).
 

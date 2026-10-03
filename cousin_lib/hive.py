@@ -18,6 +18,7 @@ HiveError so the caller behaves single-machine, never crashing.
 """
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -45,6 +46,9 @@ MAX_BODY_BYTES = 1024 * 1024
 # periods: one missed checkin is jitter, two and a half is gone.
 ONLINE_FACTOR = 2.5
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
+# Where `cousin-hive send` and `recall` find their token when no
+# --token-file is given: the node's own (node.env sets it).
+TOKEN_ENV = "HIVE_TOKEN"
 
 
 class HiveError(Exception):
@@ -960,6 +964,49 @@ def _store_from_env():
     return HiveStore(_root_from_env() / "shared" / "hive")
 
 
+def read_token_file(path, stdin=None):
+    """The token in the file at `path`, or on standard input when `path` is
+    `-`, stripped. ValueError, never quoting the content, when it cannot be
+    read or is not one word. This is how a CLI takes a token: on its
+    command line, every local user could read it (`ps`,
+    /proc/<pid>/cmdline)."""
+    where = "standard input" if path == "-" else path
+    try:
+        if path == "-":
+            text = (stdin if stdin is not None else sys.stdin).read()
+        else:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+    except (OSError, UnicodeDecodeError) as err:
+        raise ValueError("cannot read the token from %s: %s"
+                         % (where, getattr(err, "strerror", None) or type(err).__name__))
+    token = text.strip()
+    if len(token.split()) != 1:
+        raise ValueError("%s does not hold one token" % where)
+    return token
+
+
+def warn_token_flag(prog):
+    """The one line a deprecated `--token T` prints; the flag still works."""
+    print("%s: --token is deprecated: the token is on the command line, where every"
+          " local user can read it; use --token-file PATH (- for stdin)" % prog,
+          file=sys.stderr)
+
+
+def _client_token(args, environ=None):
+    """send's and recall's token: --token-file, else the deprecated --token,
+    else HIVE_TOKEN. ValueError when none gives one."""
+    if args.token_file is not None:
+        return read_token_file(args.token_file)
+    if args.token is not None:
+        warn_token_flag("cousin-hive")
+        return args.token
+    token = (os.environ if environ is None else environ).get(TOKEN_ENV, "").strip()
+    if not token:
+        raise ValueError("no token: give --token-file PATH (- for stdin) or set %s" % TOKEN_ENV)
+    return token
+
+
 def _fmt_age(seconds):
     if seconds is None:
         return "never"
@@ -1018,7 +1065,13 @@ def hive_main(argv=None):
     for name in ("send", "recall"):
         p = sub.add_parser(name)
         p.add_argument("--queen", required=True)
-        p.add_argument("--token", required=True)
+        given = p.add_mutually_exclusive_group()
+        given.add_argument("--token-file", metavar="PATH",
+                           help="read the token from PATH (- for stdin); without"
+                                " it, %s from the environment" % TOKEN_ENV)
+        given.add_argument("--token",
+                           help="deprecated: the token on the command line, where"
+                                " every local user can read it")
         if name == "send":
             p.add_argument("--to", required=True)
             p.add_argument("--id", required=True)
@@ -1121,13 +1174,18 @@ def hive_main(argv=None):
         print("cousin-hive: %s" % err, file=sys.stderr)
         return 1
     try:
+        token = _client_token(args)
+    except ValueError as err:
+        print("cousin-hive: %s" % err, file=sys.stderr)
+        return 2
+    try:
         if args.cmd == "send":
-            hive_send(queen_url=args.queen, token=args.token,
+            hive_send(queen_url=args.queen, token=token,
                       to=args.to, body=args.body, msg_id=args.id)
             print("sent")
         else:
             for text in hive_recall(queen_url=args.queen,
-                                    token=args.token, query=args.query):
+                                    token=token, query=args.query):
                 print("- " + text)
     except HiveError as err:
         print("cousin-hive: %s" % err, file=sys.stderr)

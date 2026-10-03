@@ -25,9 +25,16 @@ The MCP registry gets the same treatment, additively and at every level:
 a table the shipped registry has and the cousin's lacks is appended whole,
 and a key inside a table they share is added to it. A value the cousin
 already has is never changed, so an edited description or argv survives -
-except a `description` field still holding text a past release shipped
-(_KNOWN_TEXT below): that one gets the current wording, because it is the
-framework's own text, not the cousin's.
+except a value still holding exactly what a past release shipped
+(_MIGRATIONS below): that one gets the current one, because it is the
+framework's own text, not the cousin's. Given the text the cousin was last
+synced from (`base`), a table or key that text had and the shipped one no
+longer has is reported as retired, and removed only when asked (`prune`,
+cousin-upgrade --prune-retired).
+
+`plan` and `_registry_sync` take the template and the shipped registry as
+text too, so cousin-upgrade can plan against a release before the
+checkout moves to it.
 """
 import difflib
 import json
@@ -94,16 +101,18 @@ def _render(text, values):
     return text
 
 
-def plan(home, root=None):
+def plan(home, root=None, *, template=None):
     """(old_text, new_text, notes) for one cousin; new == old when it is
-    in step. Raises SyncError when the file cannot be synced safely."""
+    in step. `template` is the template's text (default: the install's,
+    _template_text). Raises SyncError when the file cannot be synced
+    safely."""
     home = Path(home)
     root = Path(root) if root else FrameworkConfig.root_from_home(home)
     old = (home / "CLAUDE.md").read_text()
     if MARKER not in old:
         raise SyncError("no '%s' line: cannot tell the framework part"
                         " from the cousin's own" % MARKER)
-    tpl = _template_text(root)
+    tpl = _template_text(root) if template is None else template
     if MARKER not in tpl:
         raise SyncError("the template has no marker line")
     tpl_top = tpl[:tpl.index(MARKER)]
@@ -148,8 +157,8 @@ def plan(home, root=None):
     return old, new, notes
 
 
-def diff(home, root=None):
-    old, new, notes = plan(home, root)
+def diff(home, root=None, *, template=None):
+    old, new, notes = plan(home, root, template=template)
     text = "".join(difflib.unified_diff(
         old.splitlines(keepends=True), new.splitlines(keepends=True),
         fromfile="CLAUDE.md", tofile="CLAUDE.md (synced)"))
@@ -235,78 +244,156 @@ def _place(blocks, path):
     return at
 
 
-# Framework-owned text the sync may correct in a cousin's existing
-# registry: earlier shipped wording for a "description" field, safe to
-# replace because only a framework release could have put it there. A
-# cousin's own edit is never one of these exact strings, so it is never
-# touched; anything that is not this precise old wording (including the
-# cousin's own rewrite of it) stays untouched. Keyed by "<table
-# path>.<entry key>" - "description" as the entry key for a table's own
-# plain `description = "..."` line, or the property name ("kind", ...)
-# for an inline table's own `description = "..."` field.
-_KNOWN_TEXT = {
-    "tools.job.description": (
+# Framework-owned values the sync may migrate in a cousin's existing
+# registry: (table path, key) -> ((old, new), ...), each `old` a value an
+# earlier release shipped there. It is safe to replace because only a
+# framework release could have put that exact value there: a cousin's own
+# edit is never one of these exact values, so anything that is not this
+# precise old value (including the cousin's own rewrite of it) stays
+# untouched. `key` is a table's own key ("description" for its plain
+# `description = "..."` line), or "<key>.<field>" for a string field of an
+# inline table ("kind.description": the `description` inside
+# `kind = { ... }`). `new` is the value the shipped registry must hold for
+# the migration to apply, or None for whatever it ships now (other than
+# `old`): the shipped text is what gets written, never `new` itself, so a
+# release that does not ship it migrates nothing.
+_MIGRATIONS = {
+    ("tools.job", "description"): ((
         "Track sub-agents and background work: start, done, fail, list,"
-        " show.",
-    ),
-    "tools.job.properties.kind": (
+        " show.", None),),
+    ("tools.job.properties", "kind.description"): ((
         "(start) not shell: start takes no command, so a shell row would"
         " never close. For long shell work use a Bash call with"
         " run_in_background (tracked automatically by the job hooks), or"
         " run `cousin-job start shell TITLE -- CMD` from a shell, which"
-        " launches CMD and closes the row with its exit code",
-    ),
-    "tools.job.properties.title": ("(start)",),
-    "tools.job.properties.desc": ("context for the job (start)",),
+        " launches CMD and closes the row with its exit code", None),),
+    ("tools.job.properties", "title.description"): (("(start)", None),),
+    ("tools.job.properties", "desc.description"): ((
+        "context for the job (start)", None),),
 }
 
-_DESC = re.compile(r"(\bdescription\s*=\s*)(" + _STR.pattern + r")")
 
-
-def _entry_description(lines):
-    """The string value of a `description = "..."` field found anywhere
-    in an entry's raw lines (its own line, or inside an inline table),
-    or None when the entry has no such field."""
-    m = _DESC.search("".join(lines))
-    if not m:
+def _entry_value(key, lines):
+    """The parsed value of one entry (`key = ...`), or None when its
+    lines do not parse on their own."""
+    try:
+        return tomllib.loads("".join(lines)).get(key)
+    except tomllib.TOMLDecodeError:
         return None
-    return tomllib.loads("x = %s" % m.group(2))["x"]
 
 
-def _correct_entry(path, key, lines, shipped_lines):
-    """(lines, changed): `lines` with its description field replaced by
-    the shipped one, when the cousin's current text is still a value an
-    earlier framework release shipped for "<path>.<key>"; otherwise
-    `lines` unchanged."""
-    known = _KNOWN_TEXT.get("%s.%s" % (path, key))
-    if not known:
-        return lines, False
-    mine = _entry_description(lines)
-    if mine not in known:
-        return lines, False
-    shipped = _entry_description(shipped_lines)
-    if shipped is None or shipped == mine:
-        return lines, False
-    text = _DESC.sub(lambda m: m.group(1) + json.dumps(shipped),
-                     "".join(lines), count=1)
-    return [text], True
+def _field(name):
+    return re.compile(r"(\b%s\s*=\s*)(%s)" % (re.escape(name), _STR.pattern))
 
 
-def _registry_sync(home, root, *, apply=False):
+def _migrate_entry(path, key, lines, shipped_lines):
+    """(lines, changed): `lines` migrated to the shipped value when the
+    cousin's current value is one _MIGRATIONS records as shipped earlier
+    for (path, key) or (path, "<key>.<field>"); otherwise unchanged."""
+    for (table, spec), pairs in _MIGRATIONS.items():
+        if table != path or spec.split(".")[0] != key:
+            continue
+        field = spec.partition(".")[2]
+        mine, theirs = (_entry_value(key, lines),
+                        _entry_value(key, shipped_lines))
+        if field:
+            mine = mine.get(field) if isinstance(mine, dict) else None
+            theirs = theirs.get(field) if isinstance(theirs, dict) else None
+        for old, new in pairs:
+            if mine != old or theirs is None or theirs == old:
+                continue
+            if new is not None and theirs != new:
+                continue
+            if not field:
+                text = "".join(shipped_lines)
+                return [text if text.endswith("\n") else text + "\n"], True
+            if not isinstance(theirs, str):
+                continue
+            text = _field(field).sub(
+                lambda m: m.group(1) + json.dumps(theirs), "".join(lines),
+                count=1)
+            return [text], True
+    return lines, False
+
+
+def _retired(base, theirs, mine):
+    """Dotted paths of the tables and keys `base` had, `theirs` no longer
+    has and `mine` still has: what a release retired. A table counts
+    once, not each of its keys or the tables below it."""
+    def shape(text):
+        out = {}
+        for path, body in _blocks(text):
+            if path is not None:
+                out[path] = {k for k, _ in _entries(body) if k}
+        return out
+    base, theirs, mine = shape(base), shape(theirs), shape(mine)
+    out = []
+    for path, keys in base.items():
+        if path not in mine or any(path.startswith(t + ".") for t in out):
+            continue
+        if path not in theirs:
+            out.append(path)
+            continue
+        out.extend("%s.%s" % (path, k) for k in sorted(keys)
+                   if k not in theirs[path] and k in mine[path])
+    return out
+
+
+def _prune(blocks, retired):
+    """`blocks` without the retired tables (each with the tables below
+    it) and keys; returns the dotted paths it removed."""
+    paths = {p for p, _ in blocks if p is not None}
+    tables = [r for r in retired if r in paths]
+    keys = {}
+    for r in retired:
+        if r not in paths:
+            table, _, key = r.rpartition(".")
+            keys.setdefault(table, set()).add(key)
+    removed = []
+    for i in range(len(blocks) - 1, -1, -1):
+        path, body = blocks[i]
+        if path is None:
+            continue
+        if any(path == t or path.startswith(t + ".") for t in tables):
+            del blocks[i]
+            continue
+        if path in keys:
+            entries = _entries(body)
+            gone = [k for k, _ in entries if k in keys[path]]
+            if gone:
+                blocks[i] = (path, [one for k, ls in entries
+                                    if k not in keys[path] for one in ls])
+                removed.extend("%s.%s" % (path, k) for k in gone)
+    removed.extend(tables)
+    return sorted(removed)
+
+
+def _registry_sync(home, root, *, apply=False, theirs=None, base=None,
+                   prune=False):
     """Bring the cousin's mcp-registry.toml up to the shipped one,
     additively at every level: a table it lacks is appended whole, and a
     key the shipped table has and its table lacks is added to that
-    table. A value the cousin already has is never touched, except a
-    `description` field still holding a value the framework shipped
-    earlier (_KNOWN_TEXT): that one is corrected to the current wording.
-    Returns {"path", "added", "corrected"}, both lists of dotted paths."""
+    table. A value the cousin already has is never touched, except one
+    still holding a value the framework shipped earlier (_MIGRATIONS):
+    that one is corrected to the shipped value. `theirs` is the shipped
+    registry's text (default: the install's, shipped_default_registry);
+    `base`, when given, is the text the cousin was last synced from, and
+    what it had that `theirs` lacks is reported under "retired", and
+    removed only with `prune`. Returns {"path", "added", "corrected",
+    "retired", "pruned"}, lists of dotted paths; "path" is None for a
+    home with no registry."""
     reg = Path(home) / "mcp-registry.toml"
     if not reg.is_file():
-        return {"path": None, "added": [], "corrected": []}
-    from cousin_lib.mcp_server import shipped_default_registry
-    mine = _blocks(reg.read_text())
+        return {"path": None, "added": [], "corrected": [], "retired": [],
+                "pruned": []}
+    if theirs is None:
+        from cousin_lib.mcp_server import shipped_default_registry
+        theirs = shipped_default_registry(root)
+    original = reg.read_text()
+    retired = _retired(base, theirs, original) if base is not None else []
+    mine = _blocks(original)
     added, corrected = [], []
-    for path, body in _blocks(shipped_default_registry(root)):
+    for path, body in _blocks(theirs):
         if path is None:
             continue
         at = next((i for i, (p, _) in enumerate(mine) if p == path), None)
@@ -322,7 +409,7 @@ def _registry_sync(home, root, *, apply=False):
         new_entries, table_changed = [], False
         for key, entry_lines in entries:
             if key and key in shipped_entries:
-                entry_lines, did = _correct_entry(
+                entry_lines, did = _migrate_entry(
                     path, key, entry_lines, shipped_entries[key])
                 if did:
                     table_changed = True
@@ -337,8 +424,10 @@ def _registry_sync(home, root, *, apply=False):
         lines[end:end] = [one for _, ls in extra for one in ls]
         mine[at] = (path, lines)
         added.extend("%s.%s" % (path, k) for k, _ in extra)
-    if not added and not corrected:
-        return {"path": reg, "added": [], "corrected": []}
+    pruned = _prune(mine, retired) if prune and retired else []
+    if not added and not corrected and not pruned:
+        return {"path": reg, "added": [], "corrected": [],
+                "retired": retired, "pruned": []}
     text = "".join(("" if p is None else "[%s]\n" % p) + "".join(b)
                    for p, b in mine)
     tomllib.loads(text)
@@ -346,7 +435,8 @@ def _registry_sync(home, root, *, apply=False):
         tmp = reg.with_suffix(".toml.sync-tmp")
         tmp.write_text(text)
         tmp.replace(reg)
-    return {"path": reg, "added": added, "corrected": corrected}
+    return {"path": reg, "added": added, "corrected": corrected,
+            "retired": retired, "pruned": pruned}
 
 
 def sync(home, root=None, *, apply=False):

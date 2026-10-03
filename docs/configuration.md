@@ -10,9 +10,12 @@ When a file is missing, the thing it configures is off, and the code says so
 where it matters instead of guessing a value. When a file is there but
 broken, you get an error that names it. A typo never reads as "off".
 
-A fresh checkout's `config/` holds only `*.example` files. Git ignores
-everything else in there, so your real files (which can hold keys and
-tokens) never get committed. Copy an example to its real name and edit it.
+A fresh checkout's `config/` holds only `*.example` files, plus
+`harness.lock.toml`, which is not yours to edit: it names the agent harness
+versions the framework is tested with (see
+[`[agent] strict_harness`](#agent-strict_harness)). Git ignores everything
+else in there, so your real files (which can hold keys and tokens) never get
+committed. Copy an example to its real name and edit it.
 
 ## Which ones you need
 
@@ -367,7 +370,7 @@ Top-level keys:
 |---|---|---|
 | `transcripts_dir` | none | where the harness writes session transcripts for a cousin. A path template, see below. Read by `cousin-cache-audit`, and by the console's token counts for a cousin whose kind keeps no usage of its own (an `sdk` or `opencode` cousin's come from its `data/usage.db`, a `tmux` cousin's from its pane's own transcripts). A runner mines its own session store after every turn and does not read this. |
 | `auto_memory_dir` | none | the harness's own memory directory for a cousin. When set, it becomes the `harness` collection in `cousin-memory search`. |
-| `mcp_logs_dir` | Claude Code's `~/.cache/claude-cli-nodejs/{home_encoded}/mcp-logs-{server}` | where the harness writes a log per session per MCP server. The boot packet and `cousin-mcp --last-connection` read it for the reason a cousin's MCP server failed, which the harness itself does not report. |
+| `mcp_logs_dir` | Claude Code's `~/.cache/claude-cli-nodejs/{home_encoded}/mcp-logs-{server}` | where the harness writes a log per session per MCP server. `cousin-mcp --last-connection` and the console's `GET /api/cousins/<slug>/mcp/last-connection` read it for the reason a cousin's MCP server failed, which the harness itself does not report. |
 | `default_flip_at` | `04:00` | `"HH:MM"`, the daily [flip](glossary.md#flip) time for every cousin that does not set its own. `"never"` (or `"off"`, `"none"`, `"no"` or `""`, in any case) makes no flip the default. One time for the whole fleet is fine: the daemon fires at most one flip per tick. |
 | `settings_file` | none | the harness's settings JSON, the file that records project trust and approved MCP servers. `cousin-mcp approve` edits exactly this file. Without it, `approve` refuses and prints the edit to make by hand. |
 | `host_label` | the hostname | a non-empty string: the host a login message names ("log in on <host>"), in `data/login-required.json`, `cousin-chat list` and the Telegram notice. Anything else is an error. |
@@ -944,6 +947,43 @@ is matched against, see [chat](chat.md)) and `policy.toml` (below). A
 `cousin-migrate` reads it once, to move a 1.x cousin's key into an
 `anthropic-key` account, and nothing else reads it.
 
+### [agent] strict_harness
+
+`config/harness.lock.toml` names the harness the framework is tested with:
+the Agent SDK (`claude-agent-sdk`), the Claude Code CLI its wheel bundles,
+the opencode release and the model ids. It ships with the code (the
+checkout, or `/opt/framework` in the image) and is read from there, never
+from an install's own `config/`; a version changes there in a release, not
+on your host. At every start `cousin-runner` compares what its kind runs
+with it, once:
+
+| kind | what is read |
+|---|---|
+| `sdk` | the installed `claude-agent-sdk` (its package metadata) and the CLI its wheel bundles (the version the wheel records; nothing runs). An SDK that bundles no CLI: `claude --version` on PATH |
+| `tmux` | `claude --version` on PATH, against the lock's CLI |
+| `opencode` | `<binary> --version`, the binary being `[agent] opencode_bin`, else `COUSIN_OPENCODE_BIN`, else `opencode` on PATH |
+| `fake` | nothing |
+
+A binary gets 5 seconds to print its version. One that fails, prints none
+or does not answer is an "unpinned CLI", a mismatch like any other, never a
+silent pass.
+
+The result is a `harness` [stream](glossary.md#stream) event right after the
+head `runner` event, `{"kind", "ok", "level", "locked", "installed",
+"problems", "message"}`, and the cousin's `harness:<slug>` row in the
+[health record](operations.md#health). On a match `level` is `info` and the
+message lists the versions. On a mismatch `level` is `warning`, the message
+names both versions (`claude-agent-sdk: installed 0.2.170, locked 0.2.163`),
+the same line goes to stderr, and the runner starts anyway.
+
+`strict_harness` (`true` or `false`, default `false`; the `sdk`, `tmux` and
+`opencode` lanes) turns that warning into a refusal: a mismatch is exit 2,
+`cousin-runner: the harness is not the locked one (harness.lock.toml):
+claude-agent-sdk: installed 0.2.170, locked 0.2.163; [agent] strict_harness
+= true refuses it`, and the supervisor leaves the cousin down until the
+versions match or the key is off. A missing lock refuses too. A value that
+is not `true` or `false` is exit 2 at start, like `reply_gate`.
+
 ### [agent] dreaming
 
 A background pass that consolidates the cousin's memory, off unless you turn
@@ -1179,14 +1219,16 @@ the same tool list at every start.
   `args`, `env` values, `url` and `headers` values. The runner passes them
   through unexpanded and the agent CLI expands them from its own
   environment, which is the runner's (the supervisor's or `cousin-runner`'s,
-  not your shell's). This is on purpose: the SDK hands the servers to the CLI
-  as a `--mcp-config` command-line argument, which the host's users can
-  read, so only the `${NAME}` is on the command line and the value reaches
-  the server through the CLI's environment. Keep the secret in the runner's
-  environment and only its `${NAME}` in the file; a value written literally
-  in the file is on the command line too. A variable that is unset and has
-  no default skips that server, and the event names the variable. A
-  reference to an account variable (`ANTHROPIC_API_KEY`,
+  not your shell's). The runner hands the servers to the CLI in a private
+  file (`data/run/mcp-config.json`, mode 0600 in a 0700 directory, a side
+  session's `mcp-config-<kind>.json`), named by `--mcp-config`, never inline
+  on the CLI's command line, which the host's users can read; it is
+  rewritten at every start and removed when the runner stops. Still keep
+  the secret in the runner's environment and only its `${NAME}` in
+  `.mcp.json`: the file is plain text the model can read and edit, and a
+  stdio server's `args` (expanded) are on that server's own command line.
+  A variable that is unset and has no default skips that server, and the
+  event names the variable. A reference to an account variable (`ANTHROPIC_API_KEY`,
   `CLAUDE_CODE_OAUTH_TOKEN` and the rest of the list under
   [accounts.toml](#accountstoml)) skips its server even with a default: the
   CLI's environment holds the cousin's own credential under those names,

@@ -65,6 +65,7 @@ ROUTE_MODULES = [
     "cousin_lib.console.routes_prefs",
     "cousin_lib.console.routes_meetings",
     "cousin_lib.console.routes_telegram",
+    "cousin_lib.console.routes_health",
     "cousin_lib.console.hive",
     "cousin_lib.console.proxy",
     "cousin_lib.console.pane",
@@ -208,7 +209,6 @@ class ConsoleServer:
         self.static_handler = None
         self.settle_seconds = 1.0
         self.flip_fn = None
-        self.close_fn = None
         self.exit_fn = None
         # Every library the console calls reads FRAMEWORK_ROOT; the
         # entry point exports the flag, a direct construction inherits
@@ -619,4 +619,8 @@ def console_main(argv=None):
 
 
 if __name__ == "__main__":  # pragma: no cover - the -m launcher
-    raise SystemExit(console_main())
+    # The package module's main, not this __main__ copy's: the route modules
+    # import cousin_lib.console.app, so a server built here would catch this
+    # copy's HttpError and answer theirs (a 401, a 404) as a 500.
+    from cousin_lib.console import app as _package
+    raise SystemExit(_package.console_main())

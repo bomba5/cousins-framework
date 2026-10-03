@@ -149,6 +149,7 @@ SITES = (
     ('cousin_lib/supervisor.py', 'specs += [runner_spec(c.home) for c in runner_cousins(root)]', 'transport'),
     ('cousin_lib/telegram.py', 'if not isinstance(delivery.backend_for(cfg.home), delivery.InboxBackend):', 'transport'),
     ('cousin_lib/telegram.py', 'raise TelegramConfigError(delivery.lane_refusal(cfg.home))', 'refusal'),
+    ('cousin_lib/upgrade.py', 'for c in supervisor.runner_cousins(root)]', 'transport'),
     ('cousin_lib/watch.py', 'if not isinstance(delivery.backend_for(home), delivery.InboxBackend):', 'transport'),
 )
 

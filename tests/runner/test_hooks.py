@@ -587,53 +587,53 @@ class TestReplyGate(HooksCase):
         _run(cbs["PostToolUse"](payload, "r", {}))
 
     def test_an_unanswered_operator_turn_is_blocked_once(self):
-        cbs = self.gated(["operator:jhonata"])
+        cbs = self.gated(["operator:ana"])
         out = self.stop(cbs)
         self.assertEqual(out["decision"], "block")
-        self.assertIn("operator:jhonata", out["reason"])
+        self.assertIn("operator:ana", out["reason"])
         self.assertEqual([e["payload"]["threads"] for e in self.stream.tail()
-                          if e["kind"] == "gate"], [["operator:jhonata"]])
+                          if e["kind"] == "gate"], [["operator:ana"]])
         # the CLI marks the next Stop stop_hook_active: it passes, no loop
         self.assertEqual(self.stop(cbs, active=True), {})
 
     def test_an_implicit_reply_on_the_only_human_thread_passes(self):
-        cbs = self.gated(["operator:jhonata"])
+        cbs = self.gated(["operator:ana"])
         self.reply(cbs)
         self.assertEqual(self.stop(cbs), {})
 
     def test_two_human_threads_need_a_named_reply_each(self):
-        cbs = self.gated(["operator:jhonata", "person:merete"])
-        self.reply(cbs, thread="operator:Jhonata")
+        cbs = self.gated(["operator:ana", "person:sam"])
+        self.reply(cbs, thread="operator:Ana")
         out = self.stop(cbs)
-        self.assertIn("person:merete", out["reason"])
-        self.assertNotIn("operator:jhonata", out["reason"])
+        self.assertIn("person:sam", out["reason"])
+        self.assertNotIn("operator:ana", out["reason"])
 
     def test_peer_schedule_and_loop_turns_are_not_gated(self):
-        cbs = self.gated(["peer:sage", "schedule", "loop:daemon"])
+        cbs = self.gated(["peer:kestrel", "schedule", "loop:daemon"])
         self.assertEqual(self.stop(cbs), {})
 
     def test_a_subagent_reply_does_not_count_and_the_gate_can_be_off(self):
-        cbs = self.gated(["operator:jhonata"])
+        cbs = self.gated(["operator:ana"])
         self.reply(cbs, agent_id="sub-1")
         self.assertEqual(self.stop(cbs)["decision"], "block")
-        self.assertEqual(self.stop(self.gated(["operator:jhonata"], gate=False)), {})
+        self.assertEqual(self.stop(self.gated(["operator:ana"], gate=False)), {})
 
     def test_a_reply_does_not_carry_over_into_the_next_prompt(self):
-        cbs = self.gated(["operator:jhonata"])
+        cbs = self.gated(["operator:ana"])
         self.reply(cbs)
         self.assertEqual(self.stop(cbs), {})
         _run(cbs["UserPromptSubmit"](self._base("UserPromptSubmit", prompt="next"), None, {}))
         self.assertEqual(self.stop(cbs)["decision"], "block")
 
     def test_a_peer_folded_in_does_not_undo_the_operators_reply(self):
-        owner = {"go on": "operator:jhonata", "sage here": "peer:sage"}
-        cbs = self.gated(["operator:jhonata"], thread_for_prompt=owner.get)
+        owner = {"go on": "operator:ana", "kestrel here": "peer:kestrel"}
+        cbs = self.gated(["operator:ana"], thread_for_prompt=owner.get)
         prompt = lambda text: _run(cbs["UserPromptSubmit"](
             self._base("UserPromptSubmit", prompt=text), None, {}))
         prompt("go on")
         self.reply(cbs)
-        self.live.append("peer:sage")
-        prompt("sage here")                     # folded into the operator's turn
+        self.live.append("peer:kestrel")
+        prompt("kestrel here")                     # folded into the operator's turn
         self.assertEqual(self.stop(cbs), {})
         # but a second operator message folded in needs its own answer
         prompt("go on")

@@ -164,7 +164,7 @@ A cousin's MCP tool registry, its `.mcp.json` servers, `cousin-mcp`'s diagnostic
 
 - **etag.** Every read answers `etag` (a hash of the file, `"absent"` when there is none). A write sends it back; a file that changed meanwhile is `409 {"error", "etag", "stale": true}` and nothing is written. The model can rewrite all of these files. The check is not a lock against the model: a write the model makes between the console's etag check and its rename (a window of milliseconds) is overwritten by the console's.
 - **Applies at the next start.** Every write answers the fresh read plus `restart_required: true`. The runner reads `.mcp.json`, `policy.toml` and its registry once, at start; a tmux cousin's harness reads `.mcp.json` and the registry at session start. The inspector offers `POST /api/cousins/<slug>/restart`.
-- **Secrets in `.mcp.json`.** The runner hands the servers to the agent CLI as a `--mcp-config` command-line argument, which any user on the host can read. A value that looks like a secret (a known key prefix, an opaque mixed-case token, eight or more literal characters under a name that says secret, a password in a URL, a secret-named flag's value) is refused with `problems: [{"server", "field", "key", "reason", "suggest"}]`, where `suggest` is the `${VAR}` reference to write instead. A literal already in the file is never answered: it reads as `value: null, masked: true` (a command as `command: null, command_masked`, a url as `url: null, url_masked`), and a save that sends it back as null is refused until it is replaced. A reference to an account variable (`accounts.AUTH_VARS`) is refused: the runner skips such a server.
+- **Secrets in `.mcp.json`.** The runner hands the servers to the agent CLI in a private file (`data/run/mcp-config.json`, mode 0600), never on its command line, but `.mcp.json` is plain text the model can read and edit, and a stdio server's `args` are on its own command line, which any user on the host can read. A value that looks like a secret (a known key prefix, an opaque mixed-case token, eight or more literal characters under a name that says secret, a password in a URL, a secret-named flag's value) is refused with `problems: [{"server", "field", "key", "reason", "suggest"}]`, where `suggest` is the `${VAR}` reference to write instead. A literal already in the file is never answered: it reads as `value: null, masked: true` (a command as `command: null, command_masked`, a url as `url: null, url_masked`), and a save that sends it back as null is refused until it is replaced. A reference to an account variable (`accounts.AUTH_VARS`) is refused: the runner skips such a server.
 - **The handoff.** `policy.toml` can never deny `mcp__cousin__handoff`, in `deny_tools` or in `ask` (enforced as a deny), exactly or as a prefix (`mcp__cousin__*`, `*`): `400` naming the entry. Every generation ends through it.
 
 ### `GET /api/cousins/<slug>/mcp/registry`
@@ -941,6 +941,25 @@ No login needed. `{"version", "commit", "repo_url", "commit_url"}`. Version and 
 ```
 
 Memory and disk in GB (used memory is MemTotal minus MemAvailable, disk is `/`), network in MB/s since the previous call, loopback and container interfaces left out. CPU `pct` is the 1-minute load over the core count. On a system without `/proc` the blocks read as zeros.
+
+### `GET /api/health`
+
+Read-only, behind the login like every other route. What `cousin-health` prints ([operations](../operations.md#health)):
+
+```json
+{"components": {"dreaming:wren": {"state": "failing", "fails": 119, "since": 1790989247.2,
+                                  "last_ok": 1790902847.0, "last_fail": 1790992817.5,
+                                  "error": "ImportError: ...", "seen": 1790992817.5}},
+ "failing": [{"key": "dreaming:wren", "state": "failing", "fails": 119, "since": 1790989247.2,
+              "error": "ImportError: ...", "quiet": false}],
+ "ok": ["cousin:wren", "meetings", "tick"],
+ "supervisor": {"reachable": true, "failing": [{"name": "runner:kestrel", "state": "backoff",
+                                                "since": "2026-10-03T06:12:09+00:00",
+                                                "reason": "exited (code 1)"}]},
+ "failing_count": 2}
+```
+
+`components` is `data/health.json` as the loops daemon wrote it (timestamps in epoch seconds), `failing` its failing entries with their key, the longest streak first, and `quiet` true when the entry was last seen more than ten minutes ago. `supervisor.failing` is every supervisor child not `running`; with no supervisor, `{"reachable": false, "error", "failing": []}`. `failing_count` is both failing lists together: the console's top bar shows it in red when it is not 0.
 
 ### `POST /api/admin/restart/framework`
 

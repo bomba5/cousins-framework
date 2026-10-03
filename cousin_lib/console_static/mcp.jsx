@@ -494,9 +494,10 @@ function McpServersEditor({ cousin }) {
         <button className="btn ghost" style={mcpSmall} disabled={busy} onClick={() => { setMsg(null); setStale(false); load(); }}>reload</button>
       </div>
       <div style={{ ...mcpHint, borderLeft: "2px solid var(--amber)", paddingLeft: 8 }}>
-        Secrets: the runner hands these servers to the agent CLI on its command line (--mcp-config),
-        which any user on this host can read. Write a secret as <code>${"{NAME}"}</code> and set NAME in the
-        runner's environment: the CLI fills it in, and only the name is on the command line. A value that
+        Secrets: the runner hands these servers to the agent CLI in a private file, never on its command line,
+        but this file is plain text the model can read and edit, and a stdio server's args are on its own
+        command line, which any user on this host can read. Write a secret as <code>${"{NAME}"}</code> and set
+        NAME in the runner's environment: the CLI fills it in, and only the name is in the file. A value that
         looks like a secret is refused, with the reference to write instead. Account variables are never
         passed to a server.
       </div>

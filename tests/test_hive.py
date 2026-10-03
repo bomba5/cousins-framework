@@ -221,11 +221,89 @@ class TestCli(HiveCase):
         self.assertTrue(out.strip().startswith("hive_"))
 
     def test_send_with_no_queen_exits_one_local_fallback(self):
-        rc, _, err = self._main(
-            ["send", "--queen", "http://127.0.0.1:9",
-             "--token", "x", "--to", "bob", "--id", "m1", "hi"])
+        with mock.patch.dict(os.environ, {"HIVE_TOKEN": "x"}):
+            rc, _, err = self._main(
+                ["send", "--queen", "http://127.0.0.1:9",
+                 "--to", "bob", "--id", "m1", "hi"])
         self.assertEqual(rc, 1)
         self.assertIn("local", err)
+
+
+class TestCliToken(HiveCase):
+    """send and recall take their token from a file, stdin or HIVE_TOKEN,
+    never from the command line, where every local user can read it. The
+    old --token still works, with a one-line deprecation warning."""
+
+    TOKEN = "hive_fake-client-5e1a"
+
+    def _main(self, argv, environ=None, stdin=""):
+        import contextlib
+        import io
+
+        from cousin_lib import hive
+        seen = []
+
+        def fake_recall(*, queen_url, token, query):
+            seen.append(token)
+            return ["a memory"]
+        out, err = io.StringIO(), io.StringIO()
+        env = {k: v for k, v in os.environ.items() if k != "HIVE_TOKEN"}
+        env.update(environ or {})
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+                mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(hive, "hive_recall", fake_recall), \
+                mock.patch("sys.stdin", io.StringIO(stdin)):
+            rc = hive.hive_main(["recall", "--queen", "http://127.0.0.1:9"] + argv + ["q"])
+        return rc, seen, err.getvalue()
+
+    def test_token_file(self):
+        path = self.root / "token"
+        path.write_text(self.TOKEN + "\n")
+        argv = ["--token-file", str(path)]
+        self.assertEqual(self._main(argv), (0, [self.TOKEN], ""))
+        self.assertFalse([a for a in argv if self.TOKEN in a])
+
+    def test_token_file_dash_is_stdin(self):
+        self.assertEqual(self._main(["--token-file", "-"], stdin=self.TOKEN + "\n"),
+                         (0, [self.TOKEN], ""))
+
+    def test_the_environment(self):
+        self.assertEqual(self._main([], environ={"HIVE_TOKEN": self.TOKEN}),
+                         (0, [self.TOKEN], ""))
+
+    def test_the_file_wins_over_the_environment(self):
+        path = self.root / "token"
+        path.write_text(self.TOKEN)
+        rc, seen, _ = self._main(["--token-file", str(path)],
+                                 environ={"HIVE_TOKEN": "hive_other"})
+        self.assertEqual((rc, seen), (0, [self.TOKEN]))
+
+    def test_no_token_is_exit_two_naming_the_ways(self):
+        rc, seen, err = self._main([])
+        self.assertEqual((rc, seen), (2, []))
+        self.assertIn("--token-file", err)
+        self.assertIn("HIVE_TOKEN", err)
+
+    def test_an_empty_or_unreadable_file_is_exit_two_without_its_content(self):
+        bad = self.root / "two-words"
+        bad.write_text("hive_one hive_two\n")
+        for path in (bad, self.root / "missing"):
+            rc, seen, err = self._main(["--token-file", str(path)])
+            self.assertEqual((rc, seen), (2, []), path)
+            self.assertNotIn("hive_one", err)
+
+    def test_the_old_flag_still_works_and_warns_once(self):
+        rc, seen, err = self._main(["--token", self.TOKEN])
+        self.assertEqual((rc, seen), (0, [self.TOKEN]))
+        self.assertEqual(len(err.splitlines()), 1, err)
+        self.assertIn("deprecated", err)
+        self.assertIn("--token-file", err)
+        self.assertNotIn(self.TOKEN, err)
+
+    def test_both_flags_are_a_usage_error(self):
+        with self.assertRaises(SystemExit) as ctx:
+            self._main(["--token", "x", "--token-file", "-"])
+        self.assertEqual(ctx.exception.code, 2)
 
 
 class _FakeEmbed:

@@ -143,6 +143,21 @@ class TestCompose(PromptCase):
                                                  new_role="audits the audits"))
         self.assertIn("# Wren - audits the audits", self.compose())
 
+    def test_the_law_and_every_rule_arrive_whole_on_every_lane(self):
+        # the perimeter lives in the law and the operator rules: no lane may
+        # budget them, however long they grow (a budget only ever applies to
+        # the state digest)
+        long_rule = "".join("Rule line %d stays.\n" % i for i in range(2000))
+        self.assertGreater(len(long_rule), boot.LAYER_BUDGETS["shared"][1])
+        (self.root / "shared" / "rule_long.md").write_text("---\nkind: rule\n---\n" + long_rule)
+        block = prompt.compose_context_block(self.home, root=self.root, registry=self.registry,
+                                             version="1.12.0")
+        for lane, text in (("runner", self.compose()), ("tmux pane", block)):
+            self.assertIn(LAW.strip(), text, lane)
+            self.assertIn(long_rule.strip(), text, lane)
+            self.assertIn("Be brief.", text, lane)
+            self.assertNotIn("budget hit", text, lane)
+
     def test_rules_in_the_prompt_the_reference_index_not(self):
         text = self.compose()
         self.assertIn("Be brief.", text)

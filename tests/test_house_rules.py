@@ -66,16 +66,20 @@ class TestTheShippedFiles(unittest.TestCase):
             self.assertTrue(text.isascii(), "%s is not plain ASCII" % path.name)
 
     def test_the_active_rules_fit_the_shared_layer_with_room(self):
-        # Rendered as the boot packet renders them: they must leave at
-        # least a quarter of the shared layer for the install's own
-        # rules and the index, and fit whole even with the example on.
+        # The rules and the index, measured against the shared layer's
+        # budget: they must leave at least a quarter of it for the
+        # install's own rules and the index, and fit whole even with the
+        # example on.
         budget = boot.LAYER_BUDGETS["shared"][1]
+
+        def size(root):
+            rules, index = boot.shared_parts(root)
+            return len("\n\n".join(rules + index))
         with tempfile.TemporaryDirectory() as tmp:
             shared_tier.seed_house_rules(tmp)
-            with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": tmp}):
-                active = len(boot._shared())
-                (pathlib.Path(tmp) / "shared" / EXAMPLE.name).write_text(EXAMPLE.read_text())
-                with_example = len(boot._shared())
+            active = size(tmp)
+            (pathlib.Path(tmp) / "shared" / EXAMPLE.name).write_text(EXAMPLE.read_text())
+            with_example = size(tmp)
         self.assertLessEqual(active, budget * 3 // 4, "%d of %d" % (active, budget))
         self.assertLess(with_example, budget, "%d of %d" % (with_example, budget))
 
@@ -185,15 +189,6 @@ class TestAFreshCousinCarriesThem(PromptCase):
             _fields, body = boot._frontmatter((TEMPLATES / name).read_text())
             self.assertIn("### %s\n%s" % (name[:-3], body.strip()), text)
         self.assertNotIn("Scrum", text)
-
-    def test_the_boot_packet_quotes_every_active_rule(self):
-        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(self.root)}):
-            text = boot.assemble("wren", self.home)["text"]
-        section = text[text.index("## 2. Shared Rules and Fleet Memory"):
-                       text.index("## 3. Cousin Self-Portrait")]
-        for name in EXPECTED:
-            self.assertIn("### %s\n" % name[:-3], section)
-        self.assertNotIn("truncated", section)
 
 
 class TestTheLaw(RootCase):

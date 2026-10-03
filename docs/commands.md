@@ -667,8 +667,8 @@ cousin-cache-audit --days 7 --diagnose
 ```
 
 `cousin-version` prints the framework version (and commit in a git checkout),
-or bumps it in `pyproject.toml`; `--pyproject PATH` reads or bumps another
-`pyproject.toml` than the checkout's.
+or bumps it in `pyproject.toml`: the checkout you run it in (a git worktree
+included), else the one running; `--pyproject PATH` reads or bumps another.
 
 ```
 cousin-version bump patch

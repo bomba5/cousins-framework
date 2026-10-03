@@ -175,11 +175,17 @@ def bump_file(path, part):
     return old, new
 
 
-def _default_pyproject():
-    for candidate in (CHECKOUT / "pyproject.toml",
-                      Path.cwd() / "pyproject.toml"):
-        if pyproject_version(candidate):
-            return candidate
+def _default_pyproject(cwd=None):
+    """The checkout `bump` edits: the one the caller stands in (the
+    nearest pyproject naming this distribution, from the working
+    directory up), else the one this package runs from. A git worktree
+    is its own checkout: bumping from one must not edit the install."""
+    here = Path(cwd or Path.cwd()).resolve()
+    for folder in (here, *here.parents):
+        if pyproject_version(folder / "pyproject.toml"):
+            return folder / "pyproject.toml"
+    if pyproject_version(CHECKOUT / "pyproject.toml"):
+        return CHECKOUT / "pyproject.toml"
     return None
 
 
@@ -194,7 +200,8 @@ def version_main(argv=None):
     parser.add_argument("part", nargs="?", choices=PARTS, default="patch")
     parser.add_argument("--pyproject",
                         help="the pyproject.toml to read or bump (default:"
-                             " the checkout's)")
+                             " the checkout the working directory is in,"
+                             " else the one running)")
     args = parser.parse_args(argv)
     if args.action is None:
         if args.pyproject:

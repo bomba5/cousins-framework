@@ -33,6 +33,7 @@ import pathlib
 import re
 import tempfile
 import textwrap
+from unittest import mock
 
 from cousin_lib import perimeter
 from cousin_lib.runner import hooks, policy
@@ -326,3 +327,16 @@ class TestKnownGaps(GateCase):
             command = "cd %s && echo x > %s" % (self.path(directory), name)
             with self.subTest(command=command):
                 self.assertEqual(self.decide("S", "Bash", {"command": command})[0], ALLOW)
+
+
+class TestTheGateKnowsWhoWrites(GateCase):
+    """The rows that depend on the writer (its own home, another
+    cousin's, its own proposals) need the cousin's own home and slug at
+    the gate; the callbacks hand over theirs."""
+
+    def test_the_callbacks_pass_their_home_and_slug_to_the_perimeter(self):
+        with mock.patch.object(perimeter, "check_tool", return_value=None) as check:
+            self.decide("S", "Write", {"file_path": self.path("cousins/wren/notes/a.md")})
+        self.assertEqual(check.call_args.kwargs["slug"], SLUG)
+        self.assertEqual(pathlib.Path(check.call_args.kwargs["home"]), self.home)
+        self.assertEqual(pathlib.Path(check.call_args.kwargs["root"]), self.R)

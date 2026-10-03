@@ -53,6 +53,28 @@ python3 -m unittest tests.console.test_hive_console -k revoke
 The full run is about 4800 tests. How long it takes depends on the host
 (about ten minutes on a 2-core VM). That's the same command CI runs.
 
+### What counts as a gate
+
+A run is a gate when it reached its own end, and the two things that say
+so are its exit code and its `OK` / `FAILED (failures=..., errors=...)`
+line. A log with neither is unfinished, and unfinished is not a gate in
+either direction. So:
+
+- Gate on the exit code. Never on a count of `... ok`: `-v` prints one per
+  test, so counting them counts tests that ran, not tests that passed, and
+  a run stopped at a timeout or a moved branch leaves a prefix that reads
+  like a whole suite.
+- Read the tail of a log for the line, never the middle for a count.
+- Piping the run into `grep`, `tail` or `tee` hands the row's exit code to
+  that last command, not to the run: `false | tail -1` exits 0. With such a
+  pipeline the `OK` / `FAILED` line is the gate; with `set -o pipefail`
+  ahead of it, the exit code is the run's again.
+- When you report the result, name the commit, the command and the line.
+  "All tests pass" without those three cannot be checked by whoever reads
+  it, which is how a killed run becomes a shipped defect report.
+- A timing-sensitive failure in a run on a loaded host isn't yours yet:
+  re-run it alone, and on the base, before you own it.
+
 Every test runs hermetic: `tests/_hermetic.py` strips `FRAMEWORK_ROOT`,
 `COUSIN_HOME`, `COUSIN_SLUG`, `COUSIN_TMUX_SOCKET`,
 `COUSIN_FILTER_OVERRIDE` and `INVOCATION_ID` from the environment for

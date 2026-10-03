@@ -60,12 +60,19 @@ class TestHook(BootDistillCase):
         self.assertNotIn("Operator Calibration", digest["text"])
 
     def test_operator_stated_raw_reaches_the_calibration_layer(self):
-        self._plant("feedback: short statuses", "one line, then stop",
+        self._plant("deploy window", "never on Fridays",
                     truth_level="operator-stated")
         digest = self._digest()
         self.assertIn("Operator Calibration", digest["text"])
-        self.assertIn("one line, then stop", digest["text"])
+        self.assertIn("never on Fridays", digest["text"])
         self.assertNotIn(distill.AUTO_MARKER, digest["text"])
+
+    def test_an_operator_rule_rides_the_prompt_not_the_digest(self):
+        self._plant("feedback: short statuses", "one line, then stop",
+                    truth_level="operator-stated")
+        self.assertNotIn("one line, then stop", self._digest()["text"])
+        self.assertEqual(prompt.standing_instructions(self.home),
+                         ["### feedback: short statuses\none line, then stop"])
 
     def test_a_failing_distiller_never_breaks_the_boot(self):
         self._plant("t", "c")

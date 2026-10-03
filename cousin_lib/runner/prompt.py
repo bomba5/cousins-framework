@@ -5,11 +5,17 @@
                   + the framework contract  generated (contract.py)
                   + the authored identity   the operator's words
                   + operator rules          the shared tier's kind: rule entries
+                  + standing instructions   this cousin's operator rules (L0
+                                            entries distill.standing_instruction
+                                            picks), newest entry per topic
     first message = the state digest (state_digest, below)
 
 The system prompt MUST be byte-stable across generations: nothing here
 reads a clock, a counter, the generation, a hash or any state file. The digest carries all of that, under the boot
-packet's budget rules (boot.fit). Every read is under the `root` the
+packet's budget rules (boot.fit). The one memory it reads is the
+operator's standing instructions, topic and text only, sorted by topic:
+the bytes change when the operator's word changes and at no other time.
+Every read is under the `root` the
 caller passes; nothing here discovers a root from the environment.
 
 The text never goes on a command line: an argv is readable by every
@@ -26,7 +32,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import boot, corrections, distill, self_portrait, template_sync, trace
+from cousin_lib import boot, corrections, distill, memory, self_portrait, template_sync, trace
 from cousin_lib.runner import contract
 
 IDENTITY_ABSENT = (
@@ -110,31 +116,57 @@ def authored_identity(home, *, root):
 
 def compose_system_prompt(home, *, root, registry, version=None, tool_name=None, runner=None,
                           other_servers=contract.OTHER_SERVERS):
-    """law + contract + identity + operator rules. Never truncated.
+    """law + contract + identity + operator rules + standing instructions.
+    Never truncated.
     `tool_name` names the tools for the lane (contract.render); None is
     the SDK lane's `mcp__cousin__<name>`. `runner` is the lane's name in
     the contract (contract.render); None is the SDK runner."""
     identity, _degraded = authored_identity(home, root=root)
-    return _compose(root, registry, version, identity=identity.strip(), tool_name=tool_name,
-                    runner=runner, other_servers=other_servers)
+    return _compose(root, registry, version, identity=identity.strip(), home=home,
+                    tool_name=tool_name, runner=runner, other_servers=other_servers)
 
 
 def compose_context_block(home, *, root, registry, version=None):
     """The tmux kind's block: law + contract (the pane's
-    runner label, the stdio server's `cousin` tool names) + operator rules,
+    runner label, the stdio server's `cousin` tool names) + operator rules
+    + standing instructions,
     no identity: the pane's CLI reads the identity from CLAUDE.md itself.
     The runner writes it to data/run/tmux-context.md; the launcher appends it
     on a fresh start."""
-    return _compose(root, registry, version, identity=None, runner=contract.PANE_RUNNER)
+    return _compose(root, registry, version, identity=None, home=home,
+                    runner=contract.PANE_RUNNER)
 
 
-def _compose(root, registry, version, *, identity, tool_name=None, runner=None,
+RULE_WINDOW_DAYS = 36500
+STANDING_TITLE = "# Your operator's standing instructions"
+STANDING_LEAD = ("Your operator stated these for how you work (truth level L0, newest"
+                 " entry per topic). They hold until the operator changes them.")
+
+
+def standing_instructions(home):
+    """The operator's standing instructions for this cousin, one
+    `### <topic>` block each with the entry's whole text, sorted by topic;
+    [] when there are none or memory cannot be read. Topic and text only:
+    no date, count or cite that could move the bytes. A rule does not age
+    out: the window is a century, not the views' ten years, so no clock
+    moves it either."""
+    try:
+        topics = [t for t in distill.operator_topics(home, since_days=RULE_WINDOW_DAYS)
+                  if t["rule"]]
+    except Exception:  # noqa: BLE001 - a prompt composes without them, never fails
+        return []
+    return ["### %s\n%s" % (t["topic"], str(t["entry"].get("content", "")).strip())
+            for t in sorted(topics, key=lambda t: t["topic"])]
+
+
+def _compose(root, registry, version, *, identity, home=None, tool_name=None, runner=None,
              other_servers=contract.OTHER_SERVERS):
     if version is None:
         from cousin_lib.version import version as _v
         version = _v()
     law = boot.law_text(root).strip()
     rules, _index = boot.shared_parts(root)
+    standing = standing_instructions(home) if home is not None else []
     sections = []
     if law:
         sections.append("# Framework law\n\n" + law)
@@ -144,6 +176,9 @@ def _compose(root, registry, version, *, identity, tool_name=None, runner=None,
         sections.append(identity.strip())
     if rules:
         sections.append("# Operator rules every cousin follows\n\n" + "\n\n".join(rules))
+    if standing:
+        sections.append("%s\n\n%s\n\n%s" % (STANDING_TITLE, STANDING_LEAD,
+                                              "\n\n".join(standing)))
     return "\n\n".join(sections) + "\n"
 
 
@@ -221,16 +256,73 @@ _TITLES = (("Operator Calibration", "calibration"), ("Active State", "active_sta
 _open_loops = boot._open_loops_section
 
 
-def _calibration(home):
-    """The distilled calibration and the recent corrections, or "".
+CALIBRATION_FILE = ("memory", "distilled", "operator-calibration.md")
+_MORE = "- ... %d more not shown%s"
+
+
+def _calibration_blocks(home):
+    """The calibration layer as blocks of whole entries, in the order
+    they give way: [(heading, entries, where the rest are)]. The
+    operator's own entries, newest first, after any curated text above
+    the view's marker (one entry); the standing instructions are left
+    out (the system prompt has them whole). Then the recent corrections.
     Never the portrait's section: the prompt already carries it."""
-    parts = []
-    body = boot._distilled_body(Path(home) / "memory" / "distilled" / "operator-calibration.md")
-    if body:
-        parts.append("## operator-calibration.md\n\n" + body)
+    home = Path(home)
+    entries = []
+    path = home.joinpath(*CALIBRATION_FILE)
+    try:
+        curated = distill._curated_block(path)
+    except OSError:
+        curated = ""
+    curated = "\n".join(l for l in curated.strip().splitlines()
+                        if l.strip() != "# Operator Calibration").strip()
+    if curated and memory.STUB_TEXT not in curated:
+        entries.append(curated + "\n")
+    try:
+        topics = distill.operator_topics(home)
+    except Exception:  # noqa: BLE001 - the digest composes without them
+        topics = []
+    entries += [t["line"] for t in topics if not t["rule"]]
+    blocks = []
+    if entries:
+        blocks.append(("## operator-calibration.md", entries,
+                       " (older, in memory/distilled/operator-calibration.md)"))
     summary = corrections.summary_for_boot(home, n=15)
     if summary != corrections.EMPTY_MARKER:
-        parts.append(summary)
+        head, _, lines = summary.partition("\n")
+        blocks.append((head, lines.splitlines(), " (older, in data/corrections.jsonl)"))
+    return blocks
+
+
+def _block(heading, kept, more, where):
+    lines = [heading, ""] + list(kept)
+    if more:
+        lines.append(_MORE % (more, where))
+    return "\n".join(lines)
+
+
+def pack_calibration(blocks, max_chars=None):
+    """The calibration layer within max_chars (None: all of it), never an
+    entry cut in the middle: each block keeps its first entries while
+    they fit with a closing "N more not shown" line, and room is held for
+    every later block's heading and that line, so a long first block
+    never silences the next. "" when nothing fits."""
+    if max_chars is None:
+        return "\n\n".join(_block(h, e, 0, w) for h, e, w in blocks)
+    floor = [2 + len(_block(h, [], len(e), w)) for h, e, w in blocks]
+    parts, used = [], 0
+    for n, (heading, entries, where) in enumerate(blocks):
+        room = max_chars - used - (2 if parts else 0) - sum(floor[n + 1:])
+        kept = []
+        for i, entry in enumerate(entries):
+            if len(_block(heading, kept + [entry], len(entries) - i - 1, where)) > room:
+                break
+            kept.append(entry)
+        block = _block(heading, kept, len(entries) - len(kept), where)
+        if len(block) > room:
+            continue        # not even the heading and its "more" line
+        used += (2 if parts else 0) + len(block)
+        parts.append(block)
     return "\n\n".join(parts)
 
 
@@ -245,8 +337,10 @@ def _shared_index(root):
 def state_digest(home, *, root, slug, generation=None):
     """The first message of a generation: the volatile layers, budgeted by
     boot.fit with the boot packet's numbers and order. The layers that
-    moved into the system prompt (law, identity, operator rules) and the
-    retired tool surface are not here. Every read is under `root`."""
+    moved into the system prompt (law, identity, operator rules, the
+    operator's standing instructions) and the retired tool surface are not
+    here. The calibration layer gives way by whole entries
+    (pack_calibration), never by a slice. Every read is under `root`."""
     home = Path(home)
     if generation is None:
         generation = boot.read_generation(home)
@@ -254,8 +348,9 @@ def state_digest(home, *, root, slug, generation=None):
         distill.distill(home)   # the floor is regenerated by its consumer, as assemble does
     except Exception:  # noqa: BLE001 - a failed distill digests a staler floor, never none
         pass
+    calibration = _calibration_blocks(home)
     sections = {
-        "calibration": _calibration(home),
+        "calibration": pack_calibration(calibration),
         "active_state": boot._active_state(home, open_loops=_open_loops),
         "task_packet": boot._task_packet(home),
         "trace_summary": trace.summary_for_boot(slug, root=root),
@@ -266,7 +361,8 @@ def state_digest(home, *, root, slug, generation=None):
                 if boot._is_degraded(k, sections[k], sections)]
     if authored_identity(home, root=root)[1]:
         degraded.append("identity")
-    sections = boot.fit(sections, DIGEST_BUDGETS, DIGEST_ORDER, DIGEST_MAX_CHARS)
+    sections = boot.fit(sections, DIGEST_BUDGETS, DIGEST_ORDER, DIGEST_MAX_CHARS,
+                        cutters={"calibration": lambda n: pack_calibration(calibration, n)})
     state = _read(home / "STATUS.md") + _read(home / "data" / "handoff.md")
     state_hash = hashlib.sha256(state.encode()).hexdigest()[:12]
     body = ["STATE DIGEST FOR COUSIN: %s" % slug,

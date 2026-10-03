@@ -53,6 +53,16 @@ python3 -m unittest tests.console.test_hive_console -k revoke
 The full run is about 4800 tests. How long it takes depends on the host
 (about ten minutes on a 2-core VM). That's the same command CI runs.
 
+To see where the time goes, run the whole suite timed:
+
+```sh
+python3 .github/scripts/suite.py time            # then the 20 slowest modules and classes
+python3 .github/scripts/suite.py time --write    # and save the module times CI splits by
+```
+
+It discovers exactly what `unittest discover -s tests` does, and its
+summary line and exit code mean the same.
+
 ### What counts as a gate
 
 A run is a gate when it reached its own end, and the two things that say

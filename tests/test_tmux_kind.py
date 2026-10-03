@@ -1,20 +1,19 @@
 """The `tmux` runner kind and the lane branches around it. (The kind's
 runner, TmuxRunner, has its own tests in tests/runner/test_tmux_*.py;
 here: the kind itself, what runner_for refuses for it, the serve loop's
-claim recovery, spawn, and the migrate plan's lane check.)"""
+claim recovery and spawn.)"""
 import os
 import pathlib
 import tempfile
 import unittest
 from unittest import mock
 
-from cousin_lib import delivery, migrate, spawn
+from cousin_lib import delivery, spawn
 from cousin_lib.delivery import Item
 from cousin_lib.runner import main as runner_main
 from cousin_lib.runner.base import RunnerError
 from tests._hermetic import HermeticCase
 from tests.runner._home import temp_home
-from tests.test_migrate import Live, _root
 from tests.test_spawn_supervisor import _CreateCase
 
 
@@ -138,25 +137,6 @@ class TestSpawn(_CreateCase):
         self.create(runner="sdk")
         data = json.loads((self.home / ".claude" / "settings.json").read_text())
         self.assertFalse(set(TMUX_KEYS) & set(data))
-
-
-class TestMigratePlan(HermeticCase):
-    def test_a_runner_kind_is_never_read_as_the_legacy_lane(self):
-        """The lane check read every runner kind but sdk and fake as "on the
-        tmux lane"; the tmux kind is a runner kind, switched with --to."""
-        for kind in ("tmux", "opencode"):
-            with self.subTest(kind=kind):
-                root, home = _root(self)
-                with open(home / "cousin.toml", "a") as f:
-                    f.write('\n[agent]\nrunner = "%s"\n' % kind)
-                p = migrate.plan(home, root=root, **Live().kw())
-                lane = next(c for c in p["checks"] if c["check"] == "lane")
-                self.assertFalse(lane["ok"], lane)
-                self.assertNotIn("on the tmux lane", lane["detail"])
-                self.assertIn(kind, lane["detail"])
-                if kind == "tmux":
-                    self.assertIn("runner kind", lane["detail"])
-                    self.assertIn("--to", lane["detail"])
 
 
 if __name__ == "__main__":

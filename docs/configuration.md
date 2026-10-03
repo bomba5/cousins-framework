@@ -955,9 +955,9 @@ A few other files in a cousin's home are configuration too:
 `mcp-registry.toml` (its MCP tools), `.mcp.json` (its other MCP servers,
 below), `chat-hooks.json` (patterns incoming chat
 is matched against, see [chat](chat.md)) and `policy.toml` (below). A
-`.secrets/api-key.env` left from 1.x is not configuration any more:
-`cousin-migrate` reads it once, to move a 1.x cousin's key into an
-`anthropic-key` account, and nothing else reads it.
+`.secrets/api-key.env` left from 1.x is not configuration any more: the
+last 1.x release's `cousin-migrate` read it once, to move the cousin's key
+into an `anthropic-key` account, and nothing in 2.0.0 reads it.
 
 ### [agent] strict_harness
 

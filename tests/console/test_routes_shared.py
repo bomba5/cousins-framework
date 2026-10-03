@@ -54,6 +54,10 @@ class TestReads(SharedCase):
                          400)
         self.assertEqual(self.get("/api/shared/diff?file=project_x.md"
                                   "&slug=toki")[0], 404)
+        # The proposal exists (its name takes only the stem), but the
+        # canonical side would be read from outside shared/: refused.
+        self.assertEqual(self.get("/api/shared/diff?file=../project_x.md"
+                                  "&slug=wren")[0], 400)
         _, body = self.get("/api/shared/audit?n=5")
         self.assertEqual(body["entries"][0]["kind"], "propose")
         self.assertEqual(body["entries"][0]["actor"], "wren")

@@ -24,6 +24,24 @@ class PromoteRefused(Exception):
     """Promotion cannot proceed; the message says why and how to fix."""
 
 
+class NameRefused(ValueError):
+    """A slug or file name shaped like a path: it would leave shared/
+    (a "../" slug escapes proposed/, a "../" file reads another home)."""
+
+
+def _bare(value, what):
+    """Refuse a slug or file name that is not one bare entry name: no
+    "/" or "\\", no leading "." (so no "..", no dotfile), not empty. The
+    same shape jobs.record_job_result refuses for a job owner."""
+    text = value if isinstance(value, str) else ""
+    if not text or "/" in text or "\\" in text or "\0" in text \
+            or text.startswith("."):
+        raise NameRefused(
+            "%s %r refused: it must be a bare name, with no '/' or '\\'"
+            " and no leading '.'" % (what, value))
+    return text
+
+
 # The house rules a fresh install ships with (docs/house-rules.md): every
 # *.md directly in it is seeded; examples/ below it never is.
 HOUSE_RULES = Path(__file__).resolve().parents[1] / "templates" / "shared"
@@ -201,10 +219,13 @@ def list_shared():
 
 
 def read_shared(file):
+    _bare(file, "file")
     return (_shared_root() / file).read_text()
 
 
 def diff_proposal(file, slug):
+    _bare(file, "file")
+    _bare(slug, "slug")
     canonical = _shared_root() / file
     proposed = _shared_root() / "proposed" / _proposed_name(slug, file)
     base = (canonical.read_text().splitlines(keepends=True)
@@ -218,7 +239,10 @@ def diff_proposal(file, slug):
 def propose(file, body, *, slug, reason="", force=False):
     """The single entry path: a candidate lands in proposed/, never in
     canonical, with the proposer's slug in the filename. Replacing an
-    existing proposal requires force and both writes are audited."""
+    existing proposal requires force and both writes are audited.
+    A slug or file shaped like a path is refused (NameRefused)."""
+    _bare(slug, "slug")
+    _bare(file, "file")
     proposed_dir = _shared_root() / "proposed"
     proposed_dir.mkdir(parents=True, exist_ok=True)
     target = proposed_dir / _proposed_name(slug, file)
@@ -308,6 +332,8 @@ def _check_reviewer(proposer, by):
 def promote(file, *, proposer, by):
     """Reviewed promotion: the proposal becomes canonical, atomically,
     with the reviewer on the audit record."""
+    _bare(file, "file")
+    _bare(proposer, "proposer")
     _check_reviewer(proposer, by)
     source = _shared_root() / "proposed" / _proposed_name(proposer, file)
     if not source.exists():
@@ -321,6 +347,8 @@ def promote(file, *, proposer, by):
 def reject(file, *, proposer, by, reason=""):
     """Rejection removes the proposal; the reason survives on the
     audit record even though the content does not."""
+    _bare(file, "file")
+    _bare(proposer, "proposer")
     _check_reviewer(proposer, by)
     source = _shared_root() / "proposed" / _proposed_name(proposer, file)
     if not source.exists():
@@ -378,8 +406,8 @@ def plan_bulk_propose(home, slug):
 def shared_main(argv=None):
     """Console entry point: cousin-shared list/read/diff/propose/
     promote/reject/templates. Exit codes: 0 ok, 1 not found (templates:
-    a seeded file does not match what ships), 2 usage, 3 refused by the
-    boundary."""
+    a seeded file does not match what ships), 2 usage (including a slug
+    or file shaped like a path), 3 refused by the boundary."""
     import argparse
     import sys
 
@@ -457,6 +485,9 @@ def shared_main(argv=None):
     except PromoteRefused as err:
         print("cousin-shared: %s" % err, file=sys.stderr)
         return 3
+    except NameRefused as err:
+        print("cousin-shared: %s" % err, file=sys.stderr)
+        return 2
     except FileExistsError as err:
         print("cousin-shared: %s" % err, file=sys.stderr)
         return 1

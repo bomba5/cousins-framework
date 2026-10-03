@@ -65,6 +65,8 @@ def _review(req, action):
                                reason=str(reason))
     except shared_tier.PromoteRefused as err:
         raise HttpError(403, str(err))
+    except shared_tier.NameRefused as err:
+        raise HttpError(400, str(err))
     except FileNotFoundError as err:
         raise HttpError(404, str(err))
     return 200, {"ok": True, "file": file}
@@ -249,7 +251,10 @@ def register():
                     / shared_tier._proposed_name(slug, file))
         if not proposed.is_file():
             raise HttpError(404, "no proposal from %s for %s" % (slug, file))
-        return 200, {"diff": shared_tier.diff_proposal(file, slug)}
+        try:
+            return 200, {"diff": shared_tier.diff_proposal(file, slug)}
+        except shared_tier.NameRefused as err:
+            raise HttpError(400, str(err))
 
     @router.route("GET", "/api/shared/audit")
     def audit(req):

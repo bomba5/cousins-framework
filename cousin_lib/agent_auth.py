@@ -10,9 +10,7 @@ the api_key mode (removed_keys names the leftover keys). What stays:
   `cousin-migrate` reads to carry a 1.x api_key cousin over to an
   account;
 - read_private_file and the key rules (KEY_MAX_CHARS, _KEY_RE), which
-  accounts.py and console/secrets.py apply to every secret file;
-- agent_env and the launcher (agent_launch.py), which the legacy start
-  path names.
+  accounts.py and console/secrets.py apply to every secret file.
 
 Two mode names, spelled here and nowhere else: MODE_LOGIN ("claude",
 the default, the harness's own login) and MODE_API_KEY ("api_key", a
@@ -23,7 +21,6 @@ import json
 import os
 import re
 import stat
-import sys
 import tempfile
 import tomllib
 from pathlib import Path
@@ -405,48 +402,3 @@ def check_isolated_dir(cfg):
                     "the api_key settings copy %s carries account keys"
                     " (%s); switch to api_key again to rebuild it"
                     % (iso / cfg["settings_name"], ", ".join(found)))
-
-
-# ---- the agent's environment ------------------------------------------
-
-def agent_env(home, root, base_env):
-    """The environment the agent starts with, for the cousin's current
-    mode. claude: the configured key and config-dir variables removed.
-    api_key: both set, after the key file and the isolated directory
-    pass their checks. Raises AuthError; the message never holds the
-    key."""
-    mode = read_mode(home)
-    cfg = api_key_config(root)
-    env = dict(base_env)
-    if mode == MODE_LOGIN:
-        if cfg:
-            env.pop(cfg["key_env"], None)
-            env.pop(cfg["config_dir_env"], None)
-        return env
-    if cfg is None:
-        raise AuthError("%s mode needs config/harness.toml [auth.api_key]"
-                        " (the Claude Code values ship in"
-                        " config/harness.toml.claude-code.example)"
-                        % MODE_API_KEY)
-    key = read_key(home, cfg["key_env"])
-    check_isolated_dir(cfg)
-    env[cfg["key_env"]] = key
-    env[cfg["config_dir_env"]] = str(cfg["isolated_dir"])
-    return env
-
-
-def preflight(home, root):
-    """The launch's checks, run before a session is created so a refusal
-    is an error the caller sees, not a pane that closes at once."""
-    agent_env(home, root, {})
-
-
-LAUNCHER = Path(__file__).resolve().parent / "agent_launch.py"
-
-
-def launcher_argv(home, root):
-    """What start_cousin puts in front of the agent command: the
-    launcher, by path, on this interpreter. It reads the mode and the
-    key at exec time; nothing secret is in these words."""
-    return [sys.executable, str(LAUNCHER), "--home", str(home),
-            "--root", str(root), "--"]

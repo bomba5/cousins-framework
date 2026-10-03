@@ -1,5 +1,7 @@
 # Telegram bridge
 
+*Optional: nothing on this page is needed to run a cousin.*
+
 The bridge relays one [cousin](glossary.md#cousin)'s chat to Telegram and back, so you can talk
 to the cousin from your phone. It is the only feature in the framework
 that sends your content to a third party. It stays off until it is fully

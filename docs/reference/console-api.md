@@ -811,7 +811,7 @@ Body `{"action": "distill"|"compact-raw"|"compact-index"|"reindex", "dry_run"?}`
 
 ### `GET /api/memory/<slug>/dreams`
 
-`{"settings": {"mode", "at"}, "passes": [pass, ...]}`: the cousin's dreaming setting (`[agent] dreaming`, `off` when unset or unknown) and its passes newest first (at most 50), from `data/dreams/*.jsonl`. A pass is `{"pass_id", "started", "ended"?, "trigger", "model", "budget", "result", "tokens"?, "summary"?, "error"?, "changes": [{"op", "topic", "entry_ids", "mark_id", "why"}], "undone"?, "undone_by"?}`. `result` is `done`, `no_change`, `budget`, `error`, or, for a pass with no end record, `running`, or `lost` once it is past the pass timeout.
+`{"settings": {"mode", "at"}, "passes": [pass, ...]}`: the cousin's dreaming setting (`[agent] dreaming`, `off` when unset or unknown) and its passes newest first (at most 50), from `data/dreams/*.jsonl`. A pass is `{"pass_id", "started", "ended"?, "trigger", "model", "budget", "result", "tokens"?, "summary"?, "error"?, "coverage"?, "through_before"?, "through_after"?, "released"?, "changes": [change, ...], "undone"?, "undone_by"?, "reverted"?}`. A change is `{"op", "topic", "entry_ids", "created", "why"}` plus, by `op`: `merge` `kept`, `derived_from`, `mark_id`, `marks`; `retire` `mark_id`, `marks`; `settle` `evidence`, `mark_id`, `marks`; `remember` `derived_from` and `mode` (`create` or `append`). `created` is the id of the claim the change wrote, or `null`. `coverage` is what the slice held: `{"files", "entries", "lines", "chars", "budget", "cut", "from", "to", "topics", "machine", "unread"}`, `cut` being `end`, `budget` or `over-budget`; `from`, `to` and the `through_*` keys are ledger positions `{"month", "lines"}`. `released` is the id of a lost pass whose hold this pass released before taking its slice, else `null`. A `lost` pass has no end line: its `changes` are read from its journal (`data/dreams/journal/<pass_id>.jsonl`). `result` is `done`, `no_change`, `budget`, `error`, or, for a pass with no end record, `running`, or `lost` once it is past the pass timeout.
 
 ### `POST /api/memory/<slug>/dreams/run`
 
@@ -819,7 +819,7 @@ One dreaming pass now, whatever the setting, as the cousin's long operation of k
 
 ### `POST /api/memory/<slug>/dreams/undo`
 
-Body `{"pass_id"}`. Reverses one pass's changes (`dreaming.undo`), recorded as by the logged-in user, then rebuilds the distilled views. `200 {"ok": true, "reverted": [change, ...]}` and a `memory-change` event; `400` for an unknown pass, one that changed nothing, or one already undone.
+Body `{"pass_id"}`. Reverses one pass's changes (`dreaming.undo`), recorded as by the logged-in user, then rebuilds the distilled views. `200 {"ok": true, "reverted": [{"op": "undo", "reversed", "removed", "missing", "blocked", "trash"}, ...]}`, one per change, `blocked` naming the lines in the gzip archive that cannot be moved and `trash` the batch id, and a `memory-change` event; `400` for an unknown pass, one still running, one that changed nothing, or one already undone. A `lost` pass is undone from its journal.
 
 ### `GET /api/memory/<slug>/portrait`
 

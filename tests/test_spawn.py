@@ -937,19 +937,20 @@ class TestRegistrySyncCorrectsShippedText(unittest.TestCase):
         self.template_sync = template_sync
 
     def _old_registry(self):
-        """The shipped registry with every field _KNOWN_TEXT records
+        """The shipped registry with every description _MIGRATIONS records
         rolled back to the earlier wording it names, the way a cousin
         synced before this fix would still have it."""
         ts = self.template_sync
+        olds = {(table, spec.split(".")[0]): pairs[0][0]
+                for (table, spec), pairs in ts._MIGRATIONS.items()}
         out = []
         for path, body in ts._blocks(self.shipped):
             new_entries = []
             for key, lines in ts._entries(body):
-                old = (ts._KNOWN_TEXT.get("%s.%s" % (path, key))
-                      if path and key else None)
+                old = olds.get((path, key)) if path and key else None
                 if old:
-                    text = ts._DESC.sub(
-                        lambda m, v=old[0]: m.group(1) + json.dumps(v),
+                    text = ts._field("description").sub(
+                        lambda m, v=old: m.group(1) + json.dumps(v),
                         "".join(lines), count=1)
                     lines = [text]
                 new_entries.append((key, lines))
@@ -965,8 +966,8 @@ class TestRegistrySyncCorrectsShippedText(unittest.TestCase):
         self.reg.write_text(self._old_registry())
         before = tomllib.loads(self.reg.read_text())["tools"]["job"]
         self.assertEqual(before["description"],
-                         self.template_sync._KNOWN_TEXT[
-                             "tools.job.description"][0])
+                         self.template_sync._MIGRATIONS[
+                             ("tools.job", "description")][0][0])
         out = self._sync()
         for field in ("tools.job.description", "tools.job.properties.kind",
                      "tools.job.properties.title",
@@ -988,7 +989,8 @@ class TestRegistrySyncCorrectsShippedText(unittest.TestCase):
     def test_the_cousins_own_wording_is_kept(self):
         text = self._old_registry()
         old_line = "description = %s" % json.dumps(
-            self.template_sync._KNOWN_TEXT["tools.job.description"][0])
+            self.template_sync._MIGRATIONS[
+                ("tools.job", "description")][0][0])
         self.assertIn(old_line, text)
         text = text.replace(
             old_line, 'description = "my own wording for the job tool"', 1)

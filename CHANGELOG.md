@@ -3,6 +3,29 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.17.0 - 2026-10-03
+
+### Added
+
+- **`cousin-upgrade --dry-run` plans an upgrade and changes nothing.** It
+  resolves the target (`--to REF`, else the newest release tag in version
+  order; an older one only when named) and reads every shipped text from git
+  at both refs, so the plan holds before the checkout moves. The report: the
+  changelog headings and bold leads in between, whether the dependencies
+  changed, the seeded files against the target's templates, and for each
+  home the registry keys it would add, the framework values it would migrate
+  and the entries the target retired (reported, never removed), whether
+  `.mcp.json` would be rewritten, `policy.toml` named and left alone, and the
+  CLAUDE.md diff; then the restarts it would do, in order, the caller's own
+  runner last. `--json` prints the same plan. Without `--dry-run` it exits 2:
+  the apply path comes in a later release.
+- **The registry sync takes its texts as arguments.** The shipped registry
+  and the CLAUDE.md template can be given as text (a release's, read from
+  git) instead of the installed files, and the sync reports the entries the
+  release it last synced from had and the new one retired. The table of
+  framework-owned values it may migrate is keyed by table and key with the
+  old and new value, and covers any value, not only a description.
+
 ## 3.16.1 - 2026-10-03
 
 ### Fixed

@@ -82,6 +82,7 @@ TABLE = (
             "cousins/wren/mcp-registry.toml",
             "cousins/wren/chat-hooks.json",
             "cousins/wren/.claude/settings.json",
+            "cousins/wren/.claude/settings.local.json",
             "cousins/wren/.claude"), ALLOW, REFUSE, NA),
     # G1: another cousin's home is that cousin's
     ("A10", ("cousins/sam/memory/raw/2026-10-03.jsonl",
@@ -220,6 +221,24 @@ for _row, _paths, _p, _s, _f in TABLE:
                 _framework_test(_row, _paths, _f))
     setattr(TestTheMirrorRule, "test_%s_primary_reads" % _name, _read_test(_row, _paths, "P"))
     setattr(TestTheMirrorRule, "test_%s_subagent_reads" % _name, _read_test(_row, _paths, "S"))
+
+
+class TestAnotherCousinsHome(GateCase):
+    """Row A10 spelled out, for docs/reference/rules-inventory.md (law
+    12): a background pass cannot put text in another cousin's memory,
+    where that cousin's boot and recall would read it."""
+
+    def test_a_subagent_cannot_write_into_another_cousins_memory(self):
+        for rel in ("cousins/sam/MEMORY.md", "cousins/sam/memory/distilled/decisions.md",
+                    "cousins/sam/memory/raw/2026-10-03.jsonl"):
+            with self.subTest(path=rel):
+                decision, reason = self.decide("S", "Write", {"file_path": self.path(rel)})
+                self.assertEqual(decision, REFUSE)
+                self.assertIn("sam's home", reason)
+                self.assertIn("cousin-chat send sam", reason)
+                # the primary session keeps today's behaviour
+                self.assertEqual(self.decide("P", "Write", {"file_path": self.path(rel)})[0],
+                                 ALLOW)
 
 
 class TestOwnTools(GateCase):

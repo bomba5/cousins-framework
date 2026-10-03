@@ -32,6 +32,21 @@ writing side:
   audits), `self_portrait.commit_candidate` and the body-swap's identity
   trade (`lifecycle._swap_bodies`).
 
+Who writes. The tool gate also hands over the writing cousin's home and
+slug for a subagent, and four more surfaces are then refused to it, all
+anchored on the root (protected_reason's `home`/`slug`):
+
+| surface                               | why                                   |
+|---------------------------------------|---------------------------------------|
+| `shared/proposed/` but `<slug>__*`    | another cousin's proposal             |
+| `shared/audit.jsonl`                  | the tier's record; `shared_tier._audit` appends it |
+| OWN_CONFIG in its own home            | what the next session may do (policy.toml, ...) |
+| `cousins/<other>/**`                  | another cousin's home                 |
+
+So the first two exclusions above hold for the framework's writers and
+the primary session, not for a subagent. A framework writer never passes
+`home` or `slug`, so assert_writable checks the three shapes only.
+
 Anchored on the root: the check is pure and offline (paths are
 normalised, never resolved), so the Bash chokepoint can apply it to a
 parsed write target cheaply. A caller that knows the framework root
@@ -86,7 +101,8 @@ COUSINS_DIR = "cousins"
 # pass that rewrote one would loosen the session after it.
 OWN_CONFIG = (("policy.toml",), ("cousin.toml",), (".mcp.json",),
               ("mcp-registry.toml",), ("chat-hooks.json",),
-              (".claude", "settings.json"), (".claude",))
+              (".claude", "settings.json"), (".claude", "settings.local.json"),
+              (".claude",))
 
 # Tools that WRITE the path they name. Read, Grep and Glob name paths too
 # and are absent on purpose: a subagent reads the law and the shared rules

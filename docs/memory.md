@@ -266,15 +266,19 @@ what you said from what it guessed.
 | Level | `--level` | What it's for |
 |---|---|---|
 | `L0_OPERATOR` | `operator` | Something you said. Needs `--cite`. |
-| `L1_FRAMEWORK` | `framework` | Something the framework observed: a flip happened, a loop fired. |
-| `L2_TOOL` | `tool` | A measured result: what a command printed, what a job returned. |
+| `L1_FRAMEWORK` | `framework` | Something the framework observed: a flip happened, a loop fired. Needs `--cite`, else written as `conclusion`. |
+| `L2_TOOL` | `tool` | A measured result: what a command printed, what a job returned. Needs `--cite`, else written as `conclusion`. |
 | `L3_COUSIN_CONCLUSION` | `conclusion` | The cousin's own conclusion. The default. |
 | `L4_COUSIN_HYPOTHESIS` | `hypothesis` | A guess the cousin hasn't checked yet. |
 | `L5_OBSOLETE` | `obsolete` | Something that used to be true and was superseded. Kept for history. |
 
 `--level operator` without `--cite` is refused. It's the strongest claim
 a memory can make, so it has to say where you said it: a chat message
-id, a quote, a date. Operator entries go to
+id, a quote, a date. `--level framework` or `--level tool` without
+`--cite` is written as `conclusion` (L3), as the law's rule 10 says, and
+`decide` or `remember` prints a `demoted:` line saying so. The entries
+the framework writes itself (a flip, a model change, a job that ended)
+keep their level: they don't go through that check. Operator entries go to
 `memory/distilled/operator-calibration.md`, which the boot packet
 carries as its own layer, ahead of everything the cousin concluded on
 its own.

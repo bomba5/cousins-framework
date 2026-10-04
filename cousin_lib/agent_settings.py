@@ -62,6 +62,9 @@ SCHEMA = {
     "reply_gate": {"type": "bool", "lanes": ("sdk", "opencode"), "default": True,
                    "hint": "a turn on operator or person chat that ends without reply"
                            " is sent back once to answer or confirm"},
+    "peer_gate": {"type": "bool", "lanes": ("sdk", "opencode"), "default": True,
+                  "hint": "a turn on a peer cousin's message that ends without send"
+                          " is sent back once to answer or confirm"},
     "sessions": {"type": "sessions", "lanes": ("sdk",),
                  "hint": "thread kinds with a side session of their own"},
     "small_model": {"type": "model", "lanes": ("opencode",),

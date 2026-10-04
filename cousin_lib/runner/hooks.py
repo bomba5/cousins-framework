@@ -60,49 +60,95 @@ PERMISSION_NOTIFICATION = "permission_prompt"
 # The reply tool as the CLI names it: the runner registers its tool server
 # under the key "cousin" (sdk.py, options()).
 REPLY_TOOL = "mcp__cousin__reply"
+SEND_TOOL = "mcp__cousin__send"
 SUBAGENT_REPLY_REASON = "a subagent must name the thread it answers"
 # The thread kinds where a person waits on the chat surface: a turn on one
 # that ends without `reply` is sent back once by the reply gate (here on
 # the sdk lane, in opencode.py's _on_idle on the opencode lane).
 HUMAN_KINDS = ("operator", "person")
+# A peer cousin waits on its own inbox: a turn on a peer thread that ends
+# without `send` to that peer is sent back once by the peer gate, the same
+# way. Its text says not to answer a thanks, so two gated cousins never
+# trade acknowledgements.
+PEER_KINDS = ("peer",)
 REPLY_GATE_REASON = (
     "You are ending this turn without calling reply on %s, so the person who"
     " wrote sees nothing on the chat surface. If an answer is due, call reply"
     " now. If none is (an acknowledgement, a message that needs no answer),"
     " just end the turn again: this check runs once per turn.")
+PEER_GATE_REASON = (
+    "You are ending this turn without calling send to %s, so the cousin who"
+    " wrote gets no answer. If the message asks you something or waits on a"
+    " result, call send now (to=%s). If it needs no answer (a thanks, an"
+    " acknowledgement, a status note), just end the turn again, and do not"
+    " send a thanks back: this check runs once per turn.")
 
 
 def _kind(thread):
     return str(thread).partition(":")[0]
 
 
-def unanswered_threads(live, replied, implicit):
+def _key(thread):
+    return str(thread).partition(":")[2]
+
+
+def unanswered_threads(live, replied, implicit, sent=None):
     """The reply gate's decision, the same on every lane that has one: the
     live operator or person threads (`live`, thread ids in turn order) no
     successful reply this turn covered. `replied` holds the thread ids a
     reply named, lowercased; `implicit` is whether a reply named none,
-    which covers the turn only while exactly one such thread is live."""
+    which covers the turn only while exactly one such thread is live.
+    With `sent` (the peers a successful send named, lowercased; None while
+    the peer gate is off) the live peer threads no send covered follow."""
     human = [t for t in live if _kind(t) in HUMAN_KINDS]
     if implicit and len(human) == 1:
-        return []
-    return [t for t in human if str(t).lower() not in replied]
+        missing = []
+    else:
+        missing = [t for t in human if str(t).lower() not in replied]
+    if sent is not None:
+        missing += [t for t in live
+                    if _kind(t) in PEER_KINDS and _key(t).lower() not in sent]
+    return missing
+
+
+def _split(missing):
+    return ([t for t in missing if _kind(t) not in PEER_KINDS],
+            [t for t in missing if _kind(t) in PEER_KINDS])
 
 
 def reply_gate_reason(missing):
-    """The send-back text for the unanswered threads `missing`."""
-    return REPLY_GATE_REASON % " and ".join(missing)
+    """The send-back text for the unanswered threads `missing`: the reply
+    gate's for operator and person threads, the peer gate's for peers."""
+    human, peers = _split(missing)
+    parts = []
+    if human:
+        parts.append(REPLY_GATE_REASON % " and ".join(human))
+    if peers:
+        parts.append(PEER_GATE_REASON % (" and ".join(peers),
+                                         ", ".join(_key(t) for t in peers)))
+    return " ".join(parts)
+
+
+def gate_events(missing):
+    """The `gate` event payloads of one send-back: one per gate that sent
+    it back (`reply`, `send`), each naming its own threads."""
+    human, peers = _split(missing)
+    return ([{"gate": "reply", "threads": human}] if human else []) \
+        + ([{"gate": "send", "threads": peers}] if peers else [])
 
 
 class ReplyLedger:
-    """The reply gate's state for the turn in flight: the threads a
-    successful reply named (lowercased), and whether one named none (the
-    implicit thread). Each lane feeds it its own way (the sdk lane from
-    PostToolUse, the opencode lane from a completed `cousin_reply` part
-    of the session's own event stream); neither feeds a subagent's."""
+    """The reply and peer gates' state for the turn in flight: the threads
+    a successful reply named (lowercased), whether one named none (the
+    implicit thread), and the peers a successful send named. Each lane
+    feeds it its own way (the sdk lane from PostToolUse, the opencode lane
+    from a completed `cousin_reply` or `cousin_send` part of the session's
+    own event stream); neither feeds a subagent's."""
 
     def __init__(self):
         self.threads = set()
         self.implicit = False
+        self.sent = set()
 
     def note(self, tool_input):
         """One successful `reply` call with these arguments."""
@@ -112,24 +158,38 @@ class ReplyLedger:
         else:
             self.implicit = True
 
+    def note_send(self, tool_input):
+        """One successful `send` call with these arguments."""
+        to = tool_input.get("to") if isinstance(tool_input, dict) else None
+        if str(to or "").strip():
+            self.sent.add(str(to).strip().lower())
+
     def prompted(self, thread=None):
-        """A new prompt is answered afresh: a reply sent before it does not
-        cover its thread `thread`; the other threads keep what they were
-        answered. With no thread (a prompt nobody can place) every thread
-        is reset."""
+        """A new prompt is answered afresh: a reply or send made before it
+        does not cover its thread `thread`; the other threads keep what
+        they were answered. With no thread (a prompt nobody can place)
+        every thread is reset."""
         if thread is None:
             self.clear()
             return
         self.threads.discard(str(thread).lower())
         if _kind(thread) in HUMAN_KINDS:
             self.implicit = False
+        if _kind(thread) in PEER_KINDS:
+            self.sent.discard(_key(thread).lower())
 
     def clear(self):
         self.threads.clear()
         self.implicit = False
+        self.sent.clear()
 
-    def unanswered(self, live):
-        return unanswered_threads(live, self.threads, self.implicit)
+    def unanswered(self, live, *, humans=True, peers=False):
+        """The threads still owed an answer: operator and person ones while
+        `humans` (the reply gate is on), peers while `peers` (the peer gate)."""
+        if not humans:
+            live = [t for t in live if _kind(t) not in HUMAN_KINDS]
+        return unanswered_threads(live, self.threads, self.implicit,
+                                  self.sent if peers else None)
 
 
 def gate(policy, payload, *, root=None, home=None, slug=None):
@@ -192,7 +252,7 @@ def _accepts(fn, name):
 def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
               checkpoints=None, body_for_prompt=None, lock=None, policy=None,
               request_rollover=None, live_threads=None, reply_gate=True,
-              watch=None, policy_changed=None, thread_for_prompt=None,
+              peer_gate=True, watch=None, policy_changed=None, thread_for_prompt=None,
               memory_watch=None):
     """The callbacks by hook event name, plain `async def cb(input,
     tool_use_id, context)` functions: no SDK types, so tests drive them
@@ -220,9 +280,12 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     (turn.snapshot's threads); with `reply_gate` (cousin.toml [agent]
     reply_gate, default on) a Stop whose live operator or person
     threads got no successful `reply` this turn is blocked once with
-    REPLY_GATE_REASON. The CLI marks the Stop that follows a block
-    `stop_hook_active`, and that one always passes, so the gate costs at
-    most one more model step and can never loop.
+    REPLY_GATE_REASON; with `peer_gate` (cousin.toml [agent] peer_gate,
+    default on) one whose live peer threads got no successful `send` to
+    that peer is blocked the same way, with PEER_GATE_REASON. The CLI
+    marks the Stop that follows a block `stop_hook_active`, and that one
+    always passes, so the gates cost at most one more model step together
+    and can never loop.
     memory_watch: a memory_watch.MemoryWatch; each submitted prompt
     checks it, and memory written from outside the session (the console,
     the review gate, dreaming) reaches the model as a runner note after
@@ -251,19 +314,23 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     lock = lock if lock is not None else contextlib.nullcontext()
     # the policy the gate enforces: the start's, tightened by any edit since
     live = {"policy": policy}
-    # The reply gate's state for the turn in flight
+    # The reply and peer gates' state for the turn in flight
     replied = ReplyLedger()
 
     def note_reply(payload):
-        if payload.get("tool_name") != REPLY_TOOL or payload.get("agent_id"):
+        if payload.get("agent_id"):
             return
-        replied.note(payload.get("tool_input"))
+        if payload.get("tool_name") == REPLY_TOOL:
+            replied.note(payload.get("tool_input"))
+        elif payload.get("tool_name") == SEND_TOOL:
+            replied.note_send(payload.get("tool_input"))
 
     def unanswered():
-        """The live operator/person threads no reply covered this turn."""
-        if not reply_gate or live_threads is None:
+        """The live threads no reply or send covered this turn, as far as
+        each gate is on."""
+        if not (reply_gate or peer_gate) or live_threads is None:
             return []
-        return replied.unanswered(live_threads())
+        return replied.unanswered(live_threads(), humans=reply_gate, peers=peer_gate)
 
     def guarded(name, fn, fail_closed=False):
         """Every hook fails open but the gate: an exception becomes a
@@ -427,7 +494,8 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
         stream.append("checkpoint", {"kind": "session", "path": str(path)})
         missing = [] if payload.get("stop_hook_active") else unanswered()
         if missing:
-            stream.append("gate", {"gate": "reply", "threads": missing})
+            for event in gate_events(missing):
+                stream.append("gate", event)
             return {"decision": "block", "reason": reply_gate_reason(missing)}
         replied.clear()
         return {}

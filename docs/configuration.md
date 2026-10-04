@@ -923,8 +923,8 @@ surface. Both lanes decide the same way (`hooks.unanswered_threads` in
 one operator or person thread is live; with two, each needs a reply naming it.
 A failed `reply` and a subagent's reply do not count, and a reply sent before
 a new prompt was taken in (a message folded into the running turn) does not
-cover that prompt. Only operator and person threads are gated (`HUMAN_KINDS`
-in `runner/hooks.py`). Each send-back is a `gate` event in the runner's
+cover that prompt. This gate covers operator and person threads (`HUMAN_KINDS`
+in `runner/hooks.py`); peers have their own, `peer_gate`, below. Each send-back is a `gate` event in the runner's
 stream, with the payload `{"gate": "reply", "threads": [...]}`; on `opencode`
 the send-back names the tool as that lane serves it (`cousin_reply`) and says
 a call written out as text does nothing, and when the run's text held one
@@ -933,6 +933,19 @@ the payload adds `"written_call": true` (see
 the gate off. A value that is not `true` or `false` (a quoted `"false"`) is
 refused at runner start, exit 2: `cousin-runner:
 cousin.toml [agent] reply_gate must be true or false, got 'false'`.
+
+`peer_gate` (`true` or `false`, default `true`, the same lanes) is the same
+send-back for a turn on a peer cousin's message: a peer
+[thread](glossary.md#thread) the turn answers gets no successful `send` to
+that peer (`to` naming it), and the model is sent back once to answer with
+`send` or end the turn again. The reason tells it not to send a thanks or an
+acknowledgement back, so two cousins never trade them. A subagent's send does
+not count, and a send made before a new message from that peer was folded in
+does not cover it. The two gates share the one send-back: a turn that owes both
+an operator and a peer gets one reason naming both, and one `gate` event per
+gate, `{"gate": "reply", ...}` and `{"gate": "send", "threads": [...]}`. Each
+key switches only its own gate. A value that is not `true` or `false` is
+refused at runner start, exit 2, like `reply_gate`.
 
 The runner records `usage` on every `result` event in its stream (the SDK's
 own `ResultMessage.usage` dict: at least `input_tokens`, `output_tokens`,

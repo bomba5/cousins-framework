@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.27.0 - 2026-10-04
+
+### Added
+
+- **The peer gate: a peer's message gets an answer, or a deliberate
+  silence.** On the `sdk` and `opencode` lanes, a turn on a peer cousin's
+  message that ends without `send` to that peer is sent back once, the way
+  the reply gate sends back an unanswered operator or person turn: answer
+  with `send` now, or end the turn again if no answer is due. The reason
+  says not to send a thanks back, so two cousins never trade
+  acknowledgements. A text-only answer to a peer used to vanish. The new
+  `[agent] peer_gate` key (default on, in the console's agent settings)
+  switches it independently of `reply_gate`. A send-back owed to both an
+  operator and a peer is one prompt naming both, with one `gate` event per
+  gate (`"gate": "send"` for the peer's).
+
 ## 3.26.7 - 2026-10-04
 
 ### Fixed

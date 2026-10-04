@@ -256,11 +256,12 @@ def runner_for(home, *, kind=None):
     # true nor false is exit 2 at runner start, like effort_of - never
     # a MissingConfigError that reaches a live turn or the head event.
     commit_attribution = commit_attribution_of(agent, root_for(home))
-    # read as a bool by the sdk and opencode reply gates: a quoted "false" would
+    # read as bools by the sdk and opencode reply and peer gates: a quoted "false" would
     # be truthy and leave the gate on with nothing saying why
-    if not isinstance(agent.get("reply_gate", True), bool):
-        raise RunnerError("cousin.toml [agent] reply_gate must be true or false, got %r"
-                          % agent["reply_gate"])
+    for key in ("reply_gate", "peer_gate"):
+        if not isinstance(agent.get(key, True), bool):
+            raise RunnerError("cousin.toml [agent] %s must be true or false, got %r"
+                              % (key, agent[key]))
     strict_harness_of(agent)
     from cousin_lib.runner import sessions
     from cousin_lib.runner.policy import Policy

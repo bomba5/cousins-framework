@@ -796,19 +796,14 @@ class TestOperatorCli(HiveCase):
     def test_every_command_closes_the_store_it_opened(self):
         # A store left open is finalised later, inside some other
         # code's warning capture; each command closes its own.
-        import gc
-        import warnings
+        from tests._fakes import sqlite_left_open
         legacy = TestImportLegacy._fixtures(self)
-        gc.collect()
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always", ResourceWarning)
+        with sqlite_left_open() as left:
             for argv in (["mint", "kestrel"], ["nodes"], ["revoke", "kestrel"],
                          ["forget", "kestrel"],
                          ["import-legacy", "--tokens", str(legacy / "tokens.json")]):
                 self.assertEqual(self._main(argv)[0], 0, argv)
-            gc.collect()
-        self.assertEqual([str(w.message) for w in caught
-                          if issubclass(w.category, ResourceWarning)], [])
+        self.assertEqual(left, [])
 
 
 if __name__ == "__main__":

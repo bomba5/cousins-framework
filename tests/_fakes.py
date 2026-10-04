@@ -12,6 +12,7 @@ import http.server
 import json
 import os
 import pathlib
+import sqlite3
 import stat
 import threading
 from unittest import mock
@@ -19,6 +20,38 @@ from unittest import mock
 
 def default_vector(text):
     return [float(len(text) % 7), 1.0, 0.5]
+
+
+@contextlib.contextmanager
+def sqlite_left_open():
+    """Track every sqlite3 connection opened inside the block. The list
+    it yields holds, once the block ends, the database of each one never
+    closed (those are then closed here). This works on every Python:
+    sqlite3 warns about an unclosed connection only from 3.13."""
+    real = sqlite3.connect
+    opened, left = [], []
+
+    class Tracked(sqlite3.Connection):
+        was_closed = False
+
+        def close(self):
+            self.was_closed = True
+            super().close()
+
+    def connect(database, *args, **kwargs):
+        kwargs.setdefault("factory", Tracked)
+        conn = real(database, *args, **kwargs)
+        opened.append((str(database), conn))
+        return conn
+
+    try:
+        with mock.patch("sqlite3.connect", connect):
+            yield left
+    finally:
+        for database, conn in opened:
+            if not conn.was_closed:
+                left.append(database)
+                conn.close()
 
 
 @contextlib.contextmanager

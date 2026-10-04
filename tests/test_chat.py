@@ -5,6 +5,7 @@ appears in peer lists nor sees peers itself. Operator surfaces do not use
 this gate - it exists so co-located cousins can be isolated from each
 other, not from the operator.
 """
+import contextlib
 import http.server
 import json
 import pathlib
@@ -43,6 +44,7 @@ class _ChatCase(unittest.TestCase):
         _Capture.received = None
         self.server = http.server.HTTPServer(("127.0.0.1", 0), _Capture)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
         self.port = self.server.server_address[1]
 
@@ -143,7 +145,7 @@ class TestSenderName(HermeticCase):
         db = self.sam / "data" / "chat.db"
         if not db.exists():
             return []
-        with sqlite3.connect(db) as conn:
+        with contextlib.closing(sqlite3.connect(db)) as conn:
             return conn.execute("SELECT user, message FROM messages").fetchall()
 
     def test_the_operators_name_is_refused_and_nothing_lands(self):

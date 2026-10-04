@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 from cousin_lib.server.storage import ChatStore, normalize_chat_user
+from tests._fakes import sqlite_left_open
 
 
 class StoreCase(unittest.TestCase):
@@ -48,6 +49,19 @@ class TestCreation(StoreCase):
         store = ChatStore(path)
         self.addCleanup(store.close)
         self.assertTrue(path.is_file())
+
+
+class TestOpenFailure(StoreCase):
+    def test_a_file_that_is_not_a_database_leaves_no_connection_open(self):
+        # The connection opens before the schema runs; when the schema
+        # fails the caller has no store to close, so the store must.
+        path = self._db_path()
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"not a database, just some text " * 64)
+        with sqlite_left_open() as left:
+            with self.assertRaises(sqlite3.DatabaseError):
+                ChatStore(path)
+        self.assertEqual(left, [])
 
 
 class TestNormalization(StoreCase):

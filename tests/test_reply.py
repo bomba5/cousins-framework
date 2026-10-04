@@ -1,5 +1,6 @@
 """cousin-reply behavior: a reply is one row in the cousin's own chat
 store, written in this process (chat_api.reply); no chat server runs."""
+import contextlib
 import json
 import pathlib
 import sqlite3
@@ -16,7 +17,7 @@ def _rows(home):
     path = pathlib.Path(home) / "data" / "chat.db"
     if not path.exists():
         return []
-    with sqlite3.connect(path) as db:
+    with contextlib.closing(sqlite3.connect(path)) as db:
         db.row_factory = sqlite3.Row
         return [dict(r) for r in db.execute("SELECT * FROM messages ORDER BY id")]
 

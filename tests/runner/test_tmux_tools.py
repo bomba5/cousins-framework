@@ -1,6 +1,7 @@
 """The tmux kind's prompt block, and
 `reply` and `handoff` on the stdio `cousin-mcp` server, routed by
 run/turn.json. The SDK kind's prompt and tools are unchanged."""
+import contextlib
 import json
 import os
 import pathlib
@@ -89,7 +90,7 @@ def _chat(home):
     db = home / "data" / "chat.db"
     if not db.exists():
         return []
-    with sqlite3.connect(db) as conn:
+    with contextlib.closing(sqlite3.connect(db)) as conn:
         return conn.execute("SELECT chat_user, message FROM messages ORDER BY id").fetchall()
 
 

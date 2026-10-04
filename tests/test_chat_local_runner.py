@@ -4,6 +4,7 @@ tool (both through chat.send_message) and the console's peer route write
 the target's chat store and inbox in-process, through chat_api.send, the
 function its chat server's /api/send runs. A tmux-lane target is still
 reached over HTTP until the tmux lane is gone."""
+import contextlib
 import os
 import pathlib
 import sqlite3
@@ -21,7 +22,7 @@ def _messages(home):
     path = pathlib.Path(home) / "data" / "chat.db"
     if not path.exists():
         return []
-    with sqlite3.connect(path) as db:
+    with contextlib.closing(sqlite3.connect(path)) as db:
         return db.execute("SELECT user, message FROM messages ORDER BY id").fetchall()
 
 
@@ -29,7 +30,7 @@ def _inbox(home):
     path = pathlib.Path(home) / "data" / "inbox.db"
     if not path.exists():
         return []
-    with sqlite3.connect(path) as db:
+    with contextlib.closing(sqlite3.connect(path)) as db:
         return db.execute("SELECT thread_id, source, body, state FROM inbox ORDER BY id").fetchall()
 
 

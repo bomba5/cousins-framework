@@ -13,6 +13,7 @@ authenticated peer whose entry is unusable gets a generic 503; the detail
 of either goes to the log. A peer signature opens nothing under /api/,
 a console session or a bearer token nothing under /peer/. The sending
 side signs and never sends its secret."""
+import contextlib
 import json
 import os
 import pathlib
@@ -34,7 +35,7 @@ def _messages(home):
     path = pathlib.Path(home) / "data" / "chat.db"
     if not path.exists():
         return []
-    with sqlite3.connect(path) as db:
+    with contextlib.closing(sqlite3.connect(path)) as db:
         return db.execute("SELECT user, message FROM messages ORDER BY id").fetchall()
 
 

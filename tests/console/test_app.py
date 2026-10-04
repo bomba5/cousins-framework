@@ -251,7 +251,7 @@ class TestCliServePath(ConsoleCase):
              "--tmux-bin", str(self.tmux)],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
             env=dict(os.environ))
-        self.addCleanup(lambda: (proc.kill(), proc.wait()))
+        self.addCleanup(lambda: (proc.kill(), proc.wait(), proc.stderr.close()))
         deadline = time.monotonic() + 15
         raw = b""
         while time.monotonic() < deadline:

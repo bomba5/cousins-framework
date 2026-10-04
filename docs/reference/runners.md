@@ -103,7 +103,11 @@ envelope header, `[peer:<slug>] chat from <Name> at ...`. `reply` never
 answers a peer thread: named, it is refused with the hint to use `send`. A
 peer folded into an operator's turn makes two live threads, and a `reply`
 that names no thread is refused, never guessed; the refusal says which thread
-takes `thread=` and which peer takes `send`. Folding changes nothing in the
+takes `thread=` and which peer takes `send`. A thread nothing answers with
+`reply` or `send` (system, a loop, a schedule, a meeting) is no second
+candidate: beside exactly one operator or person thread and no peer, a bare
+`reply` goes to that thread, which is also what the reply gate counts as
+covering the turn. Folding changes nothing in the
 claim order at a turn boundary: operator and person chat first, then a
 meeting, then a peer. A peer row already queued when a meeting, loop or
 memory-proposal turn starts folds into that turn, as operator and person rows

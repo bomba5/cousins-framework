@@ -3,6 +3,26 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.26.5 - 2026-10-04
+
+### Fixed
+
+- **Commands close the databases they open.** `cousin-hive` (`mint`,
+  `revoke`, `forget`, `nodes`, `import-legacy`) and `cousin-chat-import`
+  left their SQLite connections to the garbage collector; they now close
+  them when the command is done. Dropping a connection does not close it:
+  it sits in a reference cycle, so it and its file descriptor stay open
+  until the next collection. A chat store that fails to open (a file
+  that is not a database) closes its connection before raising.
+
+- **The test suite reports a leaked resource against the test that leaked
+  it.** Each test's garbage is collected when the test ends, so a socket,
+  database or file it left open warns there instead of inside a later
+  test's captured output. With tracemalloc on (`PYTHONTRACEMALLOC=20`) a
+  leak allocated in `cousin_lib` fails its test. An unclosed sqlite
+  connection warns only from Python 3.13; sockets and files warn on every
+  version.
+
 ## 3.26.4 - 2026-10-04
 
 ### Fixed

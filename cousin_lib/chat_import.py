@@ -21,6 +21,7 @@ lock).
 """
 import argparse
 import base64
+import contextlib
 import datetime
 import json
 import os
@@ -99,26 +100,27 @@ def import_history(old_home, new_home, *, force=False):
         # store yet; create it with the server's own schema.
         from cousin_lib.server.storage import ChatStore
         new_db.parent.mkdir(parents=True, exist_ok=True)
-        ChatStore(new_db)
+        ChatStore(new_db).close()
     if marker.exists() and not force:
         raise ImportRefused("history already imported (%s)" % marker)
 
-    old = sqlite3.connect("file:%s?mode=ro" % old_db, uri=True)
-    old.row_factory = sqlite3.Row
-    old_cols = {r[1] for r in old.execute("PRAGMA table_info(messages)")}
-    old_rows = [dict(r) for r in old.execute("SELECT * FROM messages ORDER BY id")]
-    has_rx = old.execute("SELECT 1 FROM sqlite_master WHERE name='reactions'").fetchone()
-    old_rx = [dict(r) for r in old.execute("SELECT * FROM reactions")] if has_rx else []
-    old.close()
+    with contextlib.closing(sqlite3.connect("file:%s?mode=ro" % old_db, uri=True)) as old:
+        old.row_factory = sqlite3.Row
+        old_cols = {r[1] for r in old.execute("PRAGMA table_info(messages)")}
+        old_rows = [dict(r) for r in old.execute("SELECT * FROM messages ORDER BY id")]
+        has_rx = old.execute("SELECT 1 FROM sqlite_master WHERE name='reactions'").fetchone()
+        old_rx = [dict(r) for r in old.execute("SELECT * FROM reactions")] if has_rx else []
 
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     backup = new_db.with_name("chat.db.pre-import-%s" % stamp)
     shutil.copy2(new_db, backup)
 
-    new = sqlite3.connect(new_db)
-    new.row_factory = sqlite3.Row
-    cur_rows = [dict(r) for r in new.execute("SELECT * FROM messages ORDER BY id")]
-    cur_rx = [dict(r) for r in new.execute("SELECT * FROM reactions")]
+    # Read now, write at the end: the connection holds no transaction
+    # in between, so it need not stay open across the file moves.
+    with contextlib.closing(sqlite3.connect(new_db)) as new:
+        new.row_factory = sqlite3.Row
+        cur_rows = [dict(r) for r in new.execute("SELECT * FROM messages ORDER BY id")]
+        cur_rx = [dict(r) for r in new.execute("SELECT * FROM reactions")]
 
     top = max([r["id"] for r in old_rows] or [0])
     mapping = {r["id"]: top + i for i, r in enumerate(cur_rows, 1)}
@@ -175,6 +177,7 @@ def import_history(old_home, new_home, *, force=False):
     rx += [(mapping.get(x["message_id"], x["message_id"]), x["user"], x["emoji"],
             x.get("tap_count") or 1, x["created"]) for x in cur_rx]
 
+    new = sqlite3.connect(new_db)
     try:
         with new:
             new.execute("DELETE FROM reactions")

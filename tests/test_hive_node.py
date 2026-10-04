@@ -345,6 +345,7 @@ class TestBrainLoop(NodeCase):
         _HomeChat.received = []
         home = http.server.HTTPServer(("127.0.0.1", 0), _HomeChat)
         threading.Thread(target=home.serve_forever, daemon=True).start()
+        self.addCleanup(home.server_close)
         self.addCleanup(home.shutdown)
         node = self._node(
             HOME_CHAT_URL="http://127.0.0.1:%d" % home.server_address[1])

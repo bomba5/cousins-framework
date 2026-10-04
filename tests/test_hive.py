@@ -793,6 +793,18 @@ class TestOperatorCli(HiveCase):
         self.assertEqual(self._main(["forget", "kestrel"])[0], 0)
         self.assertEqual(self._main(["nodes"])[1].strip(), "no nodes")
 
+    def test_every_command_closes_the_store_it_opened(self):
+        # A store left open is finalised later, inside some other
+        # code's warning capture; each command closes its own.
+        from tests._fakes import sqlite_left_open
+        legacy = TestImportLegacy._fixtures(self)
+        with sqlite_left_open() as left:
+            for argv in (["mint", "kestrel"], ["nodes"], ["revoke", "kestrel"],
+                         ["forget", "kestrel"],
+                         ["import-legacy", "--tokens", str(legacy / "tokens.json")]):
+                self.assertEqual(self._main(argv)[0], 0, argv)
+        self.assertEqual(left, [])
+
 
 if __name__ == "__main__":
     unittest.main()

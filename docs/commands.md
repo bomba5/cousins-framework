@@ -7,7 +7,8 @@ name and the flags. Each command's `--help` is the final word.
 Two things apply to almost all of them:
 
 - Commands that work on the whole install take `--root <checkout>` or read
-  `FRAMEWORK_ROOT`. Run inside the checkout and most of them find it anyway.
+  `FRAMEWORK_ROOT`. Run inside the checkout and they find it on their own;
+  run elsewhere without either, they exit 2 naming what to set.
 - Commands that work on one [cousin](glossary.md#cousin) read `COUSIN_HOME` (the cousin's home,
   `cousins/<slug>/`) or take `--home`. Inside a running cousin, whatever its
   kind, `COUSIN_HOME` is already set (exported into the

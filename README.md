@@ -148,7 +148,7 @@ cd ~/cousins-framework
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[mcp,sdk]"
 cp config/harness.toml.claude-code.example config/harness.toml
-export FRAMEWORK_ROOT=$PWD      # every cousin-* command finds the install by it
+export FRAMEWORK_ROOT=$PWD      # optional in the checkout (the commands find it there); needed to run them from elsewhere
 cousin-console adduser ana      # asks for the password twice
 
 # the supervisor: the console on 127.0.0.1:8600, the loops daemon and every

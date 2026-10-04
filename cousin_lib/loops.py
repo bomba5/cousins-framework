@@ -1338,6 +1338,11 @@ def loops_main(argv=None):
     p.add_argument("slug")
     p.add_argument("loop")
     args = parser.parse_args(argv)
+    try:
+        FrameworkConfig.for_command()
+    except MissingConfigError as err:
+        print("cousin-loops: %s" % err, file=sys.stderr)
+        return 2
     if args.cmd == "status":
         status = daemon_status()
         print(status["message"])

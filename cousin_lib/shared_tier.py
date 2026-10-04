@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cousin_lib import perimeter
-from cousin_lib.config import CousinConfig, FrameworkConfig
+from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
 
 SHAREABLE_PREFIXES = ("project_", "project-", "reference_", "reference-")
@@ -485,6 +485,7 @@ def shared_main(argv=None):
             p.add_argument("--reason", default="")
     args = parser.parse_args(argv)
     try:
+        FrameworkConfig.for_command()
         if args.cmd == "list":
             state = list_shared()
             print("canonical:")
@@ -537,6 +538,9 @@ def shared_main(argv=None):
     except FileNotFoundError as err:
         print("cousin-shared: %s" % err, file=sys.stderr)
         return 1
+    except MissingConfigError as err:
+        print("cousin-shared: %s" % err, file=sys.stderr)
+        return 2
     return 0
 
 

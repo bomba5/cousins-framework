@@ -383,7 +383,7 @@ def chat_main(argv=None):
     args = parser.parse_args(argv)
 
     try:
-        fw = FrameworkConfig.from_env()
+        fw = FrameworkConfig.for_command()
         sender = CousinConfig.from_env()
     except MissingConfigError as e:
         print("cousin-chat: %s" % e, file=sys.stderr)

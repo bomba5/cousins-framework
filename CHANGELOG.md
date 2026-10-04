@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.26.7 - 2026-10-04
+
+### Fixed
+
+- **A bare `reply` beside a system thread goes to the one chat thread.**
+  When a turn held one operator or person thread and a thread nothing can
+  reply to (system, a loop, a schedule, a meeting), a `reply` that named
+  no thread was refused as ambiguous, though the reply gate already
+  counted such a reply as covering the turn. It now goes to the operator
+  or person thread. With a peer live, or a second operator or person
+  thread, it is still refused.
+
 ## 3.26.6 - 2026-10-04
 
 ### Fixed

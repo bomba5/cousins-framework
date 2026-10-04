@@ -520,7 +520,10 @@ def _pick_thread(ctx, thread):
     two, refused with the list, never guessed; none, refused. A peer
     folded into an operator's turn is a second live thread: a bare
     reply is refused, never sent to the operator's surface, and the
-    refusal says which thread takes thread= and which takes send."""
+    refusal says which thread takes thread= and which takes send. A
+    thread nothing can answer (system, loop, schedule, meeting) is no
+    second candidate: with one surface thread and no peer live, a bare
+    reply goes to that thread, as the reply gate already counts it."""
     turn = ctx.turn
     if turn is None:
         active, live = False, ()
@@ -543,8 +546,18 @@ def _pick_thread(ctx, thread):
         raise ValueError("no turn is live; name the thread (thread=operator:<name>"
                          " or person:<name>)")
     if len(live) > 1:
+        answerable = [t for t in live if _kind(t) in SURFACE_KINDS + ("peer",)]
+        if len(answerable) == 1 and _kind(answerable[0]) in SURFACE_KINDS:
+            return answerable[0]
         raise ValueError(_two_live(live))
     return live[0]
+
+
+def _kind(thread):
+    try:
+        return parse_thread(thread)[0]
+    except Exception:  # noqa: BLE001 - a malformed live id is no candidate
+        return None
 
 
 def _two_live(live):

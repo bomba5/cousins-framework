@@ -202,6 +202,28 @@ class TestReply(HermeticCase):
         text, err = tools.call(_ctx(self, turn), "reply", {"text": "hi"})
         self.assertTrue(err); self.assertIn("send", text)
 
+    def test_a_system_thread_beside_one_surface_thread_does_not_refuse(self):
+        """system (or a loop, a schedule, a meeting) cannot take a reply,
+        so beside one operator thread a bare reply goes to the operator,
+        as the reply gate counts it (#229)."""
+        for other in ("system", "loop:daemon", "schedule", "meeting:7"):
+            with self.subTest(other=other):
+                turn = Turn(); turn.begin({"id": 1, "thread_id": other, "sender": ""})
+                turn.add({"id": 2, "thread_id": "operator:priya", "sender": "Priya"})
+                ctx = _ctx(self, turn)
+                text, err = tools.call(ctx, "reply", {"text": "hi"})
+                self.assertFalse(err, text)
+                self.assertEqual([(r[0], r[2]) for r in self._rows(ctx.home)], [("priya", "hi")])
+
+    def test_a_system_thread_does_not_lift_the_refusal_when_a_peer_is_live(self):
+        turn = Turn(); turn.begin({"id": 1, "thread_id": "operator:priya", "sender": "Priya"})
+        turn.add({"id": 2, "thread_id": "system", "sender": ""})
+        turn.add({"id": 3, "thread_id": "peer:testa", "sender": "Testa"})
+        ctx = _ctx(self, turn)
+        text, err = tools.call(ctx, "reply", {"text": "hi"})
+        self.assertTrue(err, text); self.assertIn("send", text)
+        self.assertEqual(self._rows(ctx.home), [])
+
     def test_reply_outside_a_turn_is_refused(self):
         ctx = _ctx(self)
         text, err = tools.call(ctx, "reply", {"text": "hi"})

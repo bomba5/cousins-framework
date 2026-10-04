@@ -1302,7 +1302,7 @@ def no_kind_line(home):
 
 
 def migrate_main(argv=None):
-    from cousin_lib.config import FrameworkConfig
+    from cousin_lib.config import FrameworkConfig, MissingConfigError
     parser = argparse.ArgumentParser(
         prog="cousin-migrate",
         description="plan, apply and rollback --to switch a runner cousin between the sdk"
@@ -1339,7 +1339,11 @@ def migrate_main(argv=None):
     args = parser.parse_args(argv)
     if args.cmd == "tidy" and (args.slug is None) == (not args.all):
         parser.error("tidy takes a cousin's slug or --all, exactly one")
-    root = FrameworkConfig.resolve().root
+    try:
+        root = FrameworkConfig.for_command().root
+    except MissingConfigError as err:
+        print("cousin-migrate: %s" % err, file=sys.stderr)
+        return 2
     if args.cmd == "tidy":
         return _tidy_cli(args, root)
     home = root / "cousins" / args.slug

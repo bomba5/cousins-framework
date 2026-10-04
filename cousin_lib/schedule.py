@@ -350,6 +350,7 @@ def schedule_main(argv=None):
     handler = {"add": _cmd_add, "list": _cmd_list,
                "cancel": _cmd_cancel, "tick": _cmd_tick}[args.cmd]
     try:
+        FrameworkConfig.for_command()
         return handler(args)
     except MissingConfigError as err:
         print("cousin-schedule: %s" % err, file=sys.stderr)

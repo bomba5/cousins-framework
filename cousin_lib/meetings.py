@@ -638,6 +638,7 @@ def meeting_main(argv=None):
         p.add_argument("--user", default="user")
     args = parser.parse_args(argv)
     try:
+        FrameworkConfig.for_command()
         if args.cmd == "list":
             rows = list_meetings(state=args.state)
             if args.json:
@@ -678,6 +679,9 @@ def meeting_main(argv=None):
     except MeetingError as err:
         print("cousin-meeting: %s" % err, file=sys.stderr)
         return 1
+    except MissingConfigError as err:
+        print("cousin-meeting: %s" % err, file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

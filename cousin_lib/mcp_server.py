@@ -1121,11 +1121,22 @@ def mcp_main(argv=None):
                             " .mcp.json in the settings file"
                             " config/harness.toml names")
     p.add_argument("slug")
-    p.add_argument("--root", help="the framework root (else FRAMEWORK_ROOT)")
+    p.add_argument("--root", help="the framework root (else FRAMEWORK_ROOT,"
+                                  " else the checkout you are in)")
     args = parser.parse_args(argv)
     if args.cmd == "approve":
         return _approve(args)
     env = dict(os.environ)
+    if not env.get("FRAMEWORK_ROOT") and not env.get("COUSIN_HOME"):
+        # A person at a shell inside the checkout (--selftest,
+        # --list-tools): the shared discovery finds the install's
+        # registry. The harness always passes the environment, so a
+        # served adapter never reaches this.
+        try:
+            env["FRAMEWORK_ROOT"] = str(
+                FrameworkConfig.resolve(cwd_fallback=True).root)
+        except MissingConfigError:
+            pass        # the "no registry" refusal below says what to set
     if args.last_connection:
         from cousin_lib import mcp_logs
         home = env.get("COUSIN_HOME")

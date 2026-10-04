@@ -218,13 +218,14 @@ def main(argv=None):
     parser.add_argument("--old-home", required=True,
                         help="the cousin's previous home (holds data/chat.db"
                              " and chat/); an unpacked legacy archive works")
-    parser.add_argument("--root", help="framework root (else FRAMEWORK_ROOT)")
+    parser.add_argument("--root", help="framework root (else FRAMEWORK_ROOT,"
+                        " else the checkout you are in)")
     parser.add_argument("--force", action="store_true",
                         help="import even if a marker says it was done")
     args = parser.parse_args(argv)
     from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
     try:
-        root = FrameworkConfig.resolve(args.root).root
+        root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
         home = pathlib.Path(root) / "cousins" / args.slug
         cfg = CousinConfig.load(home)
     except MissingConfigError as err:

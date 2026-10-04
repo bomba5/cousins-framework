@@ -181,6 +181,21 @@ class FrameworkConfig:
             )
         return cls(root)
 
+    @classmethod
+    def for_command(cls, flag_value=None):
+        """resolve(flag_value, cwd_fallback=True) for a command a person
+        types, with the answer exported as FRAMEWORK_ROOT. The library
+        code under a command reads the root with from_env(); exporting
+        what resolve() found keeps the two from disagreeing, so a
+        command run from inside the checkout works all the way down
+        instead of failing in a helper that never saw the working
+        directory. The command owns its process environment, so the
+        export is its to make. Raises MissingConfigError with the one
+        message resolve() gives; the entry point prints it and exits 2."""
+        framework = cls.resolve(flag_value, cwd_fallback=True)
+        os.environ["FRAMEWORK_ROOT"] = str(framework.root)
+        return framework
+
     @staticmethod
     def root_from_home(home):
         """The root a cousin home implies, or None. Homes live at

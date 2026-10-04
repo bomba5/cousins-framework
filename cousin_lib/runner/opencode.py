@@ -198,6 +198,15 @@ PEER_GATE_TEXT = (
     " per turn.")
 
 
+def _sent_ok(output):
+    """A `cousin_send` output that says it was delivered: the tool's own
+    `{"ok": true, ...}`. An error is not, whatever status it came with."""
+    try:
+        return json.loads(output or "").get("ok") is True
+    except (ValueError, AttributeError):
+        return False
+
+
 def reply_gate_text(missing, *, written=False):
     """The reply and peer gates' send-back on this lane for the unanswered
     threads `missing`; `written` when the run's text held a reply call
@@ -1710,7 +1719,8 @@ class OpencodeRunner:
             if status == "completed" and sdk_tool_name(part.get("tool")) == hooks.REPLY_TOOL \
                     and str(text or "").startswith(tools.REPLIED):
                 run.replied.note(state.get("input"))
-            if status == "completed" and sdk_tool_name(part.get("tool")) == hooks.SEND_TOOL:
+            if status == "completed" and sdk_tool_name(part.get("tool")) == hooks.SEND_TOOL \
+                    and _sent_ok(text):
                 run.replied.note_send(state.get("input"))
             self._record("PostToolUse" if status == "completed" else "PostToolUseFailure",
                          part, state)

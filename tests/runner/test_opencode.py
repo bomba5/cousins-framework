@@ -1234,6 +1234,14 @@ class TestReplyGate(OpencodeCase):
         self.assertEqual(len(self.sent()), 1)
         self.assertEqual(self.payloads(r, "gate"), [])
 
+    def test_a_send_whose_output_is_an_error_does_not_answer_it(self):
+        r = self.gated([[("tool", "cousin_send", {"to": "kestrel", "text": "done"},
+                          "ValueError: unknown destination 'kestrel'"), ("text", "hm")],
+                        [("text", "no answer due")]])
+        a = r.enqueue(Item("peer:kestrel", "chat", "hello", sender="Kestrel"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        self.assertEqual(self.payloads(r, "gate"), [{"gate": "send", "threads": ["peer:kestrel"]}])
+
     def test_the_peer_gate_off_never_sends_a_peer_turn_back(self):
         r = self.gated([[("text", "noted, Kestrel")]], peer_gate=False)
         a = r.enqueue(Item("peer:kestrel", "chat", "hello", sender="Kestrel"))

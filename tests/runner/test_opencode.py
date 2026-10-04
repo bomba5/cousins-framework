@@ -1097,7 +1097,8 @@ class TestReplyGate(OpencodeCase):
     """The sdk lane's reply gate at the opencode idle: a good run on
     operator or person chat with no successful `cousin_reply` is sent back
     once, in the same turn; the end after that always passes."""
-    ASKED = hooks.reply_gate_reason(["operator:ana"])
+    ASKED = opencode.reply_gate_text(["operator:ana"])
+    WROTE = opencode.reply_gate_text(["operator:ana"], written=True)
 
     def gated(self, scripts, *, reply_gate=True):
         return self.started(self.runner(scripts, home=self.home(reply_gate=reply_gate)))
@@ -1128,6 +1129,45 @@ class TestReplyGate(OpencodeCase):
         self.assertEqual(results[0]["inbox_ids"], [a.inbox_id])
         self.assertFalse(results[0]["is_error"])
         self.assertIsNone(self.payloads(r, "user")[1]["echo_of"])
+
+    def test_the_lane_send_back_names_the_tool_and_the_call_form(self):
+        self.assertTrue(self.ASKED.startswith("[runner] You are ending this turn without calling"
+                                              " the `cousin_reply` tool on operator:ana,"))
+        self.assertIn("On this lane the reply tool is named `cousin_reply`", self.ASKED)
+        self.assertIn("a call written out in your text, like `cousin_reply({text: ...})`,"
+                      " does nothing", self.ASKED)
+        self.assertIn("with `text`, and with `thread` too when two threads are live", self.ASKED)
+        self.assertNotIn("as text: it was not sent", self.ASKED)
+        self.assertTrue(self.WROTE.startswith("[runner] You wrote the `cousin_reply` call as text:"
+                                              " it was not sent. You are ending this turn"))
+        self.assertNotEqual(self.ASKED, hooks.reply_gate_reason(["operator:ana"]))
+
+    def test_a_reply_call_written_as_text_gets_the_specific_send_back(self):
+        written = 'cousin_reply({text: "hi", thread: "operator:ana"})'
+        r = self.gated([[("text", written)], [("text", written)]])
+        a = r.enqueue(_op("hi", "ana"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        self.assertEqual(self.sent()[1:], [self.WROTE], "sent back once, never twice")
+        self.assertEqual(self.payloads(r, "gate"), [{"gate": "reply", "threads": ["operator:ana"],
+                                                     "written_call": True}])
+        self.assertEqual(self.kinds(r).count("tool"), 0, "the text is never made into a call")
+        self.assertEqual(len(self.payloads(r, "result")), 1)
+
+    def test_a_plain_text_answer_gets_the_lane_send_back(self):
+        r = self.gated([[("text", "Heartbeat at 12:00, all quiet.")], [("text", "ok")]])
+        a = r.enqueue(_op("hi", "ana"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        self.assertEqual(self.sent()[1:], [self.ASKED])
+        self.assertEqual(self.payloads(r, "gate"), [{"gate": "reply", "threads": ["operator:ana"]}])
+
+    def test_a_real_call_is_never_sent_back_even_beside_a_written_one(self):
+        r = self.gated([[("text", 'I will run cousin_reply(text="hello") now'),
+                         ("tool", "cousin_reply", {"text": "hello"}, "replied to ana (#1)"),
+                         ("text", "done")]])
+        a = r.enqueue(_op("hi", "ana"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        self.assertEqual(len(self.sent()), 1)
+        self.assertEqual(self.payloads(r, "gate"), [])
 
     def test_a_turn_that_replies_at_once_is_not_sent_back(self):
         r = self.gated([[("tool", "cousin_reply", {"text": "hello"}, "replied to ana (#1)"),
@@ -1174,6 +1214,34 @@ class TestReplyGate(OpencodeCase):
         self.assertEqual(self.finished(r, b), "delivered")
         self.assertEqual(len(self.sent()), 2)
         self.assertEqual(self.payloads(r, "gate"), [])
+
+
+class TestWrittenReplyCall(unittest.TestCase):
+    """written_reply_call: the reply call written out as text, in the
+    shapes free models write it, and nothing that is only prose."""
+
+    def test_the_shapes_a_model_writes(self):
+        for text in ('cousin_reply({text: "hi", thread: "operator:ana"})',
+                     'cousin_reply({"text": "hi"})',
+                     "cousin_reply(text='hi', thread='operator:ana')",
+                     'Sure.\n\n```\nreply(text="Hi! What do you need?")\n```',
+                     'cousin_reply({thread: "operator:ana", text: "a (small) note"})',
+                     'mcp__cousin__reply({"text": "hi"})',
+                     '<tool_call>{"name": "cousin_reply", "arguments": {"text": "hi"}}</tool_call>',
+                     '{"arguments": {"text": "hi"}, "tool": "reply"}'):
+            self.assertTrue(opencode.written_reply_call(text), text)
+
+    def test_prose_and_other_calls_are_not_one(self):
+        for text in ("Heartbeat at 12:00, all quiet.",
+                     "I should reply (the person asked) with text: hello",
+                     "cousin_reply()",
+                     'cousin_reply({thread: "operator:ana"}) and then text: later',
+                     'cousin-reply --user ana "hi"',
+                     'cousin_send({to: "testa", text: "hi"})',
+                     'my_reply(text="x")',
+                     'cousin_reply({context: "x"})',
+                     "", None):
+            self.assertFalse(opencode.written_reply_call(text), text)
 
 
 SAME_SEND = ("tool", "cousin_send", {"to": "testa", "text": "still waiting"}, '{"ok": true}')

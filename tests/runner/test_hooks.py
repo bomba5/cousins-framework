@@ -625,6 +625,14 @@ class TestReplyGate(HooksCase):
         _run(cbs["UserPromptSubmit"](self._base("UserPromptSubmit", prompt="next"), None, {}))
         self.assertEqual(self.stop(cbs)["decision"], "block")
 
+    def test_the_sdk_send_back_text_is_unchanged(self):
+        self.assertEqual(
+            hooks.reply_gate_reason(["operator:ana"]),
+            "You are ending this turn without calling reply on operator:ana, so the person who"
+            " wrote sees nothing on the chat surface. If an answer is due, call reply"
+            " now. If none is (an acknowledgement, a message that needs no answer),"
+            " just end the turn again: this check runs once per turn.")
+
     def test_the_decision_is_one_pure_function_both_lanes_call(self):
         live = ("operator:ana", "peer:kestrel", "person:Sam")
         self.assertEqual(hooks.unanswered_threads(live, set(), False),

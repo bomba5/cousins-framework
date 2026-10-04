@@ -77,6 +77,27 @@ class TestContractLanes(HermeticCase):
         self.assertIn("(`cousin_reply`), never with `cousin-reply`", text)
         self.assertIn("You run on the opencode runner,", text)
 
+    def test_the_call_form_paragraph_is_the_opencode_lane_s_only(self):
+        """A model on opencode wrote the reply call out as text: its contract
+        says, after "How you answer", that a call is made, not written, and
+        names the reply tool as the lane serves it. The SDK lane's bytes do
+        not move."""
+        reg = _registry()
+        plain = contract.render(reg, "1.12.0", tool_name=opencode_name, runner=OPENCODE_RUNNER,
+                                other_servers=None)
+        text = contract.render(reg, "1.12.0", tool_name=opencode_name, runner=OPENCODE_RUNNER,
+                               other_servers=None, call_form=True)
+        paragraph = contract.CALL_FORM.format(reply="cousin_reply")
+        self.assertIn('like `cousin_reply({text: "..."})` in your text is only text', paragraph)
+        self.assertIn("call the `cousin_reply` tool with `text`", paragraph)
+        answer = plain.index("## How you answer")
+        after = plain.index("\n\n", plain.index("\n\n", answer) + 2)
+        self.assertEqual(text, plain[:after] + "\n\n" + paragraph + plain[after:])
+        self.assertNotIn(paragraph, contract.render(reg, "1.12.0"))
+        self.assertEqual(hashlib.sha256(contract.render(reg, "1.12.0").encode()).hexdigest(),
+                         SDK_CONTRACT_SHA256)
+        text.encode("ascii")
+
     def test_every_tool_line_uses_the_naming_function(self):
         reg = _registry(TRACKER_TOML)
         seen = []
@@ -117,6 +138,12 @@ class TestPromptLanes(PromptCase):
         self.assertIn("- `cousin_handoff`: ", oc)
         self.assertNotIn("mcp__cousin__", oc)
         self.assertEqual(as_opencode(sdk), oc)
+
+    def test_the_opencode_prompt_carries_the_call_form(self):
+        oc = self.compose(tool_name=opencode_name, runner=OPENCODE_RUNNER, other_servers=None,
+                          call_form=True)
+        self.assertIn(contract.CALL_FORM.format(reply="cousin_reply"), oc)
+        self.assertNotIn("in your text is only text", self.compose())
 
 
 if __name__ == "__main__":

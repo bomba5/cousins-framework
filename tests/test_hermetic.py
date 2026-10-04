@@ -68,11 +68,17 @@ class TestLeakGuard(unittest.TestCase):
     object's ResourceWarning is reported against the test that leaked it,
     never inside a later test's capture. With tracemalloc on, one that
     cousin_lib allocated fails that test; one the test opened itself is
-    only reported."""
+    only reported.
+
+    The cousin_lib probe leaks a sqlite connection, which warns when
+    unclosed only from Python 3.13; the test's own leak is a file, which
+    warns on every version."""
+
+    WARNS_ON_SQLITE = sys.version_info >= (3, 13)
 
     PROBE = textwrap.dedent("""\
+        import os
         import pathlib
-        import sqlite3
         import tempfile
         import unittest
         import tests  # noqa: F401
@@ -85,8 +91,8 @@ class TestLeakGuard(unittest.TestCase):
                 store = ChatStore(pathlib.Path(tmp.name) / "chat.db")
                 store.again = store          # a cycle: only the collector frees it
 
-            def test_b_the_tests_own_connection_left_open(self):
-                held = [sqlite3.connect(":memory:")]
+            def test_b_the_tests_own_file_left_open(self):
+                held = [open(os.devnull)]
                 held.append(held)
 
             def test_c_clean(self):
@@ -99,6 +105,7 @@ class TestLeakGuard(unittest.TestCase):
             return _run_unittest(["discover", "-s", tmp, "-t", tmp],
                                  dict(env, PYTHONPATH=str(REPO)))
 
+    @unittest.skipUnless(WARNS_ON_SQLITE, "an unclosed sqlite connection warns from 3.13")
     def test_with_tracemalloc_a_cousin_lib_leak_fails_its_own_test(self):
         proc = self._probe({"PYTHONTRACEMALLOC": "20"})
         self.assertEqual(proc.returncode, 1, proc.stderr)
@@ -111,7 +118,8 @@ class TestLeakGuard(unittest.TestCase):
         proc = self._probe({"PYTHONTRACEMALLOC": ""})
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("Ran 3 tests", proc.stderr)
-        self.assertIn("left open by test_probe_leak.TestProbe.test_a", proc.stderr)
+        if self.WARNS_ON_SQLITE:
+            self.assertIn("left open by test_probe_leak.TestProbe.test_a", proc.stderr)
         self.assertIn("left open by test_probe_leak.TestProbe.test_b", proc.stderr)
 
 

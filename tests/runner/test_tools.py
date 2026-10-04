@@ -224,6 +224,16 @@ class TestReply(HermeticCase):
         self.assertTrue(err, text); self.assertIn("send", text)
         self.assertEqual(self._rows(ctx.home), [])
 
+    def test_a_system_thread_does_not_lift_the_refusal_between_two_surface_threads(self):
+        turn = Turn(); turn.begin({"id": 1, "thread_id": "system", "sender": ""})
+        turn.add({"id": 2, "thread_id": "operator:priya", "sender": "Priya"})
+        turn.add({"id": 3, "thread_id": "person:sam", "sender": "Sam"})
+        ctx = _ctx(self, turn)
+        text, err = tools.call(ctx, "reply", {"text": "hi"})
+        self.assertTrue(err, text)
+        self.assertIn("thread=operator:priya", text); self.assertIn("thread=person:sam", text)
+        self.assertEqual(self._rows(ctx.home), [])
+
     def test_reply_outside_a_turn_is_refused(self):
         ctx = _ctx(self)
         text, err = tools.call(ctx, "reply", {"text": "hi"})

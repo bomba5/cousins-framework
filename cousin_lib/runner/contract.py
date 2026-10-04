@@ -104,6 +104,18 @@ next generation starts from a digest of that state as its first
 message. A new generation is not announced; the work continues."""
 
 
+# The call form, for a lane that asks for it (render's `call_form`): one
+# paragraph after "How you answer". The opencode lane asks: a free model
+# there wrote the reply call out as text (`cousin_reply({text: ...})`),
+# and again after the reply gate's send-back, so nothing reached the
+# person (#226). The SDK lane does not ask, so its bytes, which the
+# prompt cache keys on, do not move.
+CALL_FORM = """Call a tool through your tool calls, never by writing it out: a line
+like `{reply}({{text: "..."}})` in your text is only text, and nothing
+is sent. To answer a person, call the `{reply}` tool with `text`, and
+with `thread` too when two threads are live."""
+
+
 # One fixed sentence, never the servers themselves: a home's .mcp.json
 # changes with the home, and this text must not (byte-stable prompt).
 OTHER_SERVERS = """Other MCP servers, from your home's .mcp.json, may be present beside
@@ -200,7 +212,8 @@ def _tool_block(definition, registry, tool_name):
 PANE_RUNNER = "an interactive Claude Code pane"
 
 
-def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHER_SERVERS):
+def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHER_SERVERS,
+           call_form=False):
     """The contract for this registry at this release. Same inputs, same bytes.
     Its prose names only the tools tool_definitions(registry) serves.
 
@@ -214,6 +227,10 @@ def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHE
     `other_servers` is the paragraph on the home's other MCP servers, whose
     tools the SDK lane names `mcp__<server>__<tool>`. A lane that loads no
     other server (opencode: exactly one) passes None.
+
+    `call_form` adds CALL_FORM after the "How you answer" paragraph: a
+    tool is called, never written out as text. The opencode lane passes
+    True; False (the SDK lane) leaves the bytes as they were.
     """
     from cousin_lib.runner.tools import tool_definitions
     tool_name = tool_name or sdk_tool_name
@@ -221,6 +238,11 @@ def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHE
     named = {n: tool_name(n) for n in ("reply", "send", "memory")}
     static = doctrine({d["name"] for d in definitions},
                       runner=runner or "the SDK runner", **named)
+    if call_form:
+        paragraphs = static.split("\n\n")
+        at = next(i for i, p in enumerate(paragraphs) if p.startswith("## How you answer"))
+        paragraphs.insert(at + 2, CALL_FORM.format(reply=named["reply"]))
+        static = "\n\n".join(paragraphs)
     blocks = [_tool_block(d, registry, tool_name) for d in definitions]
     text = "\n\n".join([HEADER.format(version=major_minor(version)), static,
                         "## Your tools\n\n" + "\n".join(blocks)]

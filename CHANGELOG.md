@@ -3,6 +3,33 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.26.4 - 2026-10-04
+
+### Fixed
+
+- **Every command finds the framework root from inside the checkout, or
+  says what to set.** With `FRAMEWORK_ROOT` and `COUSIN_HOME` unset,
+  `cousin-loops` (`flips`, `status`, `requests`, `fire`), `cousin-shared`,
+  `cousin-meeting list` and `cousin-migrate` stopped with a traceback, and
+  `cousin-watch`, `cousin-chat`, `cousin-job`, `cousin-tracker`,
+  `cousin-schedule tick`, `cousin-hive`, `cousin-chat-import` and
+  `cousin-mcp --list-tools` refused even when run from the checkout. They
+  now use the same discovery as `cousin-supervisor` (a `--root` flag, else
+  `FRAMEWORK_ROOT`, else the root a `COUSIN_HOME` names, else the checkout
+  you are in) and, outside any install, exit 2 with one line naming what to
+  set. `cousin-image`, `cousin-voice` and `cousin-video` report a missing
+  root as that instead of "no provider configured". The quick starts keep
+  `export FRAMEWORK_ROOT=$PWD`, now described as optional in the checkout
+  and needed only to run the commands from elsewhere.
+
+- **The media commands refuse in a different order.** `cousin-image`,
+  `cousin-voice` and `cousin-video` now resolve the root before the
+  provider, so with neither a root nor a provider the message is the root
+  one (still exit 2); with a root, the provider message is unchanged. A
+  missing cousin config there is now one line and exit 2 instead of a
+  traceback. A command that finds the root this way exports it as
+  `FRAMEWORK_ROOT`, so the processes it starts see the same install.
+
 ## 3.26.3 - 2026-10-04
 
 ### Fixed

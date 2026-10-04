@@ -10,7 +10,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 - **Commands close the databases they open.** `cousin-hive` (`mint`,
   `revoke`, `forget`, `nodes`, `import-legacy`) and `cousin-chat-import`
   left their SQLite connections to the garbage collector; they now close
-  them when the command is done. A chat store that fails to open (a file
+  them when the command is done. Dropping a connection does not close it:
+  it sits in a reference cycle, so it and its file descriptor stay open
+  until the next collection. A chat store that fails to open (a file
   that is not a database) closes its connection before raising.
 
 - **The test suite reports a leaked resource against the test that leaked

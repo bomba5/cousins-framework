@@ -3,6 +3,25 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.26.2 - 2026-10-04
+
+### Fixed
+
+- **`cousin-doctor identity` skipped lines that merely said "verify" or
+  "shape".** Both counted as words about a command's syntax wherever they
+  stood, so a line that verified a backup and then told the cousin to run a
+  terminal command was never reported. "shape" now counts only as a
+  command's shape ("a CLI's shape", "the shape of `cousin-chat send`"), and
+  "verify" no longer counts alone.
+
+### Changed
+
+- **A distinction fix keeps its audience.** When an identity line gives a
+  command to the operator or to peers ("`cousin-reply` = operator only",
+  "for peer cousins"), the fix now names the audience with the tool:
+  "rewrite the distinction in tool terms: operator: the `mcp__cousin__reply`
+  tool; peers: the `mcp__cousin__send` tool".
+
 ## 3.26.1 - 2026-10-03
 
 ### Fixed

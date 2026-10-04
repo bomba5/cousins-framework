@@ -422,8 +422,9 @@ cd ~/cousins-framework && . .venv/bin/activate && export FRAMEWORK_ROOT=$PWD
 ```
 
 Put the last two in your shell profile if you like. Commands you type inside
-the checkout find the root on their own, but exporting it keeps every command
-in agreement. For the memory and job tools from a plain shell, also
+the checkout find the root on their own; the export is what lets you run them
+from any other directory (without it, one run elsewhere stops and says what to
+set). For the memory and job tools from a plain shell, also
 `export COUSIN_HOME=$PWD/cousins/<slug>`, otherwise they stop with "no cousin
 context". The systemd units set all of this themselves.
 

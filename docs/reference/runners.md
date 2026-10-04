@@ -381,7 +381,10 @@ runs), which the contract does not cover.
   `"written_call": true`. The runner never makes that call for the model:
   only a real tool call acts, and the turn may end unanswered. A turn settled
   after an event-stream reconnect is not gated, since the replies sent in
-  the gap were not seen.
+  the gap were not seen. The peer gate (`[agent] peer_gate`) rides on the
+  same send-back: peer rows no completed `cousin_send` to that peer
+  answered are named in it, with the `cousin_send` tool and the hint not to
+  send a thanks back, and get a `gate` event of their own (`"gate": "send"`).
 - A run that keeps making the same call is bounded. The same tool with the
   same arguments made 3 times in one run gets one prompt from the runner
   (a `gate` event with `"gate": "repeat"`, `"action": "nudge"`): stop
@@ -525,9 +528,9 @@ none is a contract item:
   `data/run/tmux-context.md` (a private file, see "The system prompt is a
   private file" above); a resume or a kind switch gets a short pointer
   instead, never the full block again (`runner/prompt.py`).
-- There is no reply gate: `[agent] reply_gate` covers the `sdk` and
-  `opencode` lanes only, so a turn in the pane can end on an operator or
-  person thread without a `reply`.
+- There is no reply or peer gate: `[agent] reply_gate` and `peer_gate` cover
+  the `sdk` and `opencode` lanes only, so a turn in the pane can end on an
+  operator, person or peer thread without a `reply` or `send`.
 - The [memory perimeter](../memory.md#the-perimeter) is not on the tool gate:
   the pane has no live `PreToolUse` veto (see "Known gaps on tmux"), so a
   subagent in the pane is not refused a write to the install's

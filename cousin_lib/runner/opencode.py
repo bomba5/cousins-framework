@@ -33,7 +33,9 @@ an abort is an interruption, anything else fails the turn. The reply
 gate (`[agent] reply_gate`, hooks.unanswered_threads, the sdk lane's
 decision) runs at that idle: a good run whose operator or person rows
 got no successful `cousin_reply` gets one more prompt with the reason,
-and its rows close at the idle that answers it. A run that makes the
+and its rows close at the idle that answers it. The peer gate
+(`[agent] peer_gate`) does the same for peer rows no `cousin_send` to
+that peer answered, in the same one prompt. A run that makes the
 same call REPEAT_LIMIT times gets one nudge the same way, and one that
 reaches the limit again is aborted (an interruption). A run with no event
 for `idle_timeout_s` is settled failed, `tool_idle_timeout_s` while a tool
@@ -187,14 +189,40 @@ REPLY_GATE_TEXT = (
 REPLY_WRITTEN_LEAD = "[runner] You wrote the `{reply}` call as text: it was not sent. "
 
 
+PEER_GATE_TEXT = (
+    "You are ending this turn without calling the `{send}` tool to {threads}, so the"
+    " cousin who wrote gets no answer; text you write does not reach it. If the message"
+    " asks you something or waits on a result, call the `{send}` tool now with `to`"
+    " ({slugs}) and `text`. If it needs no answer (a thanks, an acknowledgement, a status"
+    " note), just end the turn again, and do not send a thanks back: this check runs once"
+    " per turn.")
+
+
+def _sent_ok(output):
+    """A `cousin_send` output that says it was delivered: the tool's own
+    `{"ok": true, ...}`. An error is not, whatever status it came with."""
+    try:
+        return json.loads(output or "").get("ok") is True
+    except (ValueError, AttributeError):
+        return False
+
+
 def reply_gate_text(missing, *, written=False):
-    """The reply gate's send-back on this lane for the unanswered threads
-    `missing`; `written` when the run's text held a reply call written out
-    (written_reply_call), which the send-back then names first."""
+    """The reply and peer gates' send-back on this lane for the unanswered
+    threads `missing`; `written` when the run's text held a reply call
+    written out (written_reply_call), which the send-back then names first."""
+    human = [t for t in missing if not t.startswith("peer:")]
+    peers = [t for t in missing if t.startswith("peer:")]
     reply = tool_name("reply")
-    text = REPLY_GATE_TEXT.format(reply=reply, threads=" and ".join(missing))
-    if written:
-        text = REPLY_WRITTEN_LEAD.format(reply=reply) + text[len("[runner] "):]
+    text = ""
+    if human:
+        text = REPLY_GATE_TEXT.format(reply=reply, threads=" and ".join(human))
+        if written:
+            text = REPLY_WRITTEN_LEAD.format(reply=reply) + text[len("[runner] "):]
+    if peers:
+        peer = PEER_GATE_TEXT.format(send=tool_name("send"), threads=" and ".join(peers),
+                                     slugs=", ".join(t.partition(":")[2] for t in peers))
+        text = (text + " " + peer) if text else "[runner] " + peer
     return text
 
 
@@ -668,8 +696,9 @@ class OpencodeRunner:
         self.small_model = small_model or agent.get("small_model") or self.model
         self.binary = opencode_bin(agent, environ)
         self.models_fetch = agent.get("opencode_models_fetch", True) is not False
-        # the sdk lane's reply gate, here at the idle (_gate_reply)
+        # the sdk lane's reply and peer gates, here at the idle (_gate_reply)
         self.reply_gate = bool(agent.get("reply_gate", True))
+        self.peer_gate = bool(agent.get("peer_gate", True))
         self._environ = environ
         self.shell_env = shell_env(self.home, agent, environ)
         self.server_factory = server_factory or _default_server_factory
@@ -1690,6 +1719,9 @@ class OpencodeRunner:
             if status == "completed" and sdk_tool_name(part.get("tool")) == hooks.REPLY_TOOL \
                     and str(text or "").startswith(tools.REPLIED):
                 run.replied.note(state.get("input"))
+            if status == "completed" and sdk_tool_name(part.get("tool")) == hooks.SEND_TOOL \
+                    and _sent_ok(text):
+                run.replied.note_send(state.get("input"))
             self._record("PostToolUse" if status == "completed" else "PostToolUseFailure",
                          part, state)
 
@@ -1838,7 +1870,7 @@ class OpencodeRunner:
         same runner turn, with this lane's reply_gate_text; its rows stay open
         and close at the idle that answers the send-back. Never twice in one
         run, so the next end always passes. True when it was sent."""
-        if not self.reply_gate or run.gated or run.quiet \
+        if not (self.reply_gate or self.peer_gate) or run.gated or run.quiet \
                 or run.error is not None or self._interrupt_requested or self._stop.is_set():
             return False
         live = []
@@ -1846,7 +1878,7 @@ class OpencodeRunner:
             if s.row is not None and s.echoed and not s.closed \
                     and s.row["thread_id"] not in live:
                 live.append(s.row["thread_id"])
-        missing = run.replied.unanswered(live)
+        missing = run.replied.unanswered(live, humans=self.reply_gate, peers=self.peer_gate)
         if not missing:
             return False
         run.gated = True
@@ -1865,10 +1897,10 @@ class OpencodeRunner:
         written = run.written_call or any(
             kind == "text" and written_reply_call(text)
             for kind, text in run.open_parts.values())
-        event = {"gate": "reply", "threads": missing}
-        if written:
-            event["written_call"] = True
-        self.stream.append("gate", event)
+        for event in hooks.gate_events(missing):
+            if written and event["gate"] == "reply":
+                event["written_call"] = True
+            self.stream.append("gate", event)
         try:
             run.follow_up = self._send(run, None, reply_gate_text(missing, written=written))
         except Exception as exc:  # noqa: BLE001 - not sent: the turn ends as it stands

@@ -238,8 +238,8 @@ drift from what the runner accepts.
   `"<provider>/<model>"` on a provider the account holds, never a Claude
   model), effort, auto start, [rollover](glossary.md#rollover) percentage, side sessions
   (`[agent.sessions]`, `sdk` only; `operator` and `system` always stay on the
-  primary), the reply gate (`reply_gate`, `sdk` and `opencode`; see
-  [configuration](configuration.md#agent-runner)), strict harness
+  primary), the reply and peer gates (`reply_gate`, `peer_gate`, `sdk` and
+  `opencode`; see [configuration](configuration.md#agent-runner)), strict harness
   (`strict_harness`; see [configuration](configuration.md#agent-strict_harness)),
   the opencode keys (`small_model`, `shell_env`,
   `opencode_models_fetch`; `opencode_bin` read-only) and the tmux kind's

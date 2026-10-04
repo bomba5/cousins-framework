@@ -567,13 +567,13 @@ class TestReplyGate(HooksCase):
     """A turn on operator or person chat that ends without `reply` is sent
     back once; the Stop after the block always passes."""
 
-    def gated(self, threads, *, gate=True, thread_for_prompt=None):
+    def gated(self, threads, *, gate=True, peer_gate=True, thread_for_prompt=None):
         self.live = list(threads)
         return hooks.callbacks(self.home, slug="wren", root=self.root,
                                machine=self.machine, stream=self.stream,
                                recorder=lambda payload, cancelled=None: None,
                                live_threads=lambda: tuple(self.live), reply_gate=gate,
-                               thread_for_prompt=thread_for_prompt)
+                               peer_gate=peer_gate, thread_for_prompt=thread_for_prompt)
 
     def stop(self, cbs, active=False):
         return _run(cbs["Stop"](self._base("Stop", stop_hook_active=active), None, {}))
@@ -585,6 +585,14 @@ class TestReplyGate(HooksCase):
         if agent_id:
             payload["agent_id"] = agent_id
         _run(cbs["PostToolUse"](payload, "r", {}))
+
+    def send(self, cbs, to, agent_id=None):
+        payload = self._base("PostToolUse", tool_name=hooks.SEND_TOOL,
+                             tool_input={"to": to, "text": "done"},
+                             tool_use_id="s", tool_response={})
+        if agent_id:
+            payload["agent_id"] = agent_id
+        _run(cbs["PostToolUse"](payload, "s", {}))
 
     def test_an_unanswered_operator_turn_is_blocked_once(self):
         cbs = self.gated(["operator:ana"])
@@ -608,9 +616,58 @@ class TestReplyGate(HooksCase):
         self.assertIn("person:sam", out["reason"])
         self.assertNotIn("operator:ana", out["reason"])
 
-    def test_peer_schedule_and_loop_turns_are_not_gated(self):
-        cbs = self.gated(["peer:kestrel", "schedule", "loop:daemon"])
+    def test_schedule_and_loop_turns_are_not_gated(self):
+        cbs = self.gated(["schedule", "loop:daemon", "system", "meeting:7"])
         self.assertEqual(self.stop(cbs), {})
+
+    def test_an_unanswered_peer_turn_is_blocked_once_with_the_send_hint(self):
+        cbs = self.gated(["peer:kestrel"])
+        out = self.stop(cbs)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("send to peer:kestrel", out["reason"])
+        self.assertIn("to=kestrel", out["reason"])
+        self.assertIn("do not send a thanks back", out["reason"])
+        self.assertEqual([e["payload"] for e in self.stream.tail() if e["kind"] == "gate"],
+                         [{"gate": "send", "threads": ["peer:kestrel"]}])
+        self.assertEqual(self.stop(cbs, active=True), {})
+
+    def test_a_send_to_that_peer_passes_and_to_another_does_not(self):
+        cbs = self.gated(["peer:kestrel"])
+        self.send(cbs, "testa")
+        self.assertEqual(self.stop(cbs)["decision"], "block")
+        cbs = self.gated(["peer:kestrel"])
+        self.send(cbs, " Kestrel ")
+        self.assertEqual(self.stop(cbs), {})
+
+    def test_a_subagent_send_does_not_count_and_the_peer_gate_can_be_off(self):
+        cbs = self.gated(["peer:kestrel"])
+        self.send(cbs, "kestrel", agent_id="sub-1")
+        self.assertEqual(self.stop(cbs)["decision"], "block")
+        self.assertEqual(self.stop(self.gated(["peer:kestrel"], peer_gate=False)), {})
+
+    def test_each_gate_is_its_own_switch(self):
+        # reply gate off, peer gate on: only the peer is owed
+        cbs = self.gated(["operator:ana", "peer:kestrel"], gate=False)
+        out = self.stop(cbs)
+        self.assertNotIn("operator:ana", out["reason"]); self.assertIn("peer:kestrel", out["reason"])
+        # both owed: one send-back, one event per gate
+        cbs = self.gated(["operator:ana", "peer:kestrel"])
+        before = len([e for e in self.stream.tail() if e["kind"] == "gate"])
+        out = self.stop(cbs)
+        self.assertIn("reply on operator:ana", out["reason"])
+        self.assertIn("send to peer:kestrel", out["reason"])
+        events = [e["payload"] for e in self.stream.tail() if e["kind"] == "gate"][before:]
+        self.assertEqual(events, [{"gate": "reply", "threads": ["operator:ana"]},
+                                  {"gate": "send", "threads": ["peer:kestrel"]}])
+
+    def test_a_send_does_not_carry_over_into_the_peers_next_prompt(self):
+        owner = {"kestrel here": "peer:kestrel"}
+        cbs = self.gated(["peer:kestrel"], thread_for_prompt=owner.get)
+        self.send(cbs, "kestrel")
+        self.assertEqual(self.stop(cbs), {})
+        _run(cbs["UserPromptSubmit"](self._base("UserPromptSubmit", prompt="kestrel here"),
+                                     None, {}))
+        self.assertEqual(self.stop(cbs)["decision"], "block")
 
     def test_a_subagent_reply_does_not_count_and_the_gate_can_be_off(self):
         cbs = self.gated(["operator:ana"])
@@ -640,6 +697,11 @@ class TestReplyGate(HooksCase):
         self.assertEqual(hooks.unanswered_threads(live, {"person:sam"}, True), ["operator:ana"])
         self.assertEqual(hooks.unanswered_threads(("operator:ana", "loop:heartbeat"), set(), True),
                          [])
+        # the peer gate, when on: the peers no send named
+        self.assertEqual(hooks.unanswered_threads(live, set(), False, {"kestrel"}),
+                         ["operator:ana", "person:Sam"])
+        self.assertEqual(hooks.unanswered_threads(live, {"person:sam"}, True, set()),
+                         ["operator:ana", "peer:kestrel"])
         ledger = hooks.ReplyLedger()
         ledger.note({"text": "hi", "thread": " Operator:Ana "})
         self.assertEqual(ledger.unanswered(("operator:ana",)), [])
@@ -648,7 +710,7 @@ class TestReplyGate(HooksCase):
 
     def test_a_peer_folded_in_does_not_undo_the_operators_reply(self):
         owner = {"go on": "operator:ana", "kestrel here": "peer:kestrel"}
-        cbs = self.gated(["operator:ana"], thread_for_prompt=owner.get)
+        cbs = self.gated(["operator:ana"], peer_gate=False, thread_for_prompt=owner.get)
         prompt = lambda text: _run(cbs["UserPromptSubmit"](
             self._base("UserPromptSubmit", prompt=text), None, {}))
         prompt("go on")

@@ -172,10 +172,10 @@ def _result_append_fails_once(r):
 
 
 class OpencodeCase(HermeticCase):
-    def home(self, *, model="local/m1", extra="", reply_gate=False):
-        """A cousin on opencode. The reply gate is off unless asked for:
-        it sends a text-only answer back once, which would consume a
-        script of its own in every test that is not about it."""
+    def home(self, *, model="local/m1", extra="", reply_gate=False, peer_gate=False):
+        """A cousin on opencode. The reply and peer gates are off unless
+        asked for: each sends a text-only answer back once, which would
+        consume a script of its own in every test that is not about it."""
         home = temp_home(self, runner="opencode")
         self.root = home.parent.parent
         toml = (home / "cousin.toml").read_text()
@@ -183,6 +183,8 @@ class OpencodeCase(HermeticCase):
             toml += 'model = "%s"\n' % model
         if not reply_gate:
             toml += "reply_gate = false\n"
+        if not peer_gate:
+            toml += "peer_gate = false\n"
         (home / "cousin.toml").write_text(toml + extra)
         return home
 
@@ -1100,8 +1102,9 @@ class TestReplyGate(OpencodeCase):
     ASKED = opencode.reply_gate_text(["operator:ana"])
     WROTE = opencode.reply_gate_text(["operator:ana"], written=True)
 
-    def gated(self, scripts, *, reply_gate=True):
-        return self.started(self.runner(scripts, home=self.home(reply_gate=reply_gate)))
+    def gated(self, scripts, *, reply_gate=True, peer_gate=True):
+        return self.started(self.runner(scripts, home=self.home(reply_gate=reply_gate,
+                                                                 peer_gate=peer_gate)))
 
     def finished(self, r, receipt):
         self.assertTrue(_wait(lambda: self.settled(r, receipt) is not None, 8))
@@ -1206,13 +1209,44 @@ class TestReplyGate(OpencodeCase):
         self.assertEqual(len(self.sent()), 1)
         self.assertEqual(self.payloads(r, "gate"), [])
 
-    def test_peer_and_loop_turns_are_not_gated(self):
-        r = self.gated([[("text", "noted, Kestrel")], [("text", "tick")]])
-        a = r.enqueue(Item("peer:kestrel", "chat", "hello", sender="Kestrel"))
-        self.assertEqual(self.finished(r, a), "delivered")
+    def test_loop_turns_are_not_gated(self):
+        r = self.gated([[("text", "tick")]])
         b = r.enqueue(Item("loop:heartbeat", "loop", "tick", sender="loop"))
         self.assertEqual(self.finished(r, b), "delivered")
-        self.assertEqual(len(self.sent()), 2)
+        self.assertEqual(len(self.sent()), 1)
+        self.assertEqual(self.payloads(r, "gate"), [])
+
+    def test_a_peer_turn_with_no_send_is_sent_back_once_naming_cousin_send(self):
+        r = self.gated([[("text", "noted, Kestrel")], [("text", "no answer due")]])
+        a = r.enqueue(Item("peer:kestrel", "chat", "hello", sender="Kestrel"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        asked = opencode.reply_gate_text(["peer:kestrel"])
+        self.assertEqual(self.sent()[1:], [asked])
+        self.assertIn("`cousin_send`", asked); self.assertIn("(kestrel)", asked)
+        self.assertIn("do not send a thanks back", asked)
+        self.assertEqual(self.payloads(r, "gate"), [{"gate": "send", "threads": ["peer:kestrel"]}])
+
+    def test_a_send_to_the_peer_answers_it(self):
+        r = self.gated([[("tool", "cousin_send", {"to": "kestrel", "text": "done"},
+                          '{"ok": true}'), ("text", "sent")]])
+        a = r.enqueue(Item("peer:kestrel", "chat", "hello", sender="Kestrel"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        self.assertEqual(len(self.sent()), 1)
+        self.assertEqual(self.payloads(r, "gate"), [])
+
+    def test_a_send_whose_output_is_an_error_does_not_answer_it(self):
+        r = self.gated([[("tool", "cousin_send", {"to": "kestrel", "text": "done"},
+                          "ValueError: unknown destination 'kestrel'"), ("text", "hm")],
+                        [("text", "no answer due")]])
+        a = r.enqueue(Item("peer:kestrel", "chat", "hello", sender="Kestrel"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        self.assertEqual(self.payloads(r, "gate"), [{"gate": "send", "threads": ["peer:kestrel"]}])
+
+    def test_the_peer_gate_off_never_sends_a_peer_turn_back(self):
+        r = self.gated([[("text", "noted, Kestrel")]], peer_gate=False)
+        a = r.enqueue(Item("peer:kestrel", "chat", "hello", sender="Kestrel"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        self.assertEqual(len(self.sent()), 1)
         self.assertEqual(self.payloads(r, "gate"), [])
 
 

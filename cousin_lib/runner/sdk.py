@@ -600,6 +600,7 @@ class SdkRunner:
                                        live_threads=lambda: self.tool_context.turn.snapshot()[1],
                                        thread_for_prompt=self._thread_for_prompt,
                                        reply_gate=bool(self._agent_value("reply_gate", True)),
+                                       peer_gate=bool(self._agent_value("peer_gate", True)),
                                        watch=self.config_watch,
                                        policy_changed=self._policy_tightened,
                                        memory_watch=self.memory_watch)

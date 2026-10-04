@@ -138,6 +138,31 @@ class TestLane(_Case):
             "  --user first. Verify a CLI's shape from --help before piping.\n"))
         self.assertEqual(self.items(), [])
 
+    def test_an_ordinary_verify_or_shape_does_not_silence_a_command(self):
+        self.cousin("wren", portrait=(
+            "Verify the backup, then tell the operator with cousin-reply.\n"
+            "Keep the shape of the week simple and answer with cousin-reply.\n"
+            "- Verify the seed list is current, then send it to sam with\n"
+            "  cousin-chat send sam.\n"
+            "The garden is in good shape; log it with cousin-memory decide.\n"))
+        self.assertEqual([(i["line"], i["match"]) for i in self.items()],
+                         [(1, "cousin-reply"), (2, "cousin-reply"), (4, "cousin-chat send"),
+                          (5, "cousin-memory decide")])
+
+    def test_the_shape_of_a_command_is_its_syntax(self):
+        self.cousin("wren", portrait=(
+            "Check the shape of `cousin-chat send` before piping into it.\n"
+            "cousin-reply has an odd call shape, so verify the command shape first.\n"))
+        self.assertEqual(self.items(), [])
+
+    def test_a_hedge_in_another_clause_of_a_wrapped_line_does_not_silence_it(self):
+        # the hedge is on the bullet's first physical line, before the colon;
+        # the command's clause, on the second, asserts it (see _hedged)
+        self.cousin("wren", portrait=(
+            "- The seed list is not finished: any reply to the\n"
+            "  operator goes to cousin-reply.\n"))
+        self.assertEqual([(i["line"], i["match"]) for i in self.items()], [(2, "cousin-reply")])
+
     def test_a_new_bullet_is_not_joined_to_the_one_before(self):
         self.cousin("wren", portrait=(
             "- Verify the shape of the backup before trusting it\n"
@@ -156,11 +181,34 @@ class TestLane(_Case):
                           (7, "cousin-reply"), (8, "cousin-chat send")])
         send = ("rewrite the distinction in tool terms: `cousin-chat send` -> the"
                 " `mcp__cousin__send` tool")
-        both = ("rewrite the distinction in tool terms: `cousin-reply` -> the"
-                " `mcp__cousin__reply` tool, `cousin-chat send` -> the `mcp__cousin__send` tool")
+        both = ("rewrite the distinction in tool terms: operator: the `mcp__cousin__reply`"
+                " tool; peers: the `mcp__cousin__send` tool")
         self.assertEqual([i["fix"] for i in items], [both, both, send,
                          "rewrite the distinction in tool terms: `cousin-reply` -> the"
-                         " `mcp__cousin__reply` tool", send])
+                         " `mcp__cousin__reply` tool",
+                         "rewrite the distinction in tool terms: peers: the"
+                         " `mcp__cousin__send` tool"])
+
+    def test_a_distinction_by_audience_carries_the_audience(self):
+        self.cousin("wren", claude=self.below(
+            "`cousin-reply` = operator only; `cousin-chat send` for peer cousins.",
+            "Use cousin-chat send for peer cousins.",
+            "`cousin-reply` = operator only.",
+            "Peers only: `cousin-chat send`, and log it with cousin-memory decide."))
+        items = self.items()
+        self.assertEqual([(i["line"], i["match"]) for i in items],
+                         [(5, "cousin-reply"), (5, "cousin-chat send"), (6, "cousin-chat send"),
+                          (7, "cousin-reply"), (8, "cousin-chat send"),
+                          (8, "cousin-memory decide")])
+        both = ("rewrite the distinction in tool terms: operator: the `mcp__cousin__reply`"
+                " tool; peers: the `mcp__cousin__send` tool")
+        peers = "rewrite the distinction in tool terms: peers: the `mcp__cousin__send` tool"
+        mixed = ("rewrite the distinction in tool terms: peers: the `mcp__cousin__send` tool;"
+                 " `cousin-memory decide` -> the `mcp__cousin__memory` tool's `decide` command")
+        self.assertEqual([i["fix"] for i in items], [
+            both, both, peers,
+            "rewrite the distinction in tool terms: operator: the `mcp__cousin__reply` tool",
+            mixed, mixed])
 
     def test_a_long_line_is_shown_around_its_match(self):
         filler = "The garden notes go in the shed and the seed list stays current. " * 4

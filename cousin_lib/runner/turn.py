@@ -37,12 +37,8 @@ class Turn:
     def snapshot(self):
         """(active, threads) read under one lock: two property reads can
         straddle a begin or an end and disagree."""
-        with self._lock:
-            out = []
-            for r in self._rows:
-                if r["thread_id"] not in out:
-                    out.append(r["thread_id"])
-            return self._active, tuple(out)
+        active, threads, _started = self.live()
+        return active, threads
 
     def live(self):
         """(active, threads, started) read under one lock: started is the

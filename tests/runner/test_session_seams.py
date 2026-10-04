@@ -155,6 +155,7 @@ class TestActivity(SeamCase):
         self.assertIsNotNone(now["since"])
         self.assertGreaterEqual(now["since"], t0)
 
+
 class TestHandoffIsThePrimarys(HermeticCase):
     def _ctx(self, home, session):
         return tools.ToolContext(home=home, slug="wren", name="Wren", root=home.parent.parent,

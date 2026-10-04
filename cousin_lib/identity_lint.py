@@ -44,11 +44,13 @@ The rules, each with its source of truth:
 Precision over recall: a line whose clause negates or dates the phrase
 (not, never, no longer, used to, was, replied, logged ...), names a
 fallback or a condition, or makes claims both ways, is not reported; nor
-is a line about a command's syntax (its --help, arguments, flags, shape,
-usage), which describes the CLI rather than tells the cousin to run it.
-A line that names commands to state a distinction (two of them with only,
-vs, not, but ...; "reaches you via"; a command given to the operator or
-to peers) is reported with a fix that keeps the distinction in tool terms.
+is a line about a command's syntax (its --help, arguments, flags, usage,
+a CLI's shape), which describes the CLI rather than tells the cousin to run
+it; "verify" or "shape" used for its own sake is no such line. A line that
+names commands to state a distinction (two of them with only, vs, not,
+but ...; "reaches you via"; a command given to the operator or to peers)
+is reported with a fix that keeps the distinction in tool terms, each
+command under the audience the line gives it.
 
 Each finding carries the matched phrase (`match`), and its shown line is
 windowed around it, so the phrase is visible on a long line. The summary
@@ -84,7 +86,16 @@ _FALLBACK = re.compile(
     r"\bfall(?:s|ing)?[ -]?back\b|\bfallback\b"
     r"|\b(?:fails?|failed|errors?|missing|unavailable|down|broken)\b", re.I)
 # A line about how a command is called describes the CLI, it is no habit.
-_USAGE = re.compile(r"--help\b|\b(?:arguments?|argv|flags?|syntax|shape|usage|verify)\b", re.I)
+# "shape" is an ordinary word, so it counts only as the shape of a command
+# ("a CLI's shape", "the shape of `cousin-chat send`"); "verify" never
+# counts alone: a line that verifies a command's syntax names --help, its
+# arguments, its flags or its shape, and one that verifies anything else
+# may still tell the cousin to run a command.
+_USAGE = re.compile(
+    r"--help\b|\b(?:arguments?|argv|flags?|syntax|usage)\b"
+    r"|\b(?:cli|command|call|invocation)(?:'s|\u2019s)?\s+shapes?\b"
+    r"|\bshapes?\s+of\s+(?:(?:a|an|the|its|each|every)\s+)?(?:`?cousin-[\w-]+|cli|command|call)",
+    re.I)
 # Two commands set against each other, or the channel something arrives on:
 # the line states a distinction the tools state too.
 _CONTRAST = re.compile(r"\b(?:only|vs|versus|not|instead|while|whereas|but)\b", re.I)
@@ -92,6 +103,7 @@ _REACH_VIA = re.compile(r"\breach(?:es)?\s+(?:[\w'-]+\s+){1,2}?(?:via|through)\b
 # A command assigned to an audience: "`X` = operator", "X for peers only".
 _AUDIENCE = re.compile(r"(?:\bfor\s+(?:the\s+|my\s+|your\s+)?|=\s*|\bonly\b.{0,40}?)"
                        r"\b(?:operators?|peers?)\b|\b(?:operators?|peers?)\s+only\b", re.I)
+_AUDIENCE_WORD = re.compile(r"\b(operator|peer)s?\b", re.I)
 _CONDITION = re.compile(r"\b(?:when|while|if|unless|until|during|without|before|after)\b", re.I)
 _BOUNDARY = re.compile(r"[.;!?](?:\s|$)")
 
@@ -332,6 +344,17 @@ def _clause_after(line, end):
 
 
 def _hedged(line, start):
+    # This reads the physical line, while the skip tests read the logical
+    # line (_logical_lines). Feeding it the logical unit, or the unit's
+    # text back to the last sentence punctuation before the command, looks
+    # like the consistent change and is wrong: a wrapped line's earlier
+    # physical lines usually hold another clause ("X is not done: any
+    # reply goes to cousin-reply"), cut off by a colon or a dash rather
+    # than a full stop, and a hedge there does not hedge the command. On
+    # the live identity files every finding the wider scope would silence
+    # was of that kind. The cost of the narrow scope is a hedge split from
+    # its command by the wrap ("never answer through" / "cousin-reply"),
+    # which is reported; rewrap that line.
     return bool(_HEDGE.search(_clause_before(line, start)))
 
 
@@ -398,6 +421,39 @@ def _logical_lines(numbered):
     return units
 
 
+def _audiences(line, mentions):
+    """{mention start: [audience]}: each audience the line gives a command
+    to (_AUDIENCE: "for the operator", "= peer messages", "peers only"),
+    as "operator" or "peers", given to the mention nearest the audience
+    word in its sentence."""
+    out = {}
+    for m in _AUDIENCE.finditer(line):
+        word = _AUDIENCE_WORD.search(line, m.start(), m.end())
+        if word is None:
+            continue
+        label = "operator" if word.group(1).lower() == "operator" else "peers"
+        near = []
+        for start, end, *_rest in mentions:
+            lo, hi = (end, word.start()) if end <= word.start() else (word.end(), start)
+            if not _BOUNDARY.search(line[lo:hi]):
+                near.append((abs(hi - lo), start))
+        if near:
+            labels = out.setdefault(min(near)[1], [])
+            if label not in labels:
+                labels.append(label)
+    return out
+
+
+def _distinction_fix(line, mentions):
+    """The fix for a line that states a distinction between commands: each
+    command in tool terms, under the audience the line gives it, if any."""
+    audiences = _audiences(line, mentions)
+    parts = [("%s: %s" % (" and ".join(audiences[start]), use)) if start in audiences
+             else "`%s` -> %s" % (said, use)
+             for start, _end, said, _tool, use, _hedged in mentions]
+    return "rewrite the distinction in tool terms: %s" % ("; " if audiences else ", ").join(parts)
+
+
 def lane_findings(facts, path, numbered):
     if facts.lane not in MODEL_LANES or facts.registry is None:
         return []
@@ -442,9 +498,8 @@ def lane_findings(facts, path, numbered):
                 continue
             where = ("every runner lane serves it" if tool == "reply"
                      else "from %s" % facts.registry[1])
-            fix = ("rewrite the distinction in tool terms: %s" % ", ".join(
-                       "`%s` -> %s" % (s, u) for _s, _e, s, _t, u, _h in mentions)
-                   if contrast else "use %s instead of `%s`" % (use, said))
+            fix = (_distinction_fix(line, mentions) if contrast
+                   else "use %s instead of `%s`" % (use, said))
             out.append(_finding(
                 facts, path, lineno, line, (start, end), "lane",
                 "%s runs on the %s runner (cousin.toml [agent] runner), where `%s` is the"

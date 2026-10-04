@@ -799,14 +799,18 @@ cousin-doctor
   A line is not reported when the phrase is negated or dated in its sentence
   (not, never, no longer, used to, was, replied, logged), names a fallback or
   a condition, or claims both ways. A `lane` line about a command's syntax
-  (its `--help`, arguments, flags, shape, usage) is not reported either. A
-  line that names two commands to state a distinction (only, vs, not, but ...),
-  says what "reaches you via" a command, or gives a command to the operator or
-  to peers ("`cousin-reply` = operator") is reported with a fix that keeps the
-  distinction: "rewrite the distinction in tool terms: `cousin-reply` ->
-  the `mcp__cousin__reply` tool, `cousin-chat send` -> the `mcp__cousin__send`
-  tool". A fact that cannot be read (an unknown account, a registry that does
-  not parse) skips its rule with a note.
+  (its `--help`, arguments, flags, usage, a CLI's shape) is not reported
+  either; "verify" or "shape" in their ordinary sense do not make a line one.
+  A line that names two commands to state a distinction (only, vs, not, but
+  ...) or says what "reaches you via" a command is reported with a fix that
+  keeps the distinction: "rewrite the distinction in tool terms:
+  `cousin-reply` -> the `mcp__cousin__reply` tool, `cousin-chat send` -> the
+  `mcp__cousin__send` tool". When the line gives a command to the operator or
+  to peers ("`cousin-reply` = operator only", "for peer cousins"), the fix
+  keeps the audience: "rewrite the distinction in tool terms: operator: the
+  `mcp__cousin__reply` tool; peers: the `mcp__cousin__send` tool". A fact
+  that cannot be read (an unknown account, a registry that does not parse)
+  skips its rule with a note.
 
   A long line is shown cut to 200 characters around the matched phrase, with
   `...` on each side cut; `--json` gives the phrase itself as `match`. The

@@ -27,6 +27,7 @@ class _RootCase(HermeticCase):
     def home(self, slug, mode):
         home = self.root / "cousins" / slug
         home.mkdir(parents=True)
+        os.chmod(home.parent, 0o755)    # the umask must not close the dirs above
         (home / "cousin.toml").write_text('[cousin]\nslug = "%s"\n' % slug)
         os.chmod(home, mode)
         return home
@@ -101,6 +102,7 @@ class TestClosedAbove(_RootCase):
         os.chmod(outer, 0o700)
         self.root = outer / "root"
         (self.root / "config").mkdir(parents=True)
+        os.chmod(self.root, 0o755)      # whatever the umask: only `outer` is closed
         self.home("wren", 0o755)
         self.assertEqual(doctor.closed_above(self.root / "cousins"), outer)
         notes = " ".join(doctor.check_homes(self.root)["notes"])

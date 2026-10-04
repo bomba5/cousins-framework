@@ -339,7 +339,10 @@ runs), which the contract does not cover.
 - The tools are the same registry, served to opencode as a remote MCP server
   the runner itself runs on loopback; the model sees them as `cousin_<tool>`
   (the SDK lane's `mcp__cousin__<tool>`), and the contract in the system
-  prompt names them that way.
+  prompt names them that way. It also has one paragraph the SDK lane's
+  has not, after "How you answer": a tool is called, never written out,
+  so a line like `cousin_reply({text: "..."})` in the model's text sends
+  nothing (`contract.CALL_FORM`).
 - The composed system prompt is appended to opencode's own agent prompt,
   which the model also sees.
 - `policy.toml` is enforced by the plugin pack in opencode's
@@ -364,7 +367,15 @@ runs), which the contract does not cover.
   whose operator or person rows got no successful `cousin_reply` (read from
   the session's own event stream, so a subagent's does not count) gets one
   more prompt with the gate's reason, a `gate` event, and its rows close at
-  the idle that answers it; the end after that always passes. A turn settled
+  the idle that answers it; the end after that always passes. The reason is
+  this lane's own (`reply_gate_text` in `runner/opencode.py`): it names the
+  tool `cousin_reply` and says that a call written out as text does
+  nothing. When the run's text held such a call (`cousin_reply(` or
+  `reply(` with a `text` argument, or a JSON tool-call object naming the
+  reply tool), the reason opens with "You wrote the `cousin_reply` call as
+  text: it was not sent." and the `gate` event carries
+  `"written_call": true`. The runner never makes that call for the model:
+  only a real tool call acts, and the turn may end unanswered. A turn settled
   after an event-stream reconnect is not gated, since the replies sent in
   the gap were not seen.
 - A run that keeps making the same call is bounded. The same tool with the

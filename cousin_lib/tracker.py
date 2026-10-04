@@ -545,6 +545,7 @@ def tracker_main(argv=None):
         "list": _cmd_list, "show": _cmd_show, "delete": _cmd_delete,
     }
     try:
+        args.root = str(FrameworkConfig.for_command(args.root).root)
         return handlers[args.cmd](args)
     except ItemNotFound as err:
         print("cousin-tracker: %s" % err, file=sys.stderr)

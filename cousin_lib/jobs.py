@@ -872,6 +872,7 @@ def jobs_main(argv=None):
         "tail": _cmd_tail,
     }
     try:
+        FrameworkConfig.for_command()
         return handlers[args.cmd](args)
     except MissingConfigError as err:
         print("cousin-job: %s" % err, file=sys.stderr)

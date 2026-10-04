@@ -438,8 +438,14 @@ class TestCli(TrackerCase):
         self.assertEqual(rc, 0)
         self.assertEqual([i["title"] for i in list_items(root=other)],
                          ["over there"])
+        # run from a directory that is not a checkout, which would
+        # otherwise be the root (FrameworkConfig.resolve)
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(self.root)
         with mock.patch.dict(os.environ):
             del os.environ["FRAMEWORK_ROOT"]
+            os.environ.pop("COUSIN_HOME", None)
             rc, _, err = self._main(["list"])
         self.assertEqual(rc, 2)
         self.assertIn("FRAMEWORK_ROOT", err)

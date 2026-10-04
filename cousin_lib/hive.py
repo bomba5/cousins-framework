@@ -956,8 +956,11 @@ def import_legacy(store, tokens_path, memory_dir=None, *, shared_slugs=()):
 # ---- the CLI -------------------------------------------------------------
 
 def _root_from_env():
+    """The queen's root for the operator subcommands: the shared
+    discovery a typed command uses (FRAMEWORK_ROOT, COUSIN_HOME, else
+    the checkout the operator is in)."""
     from cousin_lib.config import FrameworkConfig
-    return FrameworkConfig.from_env().root
+    return FrameworkConfig.for_command().root
 
 
 def _store_from_env():

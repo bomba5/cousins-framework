@@ -8,9 +8,9 @@ owns the details. The last section names everything you can leave off.
 
 The commands here run in two places, depending on your quick start:
 
-- **Bare host**: in the checkout, with its venv active and `FRAMEWORK_ROOT`
-  set to the checkout. Some commands find the install from the directory
-  they run in, but not all of them do, so set it once per shell:
+- **Bare host**: in the checkout, with its venv active. The commands find
+  the install from the checkout they run in; to run them from any other
+  directory, set `FRAMEWORK_ROOT` to the checkout once per shell:
 
   ```
   cd ~/cousins-framework && . .venv/bin/activate && export FRAMEWORK_ROOT=$PWD

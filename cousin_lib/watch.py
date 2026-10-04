@@ -111,7 +111,7 @@ def _home_for(slug, home):
         return Path(home)
     from cousin_lib.config import FrameworkConfig, MissingConfigError
     try:
-        root = FrameworkConfig.resolve()
+        root = FrameworkConfig.resolve(cwd_fallback=True)
     except MissingConfigError as err:
         raise LookupError(str(err))
     for cousin in root.list_cousins():

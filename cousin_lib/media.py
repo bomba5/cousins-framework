@@ -14,7 +14,7 @@ import tomllib
 import urllib.request
 from pathlib import Path
 
-from cousin_lib.config import CousinConfig, FrameworkConfig
+from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.jobs import track_job
 
 _KIND_EXT = {"image": "png", "voice": "mp3", "video": "mp4"}
@@ -125,8 +125,6 @@ def _run_cli(kind, argv):
     import argparse
     import sys
 
-    from cousin_lib.outbound_filter import FilterBlocked, OutboundPolicy
-
     parser = argparse.ArgumentParser(prog="cousin-%s" % kind)
     sub = parser.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("gen")
@@ -136,6 +134,21 @@ def _run_cli(kind, argv):
     c.add_argument("--user", required=True)
     c.add_argument("--caption", default="")
     args = parser.parse_args(argv)
+    try:
+        # the root a typed command finds (the checkout it runs in, too),
+        # exported for load_provider and the job tracking under it
+        FrameworkConfig.for_command()
+        return _dispatch(kind, args)
+    except MissingConfigError as err:
+        print("cousin-%s: %s" % (kind, err), file=sys.stderr)
+        return 2
+
+
+def _dispatch(kind, args):
+    import sys
+
+    from cousin_lib.outbound_filter import FilterBlocked, OutboundPolicy
+
     config = caption = None
     if args.cmd == "chat":
         config = CousinConfig.from_env()

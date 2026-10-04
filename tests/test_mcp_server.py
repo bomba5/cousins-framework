@@ -891,6 +891,11 @@ class CliCase(unittest.TestCase):
         self.assertIn("registry", err)
 
     def test_no_registry_anywhere_is_exit_2_naming_the_flag(self):
+        # from a directory that is not a checkout: inside one, the
+        # checkout's config/ would be found
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(self.tmp)
         rc, _, err = _main(["--list-tools"], env={"PATH": os.environ["PATH"]})
         self.assertEqual(rc, 2)
         self.assertIn("--registry", err)

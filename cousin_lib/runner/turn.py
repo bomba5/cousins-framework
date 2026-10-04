@@ -6,6 +6,7 @@ message folded into a running turn) means the destination
 must be named. The runner owns the writes; tool handlers only read.
 """
 import threading
+import time
 
 
 class Turn:
@@ -13,11 +14,13 @@ class Turn:
         self._lock = threading.Lock()
         self._rows = []
         self._active = False
+        self._started = None
 
     def begin(self, row):
         with self._lock:
             self._rows = [dict(row)]
             self._active = True
+            self._started = time.time()
 
     def add(self, row):
         with self._lock:
@@ -29,16 +32,25 @@ class Turn:
         with self._lock:
             self._rows = []
             self._active = False
+            self._started = None
 
     def snapshot(self):
         """(active, threads) read under one lock: two property reads can
         straddle a begin or an end and disagree."""
+        active, threads, _started = self.live()
+        return active, threads
+
+    def live(self):
+        """(active, threads, started) read under one lock: started is the
+        epoch second the turn began, stamped by begin itself, so a turn
+        seen as active always carries its own start, never None and never
+        the previous turn's."""
         with self._lock:
             out = []
             for r in self._rows:
                 if r["thread_id"] not in out:
                     out.append(r["thread_id"])
-            return self._active, tuple(out)
+            return self._active, tuple(out), self._started
 
     @property
     def active(self):

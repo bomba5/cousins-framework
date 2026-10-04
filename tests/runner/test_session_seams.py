@@ -142,6 +142,20 @@ class TestActivity(SeamCase):
         self.assertEqual(r.activity()["since"], None)
 
 
+    def test_a_turn_seen_live_already_carries_its_start(self):
+        # the turn is visible the moment it begins: its start must be
+        # there with it, not stamped a moment later (#228)
+        r, _ = self.runner([[init_msg(), result()]])
+        t0 = time.time()
+        r.turn.begin({"id": 1, "thread_id": "operator:priya", "sender": "Priya",
+                      "source": "chat"})
+        self.addCleanup(r.turn.end)
+        now = r.activity()
+        self.assertEqual(now["thread_kinds"], ["operator"])
+        self.assertIsNotNone(now["since"])
+        self.assertGreaterEqual(now["since"], t0)
+
+
 class TestHandoffIsThePrimarys(HermeticCase):
     def _ctx(self, home, session):
         return tools.ToolContext(home=home, slug="wren", name="Wren", root=home.parent.parent,

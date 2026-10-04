@@ -1,5 +1,6 @@
 """Turn: what reply routes by."""
 import threading
+import time
 import unittest
 
 from cousin_lib.runner.turn import Turn
@@ -23,6 +24,20 @@ class TestTurn(HermeticCase):
         self.assertEqual(t.senders["peer:testa"], "Testa")
         t.end()
         self.assertFalse(t.active); self.assertEqual(t.threads, ()); self.assertIsNone(t.origin)
+
+    def test_live_reads_the_start_with_the_threads(self):
+        t = Turn()
+        self.assertEqual(t.live(), (False, (), None))
+        before = time.time()
+        t.begin(_row(1, "operator:priya", "Priya"))
+        active, threads, started = t.live()
+        self.assertEqual((active, threads), (True, ("operator:priya",)))
+        self.assertGreaterEqual(started, before)
+        t.end()
+        self.assertEqual(t.live(), (False, (), None))
+        time.sleep(0.01)
+        t.begin(_row(2, "peer:testa", "Testa"))            # a new turn, its own start
+        self.assertGreater(t.live()[2], started)
 
     def test_bodies_are_the_live_rows_bodies_oldest_first(self):
         t = Turn()

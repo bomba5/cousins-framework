@@ -418,7 +418,6 @@ class SdkRunner:
         self.client_factory = client_factory or _default_factory
         self.session_id = "sdk-%s%s" % ("" if session == PRIMARY else session + "-",
                                         uuid.uuid4().hex[:8])
-        self._turn_started_at = None   # the live turn's start (activity())
         self.inbox = Inbox(self.home)
         self.stream = EventStream(self.home, self.session_id)
         self.machine = StateMachine(on_change=self._on_state)
@@ -1030,14 +1029,14 @@ class SdkRunner:
         the machine state, the KINDS of the threads its live
         turn answers (never a key, a sender or a body) and when that turn
         started (epoch seconds), None when no turn is live."""
-        active, threads = self.turn.snapshot()
+        active, threads, started = self.turn.live()
         kinds = []
         for thread in threads if active else ():
             kind = thread.partition(":")[0]
             if kind not in kinds:
                 kinds.append(kind)
         return {"state": self.machine.state, "thread_kinds": kinds,
-                "since": self._turn_started_at if active else None}
+                "since": started if active else None}
 
     def _claim(self, limit):
         """The rows this session may take: its kinds only. None
@@ -2198,7 +2197,6 @@ class SdkRunner:
                 self.machine.to("running", "turn")
             self.turn.begin(first)
             self._ledger(tool_ledger.begin, [first])
-            self._turn_started_at = time.time()
             self.stream.append("turn_start", {"inbox_ids": [first["id"]],
                                               "bodies": [first["body"]],
                                               "thread_id": first["thread_id"]})

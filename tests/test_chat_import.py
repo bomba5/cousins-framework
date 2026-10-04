@@ -14,11 +14,13 @@ behind; it comes along with every cousin.
 """
 import base64
 import contextlib
+import gc
 import json
 import pathlib
 import sqlite3
 import tempfile
 import unittest
+import warnings
 
 from cousin_lib import chat_import
 
@@ -207,6 +209,37 @@ class TestImport(ImportCase):
         (self.old_home / "data" / "chat.db").unlink()
         with self.assertRaises(chat_import.ImportRefused):
             self._run()
+
+
+class TestNoConnectionLeftOpen(ImportCase):
+    """Every connection the import opens is closed, on success and on a
+    store it cannot read; a leaked one is finalised later, inside some
+    other code's warning capture."""
+
+    def _leaks(self, fn, *raises):
+        gc.collect()                                      # what came before is not ours
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ResourceWarning)
+            if raises:
+                with self.assertRaises(raises):
+                    fn()
+            else:
+                fn()
+            gc.collect()
+        return [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
+
+    def test_an_import_closes_its_connections(self):
+        self.assertEqual(self._leaks(self._run), [])
+
+    def test_creating_the_missing_new_store_closes_it(self):
+        (self.new_home / "data" / "chat.db").unlink()
+        self.assertEqual(self._leaks(self._run), [])
+
+    def test_an_old_store_without_messages_closes_it(self):
+        old_db = self.old_home / "data" / "chat.db"
+        old_db.unlink()
+        sqlite3.connect(old_db).close()                   # an empty database
+        self.assertEqual(self._leaks(self._run, sqlite3.OperationalError), [])
 
 
 if __name__ == "__main__":

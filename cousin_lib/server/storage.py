@@ -113,12 +113,18 @@ class ChatStore:
         db_path = Path(db_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA wal_autocheckpoint=200")
-        self.conn.executescript(_SCHEMA)
-        self._add_reserved_columns()
-        self.conn.commit()
+        try:
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA wal_autocheckpoint=200")
+            self.conn.executescript(_SCHEMA)
+            self._add_reserved_columns()
+            self.conn.commit()
+        except BaseException:
+            # A file that is not a database (or a schema that fails)
+            # raises here; the caller never gets a store to close.
+            self.conn.close()
+            raise
 
     def _add_reserved_columns(self):
         """The attachment columns were reserved by the v1 chat spec and

@@ -16,6 +16,7 @@ it, so the two hosts cannot drift.
 The client fails toward local: a cousin with no reachable queen raises
 HiveError so the caller behaves single-machine, never crashing.
 """
+import contextlib
 import hashlib
 import json
 import os
@@ -1084,12 +1085,13 @@ def hive_main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.cmd == "mint":
-            token = _store_from_env().mint_token(
-                args.slug, scope=args.scope.split(","))
+            with contextlib.closing(_store_from_env()) as store:
+                token = store.mint_token(args.slug, scope=args.scope.split(","))
             print(token)
             return 0
         if args.cmd == "revoke":
-            count = _store_from_env().revoke(args.slug)
+            with contextlib.closing(_store_from_env()) as store:
+                count = store.revoke(args.slug)
             if not count:
                 print("cousin-hive: %s has no live token" % args.slug,
                       file=sys.stderr)
@@ -1099,7 +1101,8 @@ def hive_main(argv=None):
             return 0
         if args.cmd == "forget":
             try:
-                out = _store_from_env().forget(args.slug)
+                with contextlib.closing(_store_from_env()) as store:
+                    out = store.forget(args.slug)
             except ValueError as err:
                 print("cousin-hive: %s" % err, file=sys.stderr)
                 return 1
@@ -1117,7 +1120,8 @@ def hive_main(argv=None):
             period = (cfg or {}).get("checkin_seconds",
                                      DEFAULT_CHECKIN_SECONDS)
             now = time.time()
-            rows = HiveStore(root / "shared" / "hive").nodes()
+            with contextlib.closing(HiveStore(root / "shared" / "hive")) as store:
+                rows = store.nodes()
             if not rows:
                 print("no nodes")
                 return 0
@@ -1132,8 +1136,9 @@ def hive_main(argv=None):
             return 0
         if args.cmd == "import-legacy":
             shared = [x for x in args.shared_slugs.split(",") if x]
-            report = import_legacy(_store_from_env(), args.tokens,
-                                   args.memory_dir, shared_slugs=shared)
+            with contextlib.closing(_store_from_env()) as store:
+                report = import_legacy(store, args.tokens, args.memory_dir,
+                                       shared_slugs=shared)
             print("tokens: %d added, %d already present"
                   % (report["tokens_added"], report["tokens_present"]))
             if report["token_conflicts"]:

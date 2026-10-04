@@ -63,6 +63,58 @@ class TestHermeticWrapper(unittest.TestCase):
         self.assertIn("Ran 2 tests", proc.stderr)
 
 
+class TestLeakGuard(unittest.TestCase):
+    """The wrapper collects each test's garbage as the test ends: a leaked
+    object's ResourceWarning is reported against the test that leaked it,
+    never inside a later test's capture. With tracemalloc on, one that
+    cousin_lib allocated fails that test; one the test opened itself is
+    only reported."""
+
+    PROBE = textwrap.dedent("""\
+        import pathlib
+        import sqlite3
+        import tempfile
+        import unittest
+        import tests  # noqa: F401
+        from cousin_lib.server.storage import ChatStore
+
+        class TestProbe(unittest.TestCase):
+            def test_a_product_object_left_open(self):
+                tmp = tempfile.TemporaryDirectory()
+                self.addCleanup(tmp.cleanup)
+                store = ChatStore(pathlib.Path(tmp.name) / "chat.db")
+                store.again = store          # a cycle: only the collector frees it
+
+            def test_b_the_tests_own_connection_left_open(self):
+                held = [sqlite3.connect(":memory:")]
+                held.append(held)
+
+            def test_c_clean(self):
+                pass
+        """)
+
+    def _probe(self, env):
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / "test_probe_leak.py").write_text(self.PROBE)
+            return _run_unittest(["discover", "-s", tmp, "-t", tmp],
+                                 dict(env, PYTHONPATH=str(REPO)))
+
+    def test_with_tracemalloc_a_cousin_lib_leak_fails_its_own_test(self):
+        proc = self._probe({"PYTHONTRACEMALLOC": "20"})
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn("FAILED (failures=1)", proc.stderr)
+        self.assertIn("FAIL: test_a_product_object_left_open", proc.stderr)
+        self.assertIn("allocated at cousin_lib/server/storage.py:", proc.stderr)
+        self.assertIn("left open by test_probe_leak.TestProbe.test_b", proc.stderr)
+
+    def test_without_tracemalloc_a_leak_is_only_reported(self):
+        proc = self._probe({"PYTHONTRACEMALLOC": ""})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Ran 3 tests", proc.stderr)
+        self.assertIn("left open by test_probe_leak.TestProbe.test_a", proc.stderr)
+        self.assertIn("left open by test_probe_leak.TestProbe.test_b", proc.stderr)
+
+
 class TestRestoreNeverEmptiesTheEnvironment(unittest.TestCase):
     """Threads a test leaves running (a node's poll loop, a server)
     read os.environ while the wrapper restores it. A clear-and-refill

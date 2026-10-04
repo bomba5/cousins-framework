@@ -39,6 +39,7 @@ class _CliCase(unittest.TestCase):
         _Ok.received = None
         self.server = http.server.HTTPServer(("127.0.0.1", 0), _Ok)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
         self.port = self.server.server_address[1]
         tmp = tempfile.TemporaryDirectory()
@@ -60,7 +61,7 @@ def _reply_rows(home):
     """cousin-reply stores the reply in the cousin's own chat store
     (chat_api.reply): no request reaches a server."""
     import sqlite3
-    with sqlite3.connect(pathlib.Path(home) / "data" / "chat.db") as db:
+    with contextlib.closing(sqlite3.connect(pathlib.Path(home) / "data" / "chat.db")) as db:
         return db.execute("SELECT message, reply_to_user FROM messages ORDER BY id").fetchall()
 
 

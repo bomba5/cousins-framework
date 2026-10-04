@@ -7,6 +7,7 @@ in the size of the memory. The numbers are the whole reason for this
 module; the tests below are about the properties that must survive the
 change of storage.
 """
+import contextlib
 import json
 import os
 import pathlib
@@ -47,7 +48,7 @@ class TestRoundTrip(VectorStoreCase):
                                           "vector": [1.0, 2.0]}})
         path = self.home / "memory" / "vectors.db"
         self.assertTrue(path.is_file())
-        with sqlite3.connect(path) as conn:
+        with contextlib.closing(sqlite3.connect(path)) as conn:
             rows = conn.execute("SELECT key FROM vectors").fetchall()
         self.assertEqual(rows, [("memory:a.md#0",)])
 

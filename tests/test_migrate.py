@@ -66,7 +66,7 @@ def _inbox(home, rows):
     inbox = Inbox(home)
     for state, outcome, age in rows:
         rec = inbox.put(Item("operator:priya", "chat", "hello", sender="Priya"))
-        with sqlite3.connect(home / "data" / "inbox.db") as db:
+        with contextlib.closing(sqlite3.connect(home / "data" / "inbox.db")) as db, db:
             db.execute("UPDATE inbox SET state = ?, outcome = ?, created_at = ? WHERE id = ?",
                        (state, outcome, time.time() - age, rec))
 

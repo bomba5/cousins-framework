@@ -14,6 +14,7 @@ each test pins the raw event shapes the fake server models: the
 first idle after an announced prompt ends a turn, an abort or a failure
 sends session.error before a doubled idle pair, a prompt sent while busy
 is answered by the same run. A mismatch here is the fake lying."""
+import contextlib
 import json
 import os
 import queue
@@ -215,7 +216,7 @@ class TestLiveOpencode(HermeticCase):
         self.assertEqual(len(results), 1)
         self.assertFalse(results[0]["is_error"])
         self.assertIn("replied to priya", results[0]["text"])
-        with sqlite3.connect(self.home / "data" / "chat.db") as db:
+        with contextlib.closing(sqlite3.connect(self.home / "data" / "chat.db")) as db:
             rows = db.execute("SELECT chat_user, message FROM messages").fetchall()
         self.assertEqual(rows, [("priya", "hello from the fake model")])
         # and the model got the result back

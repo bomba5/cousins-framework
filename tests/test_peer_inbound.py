@@ -5,6 +5,7 @@ token), never the body's; a message carries an id and a send time, a
 replay inside the window is refused, a stale one too; a failed delivery
 frees the id so the sender can retry; the size and the rate are bounded;
 the destination is a local, peer-visible cousin the route allows."""
+import contextlib
 import os
 import pathlib
 import sqlite3
@@ -21,7 +22,7 @@ def _messages(home):
     path = pathlib.Path(home) / "data" / "chat.db"
     if not path.exists():
         return []
-    with sqlite3.connect(path) as db:
+    with contextlib.closing(sqlite3.connect(path)) as db:
         return db.execute("SELECT user, message FROM messages ORDER BY id").fetchall()
 
 

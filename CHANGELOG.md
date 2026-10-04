@@ -3,6 +3,24 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.26.3 - 2026-10-04
+
+### Fixed
+
+- **On `opencode`, the reply gate's send-back names the tool and the call
+  form.** A free model wrote the reply as text shaped like a call
+  (`cousin_reply({text: "hi", thread: "operator:ana"})`), and the same again
+  after the send-back, so nothing reached the person and the quick start's
+  tier 2 check went red. The lane's send-back now says the tool is
+  `cousin_reply` here, that a call written out as text does nothing, and to
+  call it with `text` (and `thread` when two threads are live). When the
+  run's text held such a call, it opens with "You wrote the `cousin_reply`
+  call as text: it was not sent." and the `gate` event carries
+  `"written_call": true`. The runner never makes the written call itself:
+  only a real tool call acts. The opencode contract says the same up front,
+  in one paragraph after "How you answer". The `sdk` lane's send-back and
+  contract bytes do not change.
+
 ## 3.26.2 - 2026-10-04
 
 ### Fixed

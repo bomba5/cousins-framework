@@ -925,7 +925,11 @@ A failed `reply` and a subagent's reply do not count, and a reply sent before
 a new prompt was taken in (a message folded into the running turn) does not
 cover that prompt. Only operator and person threads are gated (`HUMAN_KINDS`
 in `runner/hooks.py`). Each send-back is a `gate` event in the runner's
-stream, with the payload `{"gate": "reply", "threads": [...]}`. `false` turns
+stream, with the payload `{"gate": "reply", "threads": [...]}`; on `opencode`
+the send-back names the tool as that lane serves it (`cousin_reply`) and says
+a call written out as text does nothing, and when the run's text held one
+the payload adds `"written_call": true` (see
+[runners](reference/runners.md#lane-differences-on-opencode)). `false` turns
 the gate off. A value that is not `true` or `false` (a quoted `"false"`) is
 refused at runner start, exit 2: `cousin-runner:
 cousin.toml [agent] reply_gate must be true or false, got 'false'`.

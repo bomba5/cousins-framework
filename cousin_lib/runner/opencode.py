@@ -168,6 +168,90 @@ def tool_name(name):
     return "%s%s" % (OWN_PREFIX, name)
 
 
+# The reply gate's send-back on this lane (#226). The sdk lane's text
+# (hooks.REPLY_GATE_REASON, unchanged) says "call reply", the tool's short
+# name. A free model here wrote the call out as text instead
+# (`cousin_reply({text: "hi", thread: "operator:ana"})`), and wrote the same
+# text again after that send-back, so nothing reached the person. This one
+# names the tool as this lane serves it and says that text is not a call;
+# when the run's text holds such a call (written_reply_call), it leads with
+# that.
+REPLY_GATE_TEXT = (
+    "[runner] You are ending this turn without calling the `{reply}` tool on {threads},"
+    " so the person who wrote sees nothing on the chat surface. On this lane the reply"
+    " tool is named `{reply}`, and only a real tool call sends: a call written out in your"
+    " text, like `{reply}({{text: ...}})`, does nothing. If an answer is due, call the"
+    " `{reply}` tool now with `text`, and with `thread` too when two threads are live."
+    " If none is (an acknowledgement, a message that needs no answer), just end the turn"
+    " again: this check runs once per turn.")
+REPLY_WRITTEN_LEAD = "[runner] You wrote the `{reply}` call as text: it was not sent. "
+
+
+def reply_gate_text(missing, *, written=False):
+    """The reply gate's send-back on this lane for the unanswered threads
+    `missing`; `written` when the run's text held a reply call written out
+    (written_reply_call), which the send-back then names first."""
+    reply = tool_name("reply")
+    text = REPLY_GATE_TEXT.format(reply=reply, threads=" and ".join(missing))
+    if written:
+        text = REPLY_WRITTEN_LEAD.format(reply=reply) + text[len("[runner] "):]
+    return text
+
+
+# A reply call written out in the model's text: `cousin_reply(` (or
+# `reply(`, or the sdk lane's `mcp__cousin__reply(`) whose arguments hold a
+# `text` key, JSON-ish (`{text: "hi"}`, `{"text": "hi"}`) or Python-ish
+# (`text="hi"`); or a JSON tool-call object naming the reply tool
+# (`{"name": "cousin_reply", "arguments": {"text": "hi"}}`). Prose that
+# says "reply" is not one: the key is required.
+_WRITTEN_CALL = re.compile(r"(?<![\w.-])(?:%s|mcp__cousin__)?reply\(" % re.escape(OWN_PREFIX))
+_WRITTEN_NAMED = re.compile(r"""["']?(?:name|tool|tool_name|function)["']?\s*[:=]\s*"""
+                            r"""["'](?:%s|mcp__cousin__)?reply["']""" % re.escape(OWN_PREFIX))
+_TEXT_KEY = re.compile(r"""(?:^|[\s{(,])["']?text["']?\s*[:=]""")
+WRITTEN_ARGS_CHARS = 4000
+
+
+def _call_args(text, start):
+    """The argument text of a call whose `(` ends at `start`: up to its
+    matching `)` outside quotes, or WRITTEN_ARGS_CHARS of it."""
+    depth, quote, escaped = 1, None, False
+    end = min(len(text), start + WRITTEN_ARGS_CHARS)
+    for i in range(start, end):
+        c = text[i]
+        if escaped:
+            escaped = False
+        elif c == "\\":
+            escaped = True
+        elif quote:
+            if c == quote:
+                quote = None
+        elif c in "\"'`":
+            quote = c
+        elif c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i]
+    return text[start:end]
+
+
+def written_reply_call(text):
+    """True when `text` holds a call to the reply tool written out as
+    text rather than made (the shapes above)."""
+    text = str(text or "")
+    if "reply" not in text:
+        return False
+    for m in _WRITTEN_CALL.finditer(text):
+        if _TEXT_KEY.search(_call_args(text, m.end())):
+            return True
+    for m in _WRITTEN_NAMED.finditer(text):
+        around = text[max(0, m.start() - WRITTEN_ARGS_CHARS):m.end() + WRITTEN_ARGS_CHARS]
+        if _TEXT_KEY.search(around):
+            return True
+    return False
+
+
 def sdk_tool_name(name):
     """opencode's tool name in the SDK lane's form: `bash` -> `Bash`,
     `cousin_reply` -> `mcp__cousin__reply`; any other name is its own."""
@@ -522,6 +606,7 @@ class _Run:
         self.quiet = False          # nor does it write a result: no inbox row is its
         self.replied = hooks.ReplyLedger()  # the reply gate: what this run's replies covered
         self.gated = False          # the gate sent its one send-back (or tried to)
+        self.written_call = False   # a reply call written out as text (written_reply_call)
         self.follow_up = None       # that send-back's _Sent
         self.repeats = {}           # the loop bound: call key -> times made in this run
         self.nudge = None           # the loop bound's one nudge (_Sent), once sent
@@ -967,6 +1052,7 @@ class OpencodeRunner:
                                                         registry=self._mcp.registry,
                                                         tool_name=tool_name,
                                                         runner="the opencode runner",
+                                                        call_form=True,
                                                         other_servers=None)
             if self._stop.is_set():
                 return False
@@ -1566,6 +1652,8 @@ class OpencodeRunner:
             if partial:
                 payload["partial"] = True
             self.stream.append("text", payload)
+            if not run.written_call and written_reply_call(text):
+                run.written_call = True
 
     def _on_delta(self, run, p):
         if run is None or p.get("field") != "text":
@@ -1747,7 +1835,7 @@ class OpencodeRunner:
         """The reply gate (the sdk lane's Stop hook, hooks.unanswered_threads):
         a good run about to end whose operator or person rows got no
         successful `reply` is sent back once, in the same session and the
-        same runner turn, with hooks.REPLY_GATE_REASON; its rows stay open
+        same runner turn, with this lane's reply_gate_text; its rows stay open
         and close at the idle that answers the send-back. Never twice in one
         run, so the next end always passes. True when it was sent."""
         if not self.reply_gate or run.gated or run.quiet \
@@ -1762,9 +1850,27 @@ class OpencodeRunner:
         if not missing:
             return False
         run.gated = True
-        self.stream.append("gate", {"gate": "reply", "threads": missing})
+        # A reply call the model wrote out as text is named in the
+        # send-back, never made for it. The runner does not turn model text
+        # into an action: a tool call is the one way the model acts, and
+        # only a tool call passes the policy plugin's veto, the recorder and
+        # the loop bound, all of which read tool parts. Text is also where
+        # the model drafts, quotes and explains, and where it repeats what
+        # it was sent, so a parsed "call" could be a draft, an example or a
+        # line a stranger put in a message; the contract tells the model
+        # its text goes to the reasoning stream and only the tool writes the
+        # chat surface. Nothing in the framework acts on model text (the
+        # tmux lane's `cousin-reply` is a real command the pane runs), and
+        # no operator rule says otherwise. So the turn may end unanswered.
+        written = run.written_call or any(
+            kind == "text" and written_reply_call(text)
+            for kind, text in run.open_parts.values())
+        event = {"gate": "reply", "threads": missing}
+        if written:
+            event["written_call"] = True
+        self.stream.append("gate", event)
         try:
-            run.follow_up = self._send(run, None, hooks.reply_gate_reason(missing))
+            run.follow_up = self._send(run, None, reply_gate_text(missing, written=written))
         except Exception as exc:  # noqa: BLE001 - not sent: the turn ends as it stands
             self.stream.append("error", {"error": "reply gate: %s: %s"
                                          % (type(exc).__name__, exc)})

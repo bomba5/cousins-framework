@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.26.6 - 2026-10-04
+
+### Fixed
+
+- **A live turn always reports when it started.** For a moment after an
+  Agent SDK turn began, a session's activity (shown in another session's
+  digest) said it was running a turn on some threads with no start time,
+  and a new turn could briefly show the previous turn's start. The turn now
+  stamps its start as it begins, and activity reads the state, the thread
+  kinds and the start together.
+
 ## 3.26.5 - 2026-10-04
 
 ### Fixed

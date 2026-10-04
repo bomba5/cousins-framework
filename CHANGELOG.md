@@ -17,7 +17,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   it.** Each test's garbage is collected when the test ends, so a socket,
   database or file it left open warns there instead of inside a later
   test's captured output. With tracemalloc on (`PYTHONTRACEMALLOC=20`) a
-  leak allocated in `cousin_lib` fails its test.
+  leak allocated in `cousin_lib` fails its test. An unclosed sqlite
+  connection warns only from Python 3.13; sockets and files warn on every
+  version.
 
 ## 3.26.4 - 2026-10-04
 

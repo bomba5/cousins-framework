@@ -234,6 +234,7 @@ class TestOrphans(ServerCase):
                str(self.config)))
         runner = subprocess.Popen([sys.executable, "-c", script, json.dumps(self.env())],
                                   stdout=subprocess.PIPE, text=True)
+        self.addCleanup(runner.stdout.close)
         self.addCleanup(runner.wait)
         child = int(runner.stdout.readline())
         self.killpg_later(child)
@@ -317,6 +318,7 @@ class TestOrphans(ServerCase):
         self.assertEqual(opencode_http.reap_leftover(pidfile), [])
         self.assertFalse(_gone(srv.pid))
         other = subprocess.Popen(["sleep", "60"], start_new_session=True)
+        self.addCleanup(other.wait)
         self.addCleanup(other.kill)
         opencode_http.write_pidfile(pidfile, other.pid, marker="nobody")
         self.assertEqual(opencode_http.reap_leftover(pidfile), [])

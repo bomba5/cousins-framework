@@ -13,6 +13,7 @@ Canary: a migration that moves memory must not leave chat history
 behind; it comes along with every cousin.
 """
 import base64
+import contextlib
 import json
 import pathlib
 import sqlite3
@@ -101,9 +102,9 @@ class ImportCase(unittest.TestCase):
         (self.new_home / "chat" / "inbound" / "1.jpg").write_bytes(b"newpic")
 
     def _rows(self):
-        c = sqlite3.connect(self.new_home / "data" / "chat.db")
-        c.row_factory = sqlite3.Row
-        return {r["id"]: dict(r) for r in c.execute("SELECT * FROM messages")}
+        with contextlib.closing(sqlite3.connect(self.new_home / "data" / "chat.db")) as c:
+            c.row_factory = sqlite3.Row
+            return {r["id"]: dict(r) for r in c.execute("SELECT * FROM messages")}
 
     def _run(self, **kw):
         return chat_import.import_history(self.old_home, self.new_home, **kw)
@@ -171,16 +172,16 @@ class TestImport(ImportCase):
 
     def test_reactions_follow_their_messages(self):
         self._run()
-        c = sqlite3.connect(self.new_home / "data" / "chat.db")
-        got = sorted(c.execute("SELECT message_id, emoji FROM reactions"))
+        with contextlib.closing(sqlite3.connect(self.new_home / "data" / "chat.db")) as c:
+            got = sorted(c.execute("SELECT message_id, emoji FROM reactions"))
         self.assertEqual(got, [(2, "thumbs"), (6, "wave")])
 
     def test_the_sequence_continues_after_the_highest_id(self):
         self._run()
-        c = sqlite3.connect(self.new_home / "data" / "chat.db")
-        c.execute("INSERT INTO messages (chat_user, user, message, timestamp,"
-                  " type) VALUES ('operator', 'Operator', 'next', 't', 'user')")
-        self.assertEqual(c.execute("SELECT max(id) FROM messages").fetchone()[0], 8)
+        with contextlib.closing(sqlite3.connect(self.new_home / "data" / "chat.db")) as c:
+            c.execute("INSERT INTO messages (chat_user, user, message, timestamp,"
+                      " type) VALUES ('operator', 'Operator', 'next', 't', 'user')")
+            self.assertEqual(c.execute("SELECT max(id) FROM messages").fetchone()[0], 8)
 
     def test_a_second_import_is_refused(self):
         self._run()

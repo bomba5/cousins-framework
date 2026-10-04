@@ -4,6 +4,7 @@ takes the sender from the token (never the body), and delivers to the
 install's home cousin only (config/hive.toml `home_cousin`), through
 peer_inbound.accept (a replayed msg_id is refused). The node posts there
 with its own token when its env says TELL_HOME=1."""
+import contextlib
 import json
 import pathlib
 import sqlite3
@@ -20,7 +21,7 @@ def _messages(home):
     path = pathlib.Path(home) / "data" / "chat.db"
     if not path.exists():
         return []
-    with sqlite3.connect(path) as db:
+    with contextlib.closing(sqlite3.connect(path)) as db:
         return db.execute("SELECT user, message FROM messages ORDER BY id").fetchall()
 
 

@@ -7,6 +7,7 @@ declared provider or nowhere. The provider is a fake HTTP service over
 a real loopback socket - the wire contract is exercised end to end,
 only the asset bytes are scripted.
 """
+import contextlib
 import http.server
 import json
 import os
@@ -72,6 +73,7 @@ class MediaCase(unittest.TestCase):
     def _serve(self):
         server = http.server.HTTPServer(("127.0.0.1", 0), _FakeProvider)
         threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
         return "http://127.0.0.1:%d/gen" % server.server_address[1]
 
@@ -150,7 +152,7 @@ class TestCli(MediaCase):
         self._configure(self._serve())
         rc, _, err = self._main(["chat", "a cat", "--user", "Sam"])
         self.assertEqual(rc, 0, err)
-        with sqlite3.connect(self.home / "data" / "chat.db") as db:
+        with contextlib.closing(sqlite3.connect(self.home / "data" / "chat.db")) as db:
             rows = db.execute("SELECT reply_to_user, attachment_kind, attachment_path"
                               " FROM messages").fetchall()
         self.assertEqual(len(rows), 1)

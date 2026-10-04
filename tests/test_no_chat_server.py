@@ -4,6 +4,7 @@ replies leave on every outbound one. Each path's own tests are in
 test_reply, test_media, test_chat_local_runner, test_telegram_no_server,
 test_peer_inbound, console/test_hive_tell_home and console/test_peer_send;
 this one walks them on one home."""
+import contextlib
 import os
 import pathlib
 import sqlite3
@@ -65,12 +66,12 @@ class TestNoChatServer(HermeticCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(reply_main(["--user", "Priya", "-m", "and filed"]), 0)
             relayed = telegram._history(telegram.load_bridge_config(self.home), "Priya")
-        with sqlite3.connect(self.home / "data" / "chat.db") as db:
+        with contextlib.closing(sqlite3.connect(self.home / "data" / "chat.db")) as db:
             rows = db.execute("SELECT user, message FROM messages ORDER BY id").fetchall()
         self.assertEqual(rows, [("Sam", "hi"), ("Kestrel", "from afar"), ("Wren", "noted"),
                                 ("Wren", "and filed")])
         self.assertEqual([m["message"] for m in relayed], ["and filed"])   # the newest reply
-        with sqlite3.connect(self.home / "data" / "inbox.db") as db:
+        with contextlib.closing(sqlite3.connect(self.home / "data" / "inbox.db")) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM inbox").fetchone()[0], 2)
 
 

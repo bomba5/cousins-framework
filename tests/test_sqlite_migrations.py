@@ -23,6 +23,7 @@ class TestAddColumn(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.path = pathlib.Path(tmp.name) / "x.db"
         self.conn = sqlite3.connect(self.path)
+        self.addCleanup(self.conn.close)
         self.conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
 
     def test_it_adds_a_missing_column(self):

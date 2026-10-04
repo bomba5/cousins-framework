@@ -17,9 +17,23 @@ explicit base class, for a module that wants to say so.
 
 install() runs from tests/__init__.py, which is imported during
 discovery (test_hermetic imports it), before any test runs.
+
+The same wrapper collects each test's garbage when the test ends. A
+socket, database or file a test leaves open is otherwise finalised
+whenever the collector next runs, inside some later test, and its
+ResourceWarning lands in that test's captured stderr. Collected here,
+the warning is reported against the test that leaked. With tracemalloc
+on (PYTHONTRACEMALLOC=20, or -X tracemalloc=20) the warning names where
+the object was allocated; one allocated in cousin_lib fails the test.
+Without tracemalloc there is no telling whose it was, so the warning is
+only passed on.
 """
+import gc
 import os
+import pathlib
+import tracemalloc
 import unittest
+import warnings
 
 # Every variable the framework reads to find an install, a cousin, a
 # tmux server, a filter override, a supervisor or a new cousin's lane,
@@ -64,6 +78,53 @@ def hermetic_env():
     return _Ctx()
 
 
+_PRODUCT = str(pathlib.Path(__file__).resolve().parent.parent / "cousin_lib") + os.sep
+
+
+def _allocated_in_product(source):
+    """The cousin_lib frame an object was allocated in, or None: None too
+    when tracemalloc is off or did not see the allocation."""
+    if source is None or not tracemalloc.is_tracing():
+        return None
+    trace = tracemalloc.get_object_traceback(source)
+    for frame in reversed(trace or ()):                  # innermost first
+        if frame.filename.startswith(_PRODUCT):
+            return "%s:%d" % (frame.filename[len(_PRODUCT) - len("cousin_lib/"):],
+                              frame.lineno)
+    return None
+
+
+def collect_leaks(test_id=None):
+    """Run the collector and return the ResourceWarnings it raised, as
+    (message, cousin_lib allocation site or None). Every warning not
+    returned as a cousin_lib leak is passed on, a ResourceWarning with
+    the id of the test that left the object behind."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        gc.collect()
+    leaks = []
+    for w in caught:
+        site = None
+        if issubclass(w.category, ResourceWarning):
+            site = _allocated_in_product(w.source)
+            leaks.append((str(w.message), site))
+        if site is None:
+            message = w.message
+            if issubclass(w.category, ResourceWarning) and test_id:
+                message = ResourceWarning("%s, left open by %s" % (message, test_id))
+            warnings.warn_explicit(message, w.category, w.filename, w.lineno,
+                                   source=w.source)
+    return leaks
+
+
+def _fail_on_product_leaks(test, result):
+    ours = [(msg, site) for msg, site in collect_leaks(test.id()) if site]
+    if ours and result is not None:
+        lines = "\n".join("  %s, allocated at %s" % pair for pair in ours)
+        err = AssertionError("left open by cousin_lib, found when the test ended:\n" + lines)
+        result.addFailure(test, (AssertionError, err, None))
+
+
 def install():
     """Make every unittest.TestCase run hermetic. Idempotent."""
     original = unittest.TestCase.run
@@ -72,7 +133,9 @@ def install():
 
     def run(self, result=None):
         with hermetic_env():
-            return original(self, result)
+            result = original(self, result)
+        _fail_on_product_leaks(self, result)
+        return result
 
     setattr(run, _MARK, True)
     unittest.TestCase.run = run

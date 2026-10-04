@@ -217,6 +217,7 @@ class TestMint(SpawnNodeCase):
     def test_token_is_minted_in_the_queen_store_with_both_scopes(self):
         token = self._build()["token"]
         store = HiveStore(self.root / "shared" / "hive")
+        self.addCleanup(store.close)
         self.assertEqual(store.resolve(token),
                          {"slug": "testa", "scope": {"own", "shared"}})
 
@@ -233,6 +234,7 @@ class TestMint(SpawnNodeCase):
         result = self._build(token="hive_from_the_remote_queen")
         self.assertEqual(result["token"], "hive_from_the_remote_queen")
         store = HiveStore(self.root / "shared" / "hive")
+        self.addCleanup(store.close)
         self.assertIsNone(store.resolve("hive_from_the_remote_queen"))
         self.assertEqual(
             store.conn.execute("SELECT COUNT(*) FROM tokens").fetchone()[0],

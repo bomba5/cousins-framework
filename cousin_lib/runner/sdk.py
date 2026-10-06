@@ -87,6 +87,14 @@ ATTRIBUTION_OFF_SETTINGS = json.dumps({"includeCoAuthoredBy": False,
                                        "attribution": {"commit": "", "pr": ""}})
 
 
+# The SDK refuses one stream message over its max_buffer_size (1 MiB by
+# default) and the turn dies with CLIJSONDecodeError. A Read of an image
+# comes back as one message holding the whole file in base64, so any image
+# over ~750 KB hit it. 32 MiB is the API's own request ceiling: a message
+# the model could be sent at all fits.
+STREAM_BUFFER_BYTES = 32 * 1024 * 1024
+
+
 def _attribution_settings(commit_attribution):
     return None if commit_attribution else ATTRIBUTION_OFF_SETTINGS
 # The session a runner is (runner/sessions.py): the primary holds
@@ -637,6 +645,7 @@ class SdkRunner:
                                       system_prompt=system_prompt, session_store=self.session_store,
                                       mcp_servers=mcp_servers,
                                       hooks=hook_table,
+                                      max_buffer_size=STREAM_BUFFER_BYTES,
                                       extra_args=extra)
 
     def _mcp_options(self, server, extra):

@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.27.2 - 2026-10-06
+
+### Fixed
+
+- **A cousin reading a large image no longer loses its turn.** On the
+  `sdk` lane, a `Read` of an image comes back as one stream message
+  holding the whole file, and the Agent SDK refuses any message over
+  1 MiB by default: an image over about 750 KB ended the turn with
+  "JSON message exceeded maximum buffer size", the drain timed out and
+  the runner reconnected, leaving the message that started the turn
+  unanswered. The runner now sets the SDK's `max_buffer_size` to 32 MiB.
+
 ## 3.27.1 - 2026-10-06
 
 ### Fixed

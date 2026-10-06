@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.27.3 - 2026-10-06
+
+### Fixed
+
+- **A cousin you stopped no longer counts as failing.** `cousin-health`
+  and the console's top-bar count listed every supervisor child that was
+  not running, so each runner held down by a `stop` showed as a failure.
+  A child stopped because its cousin is held (`<home>/run/held`) is now
+  left out; a runner stopped for a login still counts. Each row of
+  `cousin-supervisor status` gains `held`.
+
 ## 3.27.2 - 2026-10-06
 
 ### Fixed

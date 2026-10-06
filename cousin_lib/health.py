@@ -122,7 +122,9 @@ def _record(root, results, now):
 
 def _supervisor(root):
     """{"reachable": bool, "error"?, "failing": [child]}: every supervisor
-    child (console, loops, runners, bridges, plugins) not `running`."""
+    child (console, loops, runners, bridges, plugins) not `running`, but
+    for one stopped because its cousin is held down: the operator's own
+    stop is not a fault. A stop that needs them (login required) counts."""
     from cousin_lib import supervisor
     try:
         answer = supervisor.request(root, "status", timeout=3.0)
@@ -130,9 +132,12 @@ def _supervisor(root):
         return {"reachable": False, "error": str(err), "failing": []}
     failing = []
     for name, row in sorted((answer.get("children") or {}).items()):
-        if isinstance(row, dict) and row.get("state") != "running":
-            failing.append({"name": name, "state": row.get("state"),
-                            "since": row.get("since"), "reason": row.get("reason")})
+        if not isinstance(row, dict) or row.get("state") == "running":
+            continue
+        if row.get("state") == "stopped" and row.get("held"):
+            continue
+        failing.append({"name": name, "state": row.get("state"),
+                        "since": row.get("since"), "reason": row.get("reason")})
     return {"reachable": True, "failing": failing}
 
 

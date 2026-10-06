@@ -37,6 +37,19 @@ class TestHealthRoute(ConsoleCase):
         self.assertEqual(body["supervisor"]["failing"][0]["name"], "runner:kestrel")
         self.assertEqual((body["failing"], body["failing_count"]), ([], 1))
 
+    def test_a_held_stop_is_left_out_of_the_top_bar_count(self):
+        stub = StubSupervisor(self.root, {"status": {"ok": True, "children": {
+            "runner:kestrel": {"state": "stopped", "since": "2026-10-06T10:56:32+00:00",
+                               "reason": "stopped by request", "held": True},
+            "runner:wren": {"state": "stopped", "since": "2026-10-06T11:00:00+00:00",
+                            "reason": "login required (exit 4)", "held": False}}}}).start()
+        self.addCleanup(stub.close)
+        self.serve()
+        status, body = self.get("/api/health")
+        self.assertEqual(status, 200)
+        self.assertEqual([c["name"] for c in body["supervisor"]["failing"]], ["runner:wren"])
+        self.assertEqual(body["failing_count"], 1)
+
     def test_read_only_and_behind_the_login(self):
         self.serve()
         self.assertEqual(self.post("/api/health", {})[0], 405)

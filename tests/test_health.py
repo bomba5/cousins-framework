@@ -270,6 +270,19 @@ class TestCli(_RootCase):
         self.assertNotIn("FAIL  loops", out)
         self.assertNotIn("not reachable", out)
 
+    def test_a_held_stop_is_not_failing_and_a_login_stop_is(self):
+        children = {"runner:kestrel": {"state": "stopped", "since": "2026-10-06T10:56:32+00:00",
+                                       "reason": "stopped by request", "held": True},
+                    "runner:wren": {"state": "stopped", "since": "2026-10-06T11:00:00+00:00",
+                                    "reason": "login required (exit 4)", "held": False}}
+        stub = StubSupervisor(self.root, {"status": {"ok": True, "children": children}}).start()
+        self.addCleanup(stub.close)
+        rc, out, _ = self.run_cli([])
+        self.assertEqual(rc, 1)
+        self.assertNotIn("runner:kestrel", out)
+        self.assertIn("FAIL  runner:wren  stopped", out)
+        self.assertIn("1 failing", out)
+
     def test_an_empty_record_says_where_it_comes_from(self):
         rc, out, _ = self.run_cli([])
         self.assertEqual(rc, 0)

@@ -962,7 +962,7 @@ Read-only, behind the login like every other route. What `cousin-health` prints 
  "failing_count": 2}
 ```
 
-`components` is `data/health.json` as the loops daemon wrote it (timestamps in epoch seconds), `failing` its failing entries with their key, the longest streak first, and `quiet` true when the entry was last seen more than ten minutes ago. `supervisor.failing` is every supervisor child not `running`; with no supervisor, `{"reachable": false, "error", "failing": []}`. `failing_count` is both failing lists together: the console's top bar shows it in red when it is not 0.
+`components` is `data/health.json` as the loops daemon wrote it (timestamps in epoch seconds), `failing` its failing entries with their key, the longest streak first, and `quiet` true when the entry was last seen more than ten minutes ago. `supervisor.failing` is every supervisor child not `running`, except a `stopped` one whose cousin is held down (`<home>/run/held`, a stop by request); with no supervisor, `{"reachable": false, "error", "failing": []}`. `failing_count` is both failing lists together: the console's top bar shows it in red when it is not 0.
 
 ### `POST /api/admin/restart/framework`
 

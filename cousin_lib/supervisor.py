@@ -431,8 +431,12 @@ class Child:
         self.since = _now_iso()
 
     def row(self):
+        # `held`: its cousin was stopped by request and is held down
+        # (<home>/run/held), so a reader can tell a deliberate stop from a fault
+        held = self.spec.home is not None and is_held(self.spec.home)
         return {"state": self.state, "pid": self.pid, "restarts": self.restarts,
-                "since": self.since, "reason": self.reason, "last_exit": self.last_exit}
+                "since": self.since, "reason": self.reason, "last_exit": self.last_exit,
+                "held": held}
 
 
 class Supervisor:

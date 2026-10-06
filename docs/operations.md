@@ -309,7 +309,9 @@ is dropped from the file.
 `cousin-health` reads it, failing components first, then a count of the
 ok ones (`--all` lists them, `--json` prints everything). It also asks the
 supervisor, as `cousin-supervisor status` does, and lists every child that
-is not `running`; with no supervisor it says "supervisor not reachable".
+is not `running`, except one stopped because its cousin is held down (a
+`stop` you asked for is not a fault; a runner stopped for a login still
+counts); with no supervisor it says "supervisor not reachable".
 It exits 1 when anything is failing, so a timer or a monitoring check can
 call it.
 

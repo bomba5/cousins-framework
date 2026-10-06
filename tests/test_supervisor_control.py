@@ -130,7 +130,7 @@ class TestSocket(_Case):
         self.assertEqual((body["ok"], body["pid"]), (True, proc.pid))
         self.assertEqual(sorted(body["children"]), ["runner:sam", "runner:wren"])
         for row in body["children"].values():
-            self.assertEqual(sorted(row), ["last_exit", "pid", "reason", "restarts",
+            self.assertEqual(sorted(row), ["held", "last_exit", "pid", "reason", "restarts",
                                            "since", "state"])
         self.assertTrue(_wait_for(lambda: is_running(self.root / "cousins" / "wren")))
         rc, out, _ = self.cli("status", "--json")
@@ -217,6 +217,9 @@ class TestSocket(_Case):
         stamp, who = (wren / "run" / "held").read_text().rstrip("\n").split(" ", 1)
         self.assertRegex(stamp, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$")
         self.assertEqual(who, "cousin-supervisor stop")
+        # the row says it, so a reader (cousin-health) can tell it from a fault
+        self.assertTrue(self.child("runner:wren")["held"])
+        self.assertFalse(self.child("runner:sam")["held"])
         proc.send_signal(signal.SIGTERM)
         self.assertEqual(proc.wait(40), 0)
         self.supervise()                                          # a new supervisor

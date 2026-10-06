@@ -1103,8 +1103,15 @@ def _hit_relpath(home, hit, root=None):
 
 
 def recall_entries(home, text, *, config=None, root=None):
-    """The hits that qualify for proactive recall, each rendered as
-    'Title (collection:relpath)'; [] when a gate says no. The gates:
+    """recall_hits' entries alone."""
+    return recall_hits(home, text, config=config, root=root)[0]
+
+
+def recall_hits(home, text, *, config=None, root=None):
+    """(entries, items) for proactive recall: `entries` the hits that
+    qualify, each rendered as 'Title (collection:relpath)'; `items` the
+    same hits for a reader (recall_item). Both [] when a gate says no.
+    The gates:
     `[memory] proactive_recall` (config, the cousin's CousinConfig,
     loaded from `home` when not given), `[recall] min_chars` and `top`,
     and how a hit qualifies: with the embedding seam configured by its
@@ -1116,18 +1123,18 @@ def recall_entries(home, text, *, config=None, root=None):
         config = CousinConfig.load(home)
     home = Path(home)
     if not config.proactive_recall:
-        return []
+        return [], []
     thresholds, configured = recall_thresholds(root)
     if not configured and not config.recall_keyword_only:
         # no semantic leg: a keyword match on an OR-joined query is too
         # loose to interrupt with; the cousin opts in per install
         _receipt(home, text, gate="no semantic leg and keyword-only recall is off")
-        return []
+        return [], []
     if len(text.strip()) < int(thresholds["min_chars"]):
         _receipt(home, text, gate="shorter than [recall] min_chars")
-        return []
+        return [], []
     hits, _notice = search(text, top=int(thresholds["top"]), home=home, root=root)
-    kept, returned, excluded = [], [], []
+    kept, returned, excluded, items = [], [], [], []
     for hit in hits:
         row = _receipt_row(home, hit, root)
         if configured:
@@ -1140,8 +1147,40 @@ def recall_entries(home, text, *, config=None, root=None):
         returned.append(row)
         kept.append("%s (%s:%s)" % (_hit_name(hit), hit.get("collection"),
                                     _hit_relpath(home, hit, root)))
+        items.append(recall_item(home, hit, root))
     _receipt(home, text, returned=returned, excluded=excluded)
-    return kept
+    return kept, items
+
+
+def recall_item(home, hit, root=None):
+    """One recalled hit for a reader (the reasoning pane): `name`,
+    `collection`, `rel` the way the console's memory search gives it
+    (home-relative; a raw hit `memory/raw/<file>#<line>`; a harness hit
+    relative to the harness directory, with `layer: "harness"`), and
+    `similarity` when the semantic leg scored it. A raw hit adds its
+    `level`."""
+    home = Path(home)
+    collection = hit.get("collection")
+    path, _, line = str(hit["path"]).rpartition("#") if collection == "raw" \
+        else (str(hit["path"]), "", "")
+    item = {"name": _hit_name(hit), "collection": collection}
+    if collection == "harness":
+        item["rel"] = _hit_relpath(home, hit, root)
+        item["layer"] = "harness"
+    else:
+        try:
+            item["rel"] = Path(path).resolve().relative_to(home.resolve()).as_posix() \
+                + ("#" + line if line else "")
+        except (ValueError, OSError):
+            item["rel"] = _hit_relpath(home, hit, root)
+    if hit.get("similarity") is not None:
+        item["similarity"] = round(float(hit["similarity"]), 4)
+    if collection == "raw":
+        entry = raw_entry(hit["path"]) or {}
+        if entry.get("truth_level"):
+            from cousin_lib.memory import normalize_level
+            item["level"] = normalize_level(entry.get("truth_level"))
+    return item
 
 
 # Proactive recall's read receipt: for every prompt it ran on, what it

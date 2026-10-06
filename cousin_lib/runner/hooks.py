@@ -229,13 +229,14 @@ def gate(policy, payload, *, root=None, home=None, slug=None):
 
 
 def default_recall(home, root=None):
-    """`recall(body) -> (context text or None, hit count)`: the recall
-    gates and line (memory_search.recall_context's parts),
+    """`recall(body) -> (context text or None, hit count, items)`: the
+    recall gates and line (memory_search.recall_context's parts) and
+    each hit for the reasoning pane (memory_search.recall_item),
     reading the runner's `root`, never the environment's."""
     def recall(body):
         from cousin_lib import memory_search
-        entries = memory_search.recall_entries(home, body, root=root)
-        return memory_search.recall_line(entries), len(entries)
+        entries, items = memory_search.recall_hits(home, body, root=root)
+        return memory_search.recall_line(entries), len(entries), items
     return recall
 
 
@@ -258,9 +259,10 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     tool_use_id, context)` functions: no SDK types, so tests drive them
     directly. `build_hooks` wraps them in HookMatchers.
 
-    recall: `recall(body) -> (text or None, hits)`, a blocking callable
-    run on a worker thread; text becomes the prompt's additionalContext,
-    hits goes on the `recall` event. Default: default_recall(home, root).
+    recall: `recall(body) -> (text or None, hits[, items])`, a blocking
+    callable run on a worker thread; text becomes the prompt's
+    additionalContext, and the `recall` event carries hits and, with any,
+    the text and the items. Default: default_recall(home, root).
     body_for_prompt: `f(prompt) -> str`, the text to search for a
     submitted prompt (the runner passes the body of the row whose
     envelope matches the prompt, "" for a thread that is not operator
@@ -457,11 +459,18 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
             stream.append("recall", {"hits": 0, "skipped": "empty body"})
             return ""
         try:
-            text, n = await asyncio.wait_for(asyncio.to_thread(recall, body), RECALL_BUDGET_S)
+            text, n, *rest = await asyncio.wait_for(asyncio.to_thread(recall, body),
+                                                    RECALL_BUDGET_S)
         except asyncio.TimeoutError:
             stream.append("recall", {"hits": 0, "timed_out": True})
             return ""
-        stream.append("recall", {"hits": n})
+        event = {"hits": n}
+        if n and text:
+            # what the cousin was given, for the reasoning pane
+            event["text"] = text
+            if rest and rest[0]:
+                event["items"] = list(rest[0])
+        stream.append("recall", event)
         return text or ""
 
     async def on_prompt(payload):

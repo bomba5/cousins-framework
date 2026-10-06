@@ -2241,7 +2241,7 @@ function RunnerPaneView({ cousin, onClose, chatUser, chatHidden }) {
             <div className="rp-body">{rpRowBody(ev)}</div>
           </div>
         )) : model.rows.map(row => (
-          <RpRow key={row.key} row={row} now={now}
+          <RpRow key={row.key} row={row} now={now} slug={slug}
                  activeTool={!!model.strip.activity} />
         ))}
         {events.length === 0 && <div className="rp-empty">{status === "live" ? "no events yet: the stream shows the runner's turns as they happen" : "connecting to the stream..."}</div>}
@@ -2271,21 +2271,92 @@ function RunnerPaneView({ cousin, onClose, chatUser, chatHidden }) {
 // The folded view's rows and strip (rpModel's output as elements).
 const RP_ACT_LABEL = { thinking: "thinking", working: "working", waiting: "waiting for permission" };
 
-function RpRow({ row, now, activeTool }) {
+// What recall gave the cousin for one message (the runner's `recall`
+// event): each item opens to the memory itself, read through the memory
+// explorer's file route; a raw entry is one line of its jsonl.
+const RP_RECALL_WHY = {
+  "context present": "the message already carried its recall",
+  "empty body": "nothing to search (not a chat message)",
+};
+
+function rpRecallTitle(rc) {
+  const names = (rc.items || []).map(i => i.name).filter(Boolean);
+  return names.length ? "recalled: " + names.join("; ") : "memories recalled for this message";
+}
+
+function RpRecallItem({ item, slug }) {
+  const [body, setBody] = React.useState(null);
+  const load = async (e) => {
+    if (!e.currentTarget.open || body) return;
+    const raw = item.collection === "raw";
+    const [file, line] = raw ? String(item.rel || "").split("#") : [item.rel, null];
+    const q = new URLSearchParams({ path: file || "" });
+    if (raw && line) { q.set("start", line); q.set("count", "1"); }
+    if (item.layer === "harness") q.set("layer", "harness");
+    const d = await apiGet(`/api/memory/${encodeURIComponent(slug)}/file?${q}`);
+    if (!d) { setBody({ err: "could not read " + item.rel }); return; }
+    if (raw) {
+      let entry = null;
+      try { entry = JSON.parse((d.lines || [])[0] || ""); } catch (_e) { entry = null; }
+      setBody(entry ? { entry } : { text: (d.lines || []).join("\n") });
+    } else {
+      setBody({ text: d.text != null ? d.text : (d.lines || []).join("\n") + (d.more ? "\n..." : "") });
+    }
+  };
+  const meta = [item.collection, item.rel].filter(Boolean).join(" · ");
+  return (
+    <details className="rp-recall-item" onToggle={load}>
+      <summary>
+        <span className="rp-recall-name">{item.name || item.rel}</span>
+        {item.level && <span className="rp-chip">{String(item.level).replace(/^L\d_/, "").toLowerCase()}</span>}
+        {item.similarity != null && <span className="rp-chip" title="semantic similarity">{Number(item.similarity).toFixed(2)}</span>}
+        <span className="rp-recall-src">{meta}</span>
+      </summary>
+      <div className="rp-recall-body">
+        {!body ? <span className="muted">loading...</span>
+          : body.err ? <span className="muted">{body.err}</span>
+          : body.entry ? (
+            <React.Fragment>
+              <div>{body.entry.content}</div>
+              <div className="rp-recall-src">{[body.entry.truth_level, body.entry.timestamp, body.entry.cite && ("cite: " + body.entry.cite)].filter(Boolean).join(" · ")}</div>
+            </React.Fragment>)
+          : renderMarkdownLite(body.text || "").map((n, j) => rpToReact(n, j))}
+      </div>
+    </details>
+  );
+}
+
+function RpRecall({ recall, slug }) {
+  const why = recall.timed_out ? "recall timed out" : (RP_RECALL_WHY[recall.skipped] || recall.skipped);
+  if (why) return <div className="rp-recall muted">No recall: {why}</div>;
+  if (!recall.hits) return <div className="rp-recall muted">No recall: nothing in memory matched</div>;
+  const items = recall.items || [];
+  return (
+    <div className="rp-recall">
+      <div className="rp-recall-head">Recalled for this message</div>
+      {items.length ? items.map((it, i) => <RpRecallItem key={i} item={it} slug={slug} />)
+        : <div className="rp-recall-src">{recall.text || recall.hits + " hits (this runner did not record which)"}</div>}
+    </div>
+  );
+}
+
+function RpRow({ row, now, activeTool, slug }) {
   const ev = row.ev || {};
   const p = ev.payload || {};
   switch (row.t) {
     case "turn": {
       const h = rpTurnHead(row);
-      const hits = row.recall && row.recall.hits;
+      const rc = row.recall;
+      const hits = rc && rc.hits;
       return (
         <details className={"rp-turn" + (row.mid ? " mid" : "")}>
           <summary title={h.title || undefined}>
             <span className="rp-turn-head">{h.head || "turn"}</span>
-            {hits > 0 && <span className="rp-chip" title="memories recalled for this message">recall {hits}</span>}
+            {hits > 0 && <span className="rp-chip rp-recall-chip" title={rpRecallTitle(rc) + " (open to see them)"}>recall {hits}</span>}
             <span className="rp-turn-snip">{h.snippet}</span>
           </summary>
           <div className="rp-turn-full">{h.full}</div>
+          {rc && slug && <RpRecall recall={rc} slug={slug} />}
         </details>
       );
     }

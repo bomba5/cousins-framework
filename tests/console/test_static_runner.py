@@ -572,6 +572,38 @@ const s = rpModel([{kind: "session_init", payload: {model: "m", apiKeySource: "A
 process.stdout.write(JSON.stringify(s));""")
         self.assertEqual(got["auth"], "API key (ANTHROPIC_API_KEY)")
 
+    def test_a_turn_keeps_what_recall_gave_the_cousin(self):
+        got = self.run_node("""
+const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
+const items = [{name: "Router", collection: "memory", rel: "memory/reference_router.md"},
+               {name: "kestrel nest", collection: "raw", rel: "memory/raw/2026-10-06.jsonl#1",
+                level: "L2_TOOL", similarity: 0.61}];
+const m = rpModel([E(1, "turn_start", {bodies: ["hi"]}),
+                   E(2, "recall", {hits: 2, text: "[fw-recall] x", items}),
+                   E(3, "user", {text: "hi"})]);
+process.stdout.write(JSON.stringify(m.rows[0].recall));""")
+        self.assertEqual(got["hits"], 2)
+        self.assertEqual(got["text"], "[fw-recall] x")
+        self.assertEqual([i["rel"] for i in got["items"]],
+                         ["memory/reference_router.md", "memory/raw/2026-10-06.jsonl#1"])
+
+    def test_the_turn_row_opens_to_the_recalled_memories(self):
+        """The chip names what was recalled; the open turn lists each item,
+        and an item reads the memory through the explorer's file route (a
+        raw entry is one line of its jsonl); a skipped recall says why."""
+        row = self.chat[self.chat.index("function RpRow("):]
+        row = row[:row.index("\n}\n")]
+        self.assertIn("<RpRecall recall={rc} slug={slug} />", row)
+        self.assertIn("rpRecallTitle(rc)", row)
+        item = self.chat[self.chat.index("function RpRecallItem("):self.chat.index("function RpRecall(")]
+        self.assertIn("/api/memory/${encodeURIComponent(slug)}/file?", item)
+        self.assertIn('q.set("count", "1")', item)
+        self.assertIn('q.set("layer", "harness")', item)
+        recall = self.chat[self.chat.index("function RpRecall("):self.chat.index("function RpRow(")]
+        self.assertIn("No recall:", recall)
+        self.assertIn("recall.timed_out", recall)
+        self.assertRegex(self.chat, r"<RpRow key=\{row\.key\} row=\{row\} now=\{now\} slug=\{slug\}")
+
     def test_a_folded_messages_recall_lands_on_its_own_divider(self):
         """The runner emits a message's recall before its user event, so
         a folded message's recall must not overwrite the turn's."""

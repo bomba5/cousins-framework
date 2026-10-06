@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.28.0 - 2026-10-06
+
+### Added
+
+- **The reasoning pane shows what was recalled, not only how much.** A
+  turn's "recall N" chip names the memories, and an open turn lists them:
+  name, where it lives, truth level and similarity, each one opening to the
+  memory itself. A message recall skipped says why. The runner's `recall`
+  stream event now carries `text` (the `[fw-recall]` line the cousin got)
+  and `items` (`name`, `collection`, `rel` as the console's memory search
+  gives it, `similarity`, a raw entry's `level`) next to `hits`.
+
 ## 3.27.3 - 2026-10-06
 
 ### Fixed

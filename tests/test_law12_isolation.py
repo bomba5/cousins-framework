@@ -181,10 +181,13 @@ class TestRetrieval(TwoCousins):
     def test_prompt_time_recall_surfaces_nothing_of_it(self):
         # enforces: law 12
         body = "where is the %s ledger and the vault phrase kept" % MARK
-        sam_text, _n = hooks.default_recall(self.sam, self.root)(body)
-        wren_text, _n = hooks.default_recall(self.wren, self.root)(body)
+        sam_text, _n, sam_items = hooks.default_recall(self.sam, self.root)(body)
+        wren_text, _n, wren_items = hooks.default_recall(self.wren, self.root)(body)
         self.assertIsolated("prompt recall", sam_text or "", wren_text or "")
         self.assertNotIn(str(self.wren), sam_text or "")
+        # the items the reasoning pane shows carry nothing of the other cousin either
+        self.assertIsolated("prompt recall items", json.dumps(sam_items), json.dumps(wren_items))
+        self.assertNotIn(str(self.wren), json.dumps(sam_items))
         context = memory_search.recall_context(self.sam, body, root=self.root)
         self.assertNotIn(MARK, context or "")
         self.assertNotIn(str(self.wren), context or "")

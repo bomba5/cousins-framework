@@ -590,7 +590,12 @@ or a cross, what it was asked, how long it took; click for the input and
 output), a reply as "reply" with the message, a thinking block as
 "thought 2s", the model's text, and a line that closes each turn (steps,
 tokens, cost, memories written, checkpoint). A message folded into a
-running turn gets its own rule and recall chip. Login and credential
+running turn gets its own rule and recall chip. An open turn lists what
+recall gave the cousin for that message: each memory by name, where it
+lives, its truth level and similarity; click one to read it (a raw entry
+shows its content, level, time and cite). A message recall skipped says
+why (it already carried its recall, it was not a chat message, or recall
+timed out). Login and credential
 problems, API retries and failed tool calls with no card are one red (or
 amber) line each; a session rollover is a divider line and a memory review
 one line (kept, dropped, pending). The runner's setup events, fresh or

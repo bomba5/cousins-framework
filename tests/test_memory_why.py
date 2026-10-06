@@ -100,6 +100,29 @@ class TestReceipt(HomeCase):
         self.assertIn("min_chars", newest["gate"])
         self.assertIn("keyword-only", older["gate"])
 
+    def test_recall_hits_gives_the_reader_each_kept_hit(self):
+        raw = self.home / "memory" / "raw"; raw.mkdir(parents=True, exist_ok=True)
+        (raw / "2026-10-06.jsonl").write_text(json.dumps(
+            {"timestamp": "2026-10-06T10:00:00+00:00", "topic": "kestrel nest",
+             "content": "the kestrel nests in the barn", "truth_level": "L2_TOOL"}) + "\n")
+        hits = [{"path": str(self.home / "memory" / "a.md"), "collection": "memory",
+                 "similarity": 0.9},
+                {"path": str(raw / "2026-10-06.jsonl") + "#1", "collection": "raw",
+                 "similarity": 0.8},
+                {"path": str(self.home / "memory" / "b.md"), "collection": "memory",
+                 "similarity": 0.2}]
+        with mock.patch.object(memory_search, "recall_thresholds",
+                               return_value=({"min_chars": 1, "top": 3, "min_score": 0.5}, True)), \
+                mock.patch.object(memory_search, "search", return_value=(hits, None)):
+            entries, items = memory_search.recall_hits(self.home, "where is the kestrel",
+                                                       config=self.config())
+        self.assertEqual(len(entries), 2)
+        self.assertEqual([(i["collection"], i["rel"], i["similarity"]) for i in items],
+                         [("memory", "memory/a.md", 0.9),
+                          ("raw", "memory/raw/2026-10-06.jsonl#1", 0.8)])
+        self.assertEqual((items[1]["name"], items[1]["level"]), ("kestrel nest", "L2_TOOL"))
+        self.assertNotIn("level", items[0])
+
     def test_returned_and_excluded_hits_are_both_recorded(self):
         hits = [{"path": str(self.home / "memory" / "a.md"), "collection": "memory",
                  "similarity": 0.9},

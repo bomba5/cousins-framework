@@ -2021,6 +2021,14 @@ body.chat-fullscreen .plugin-strips { display: none; }
 .rp-chip { font-size: 10.5px; color: var(--fg-2); background: var(--bg-2); border-radius: 5px; padding: 1px 7px; white-space: nowrap; }
 .rp-chip.is-warn { color: var(--amber); }
 .rp-chip.is-err { color: var(--red); }
+/* what recall gave the cousin, under a turn's message */
+.rp-recall-chip { cursor: pointer; }
+.rp-recall { margin: 4px 0 2px; padding-left: 10px; border-left: 1px solid var(--line); font-size: 12px; }
+.rp-recall-head { color: var(--fg-2); margin-bottom: 3px; }
+.rp-recall-item > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 2px 0; }
+.rp-recall-name { color: var(--fg-1); }
+.rp-recall-src { color: var(--fg-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-recall-body { white-space: pre-wrap; color: var(--fg-2); margin: 3px 0 6px 12px; max-height: 260px; overflow: auto; }
 /* the bg tasks chip and the list it opens under the strip */
 .rp-bg-chip { font-family: inherit; border: 1px solid transparent; cursor: pointer; }
 .rp-bg-chip:hover, .rp-bg-chip.on { border-color: var(--line); color: var(--fg-0); }

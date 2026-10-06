@@ -88,8 +88,20 @@ class TestRecall(HooksCase):
         ctx = out.get("hookSpecificOutput", {}).get("additionalContext", "")
         self.assertTrue(ctx.startswith("[fw-recall] "))
         self.assertIn("Router (memory:reference_router.md)", ctx)
+        # the pane is told what the cousin was given: the line and each item
+        (recall,) = [e["payload"] for e in self.stream.tail() if e["kind"] == "recall"]
+        self.assertEqual(recall["hits"], 1)
+        self.assertEqual(recall["text"], ctx)
+        self.assertEqual([(i["name"], i["collection"], i["rel"]) for i in recall["items"]],
+                         [("Router", "memory", "memory/reference_router.md")])
+
+    def test_a_two_value_recall_still_works_without_items(self):
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                              stream=self.stream, recall=lambda body: ("[fw-recall] x (memory:x.md)", 1))
+        _run(cbs["UserPromptSubmit"](self._base("UserPromptSubmit", prompt="anything at all here"),
+                                     None, {}))
         recalls = [e["payload"] for e in self.stream.tail() if e["kind"] == "recall"]
-        self.assertEqual(recalls, [{"hits": 1}])
+        self.assertEqual(recalls, [{"hits": 1, "text": "[fw-recall] x (memory:x.md)"}])
 
     def test_no_hits_means_no_context_and_no_error(self):
         out = _run(self.cbs["UserPromptSubmit"](self._base(

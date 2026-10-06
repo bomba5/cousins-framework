@@ -153,6 +153,21 @@ class TestHandoff(HermeticCase):
         self.assertIn("next_action", text)
         self.assertFalse((ctx.home / "data" / "handoff.md").exists())
 
+    def test_a_wrong_shape_is_refused_before_any_write(self):
+        bad = [("active_threads", "peer:toki - review"), ("active_threads", [1, 2]),
+               ("learned", "bank export: exports are UTC"), ("learned", ["exports are UTC"]),
+               ("learned", [{}]), ("learned", [{"topic": "bank export"}])]
+        for key, value in bad:
+            with self.subTest(key=key, value=value):
+                ctx = _ctx(self)
+                (ctx.home / "STATUS.md").write_text("# Wren\n\n## Open loops\n\n- old loop\n")
+                text, err = tools.call(ctx, "handoff", dict(ARGS, **{key: value}))
+                self.assertTrue(err)
+                self.assertIn(key, text)
+                self.assertIn("old loop", (ctx.home / "STATUS.md").read_text())
+                self.assertFalse((ctx.home / "data" / "active-threads.md").exists())
+                self.assertFalse((ctx.home / "data" / "handoff.md").exists())
+
     def test_one_bad_memory_does_not_cost_the_handoff(self):
         ctx = _ctx(self)
         args = dict(ARGS, learned=[{"topic": "t", "fact": "f", "level": "operator"},   # no cite

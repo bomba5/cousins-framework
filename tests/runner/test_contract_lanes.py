@@ -23,11 +23,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # OTHER_SERVERS paragraph feat/runner-mcp-json (5edd58e) appends on the SDK
 # lane, plus 1.21.0's memory triggers (remember when asked, search first) and
 # the job tool's `run` line in "Tools, not the terminal CLIs", plus 3.8.0's
-# `why` in the memory tool's command list: the bytes the
+# `why` in the memory tool's command list, plus 3.27.1's handoff shapes in
+# "Generations": the bytes the
 # SDK lane's renderer produces. A registry or static-text edit changes it on
-# purpose: update the hash in the same commit, knowing every SDK cousin's
-# prompt cache resets.
-SDK_CONTRACT_SHA256 = "793d5e6458dfd3f6733290b1a396c55b96d71c1f4c30c5ccddb028b8fd55383f"
+# purpose: update the hash in the same commit, knowing every SDK and
+# opencode cousin's prompt cache resets (the edit moves both lanes' bytes).
+SDK_CONTRACT_SHA256 = "a88c4b675e097747c9cd7825d325d836f41b6273374e3a7e2850203e53da851b"
 
 
 def as_opencode(sdk_text):

@@ -788,6 +788,17 @@ def handoff(ctx, args):
     missing = [k for k in ("position", "next_action", "status") if not str(args.get(k) or "").strip()]
     if missing:
         raise ValueError("handoff needs %s" % ", ".join(missing))
+    # the shapes are checked here, before any write: a string iterated as a
+    # list writes one thread per character, and a late refusal would leave
+    # STATUS.md moved without the rest
+    threads, items = args.get("active_threads"), args.get("learned")
+    if threads is not None and not (isinstance(threads, list)
+                                    and all(isinstance(t, str) for t in threads)):
+        raise ValueError("handoff: active_threads must be a list of strings, one per thread")
+    if items is not None and not (isinstance(items, list)
+                                  and all(isinstance(i, dict) and str(i.get("topic") or "").strip()
+                                          and str(i.get("fact") or "").strip() for i in items)):
+        raise ValueError("handoff: learned must be a list of objects with topic and fact")
     home = Path(ctx.home)
     (home / "data").mkdir(parents=True, exist_ok=True)
     written, errors, notes, learned = [], [], [], 0
@@ -803,13 +814,12 @@ def handoff(ctx, args):
         sync_state.write_state(home)
     except Exception as err:  # noqa: BLE001 - state.json is a view; STATUS is written
         errors.append("state.json: %s" % err)
-    threads = args.get("active_threads")
     if threads:
         (home / "data" / "active-threads.md").write_text(
-            "# Active threads - %s\n\n%s\n" % (ctx.name, "\n".join("- %s" % str(t).strip()
+            "# Active threads - %s\n\n%s\n" % (ctx.name, "\n".join("- %s" % t.strip()
                                                                    for t in threads)))
         written.append("data/active-threads.md")
-    for item in args.get("learned") or []:
+    for item in items or []:
         try:
             line = memory.remember(home, item.get("topic"), item.get("fact"),
                                    level=item.get("level"), cite=item.get("cite"))

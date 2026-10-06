@@ -92,7 +92,8 @@ class Hysteresis:
 def handoff_request_text(reason):
     reason = str(reason or "rollover").strip()
     ask = ("Call the `handoff` tool now, exactly once, with position, next_action and"
-           " status, plus active_threads and learned when you have them. The next"
+           " status, plus active_threads (a list of one-line strings) and learned (a list"
+           " of objects, each with topic and fact) when you have them. The next"
            " generation starts from what you write; nothing else is needed from you"
            " in this turn.")
     if is_bequest(reason):                       # a bequest: quoted whole, answered in the tool

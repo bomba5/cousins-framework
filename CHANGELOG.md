@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.27.1 - 2026-10-06
+
+### Fixed
+
+- **The handoff refuses a wrong-shaped `active_threads` or `learned`
+  instead of writing it.** `active_threads` given as one string was
+  iterated per character, so the next generation's task packet read
+  "- p", "- e", one line per letter. `learned` given as a string failed
+  only after STATUS.md was already rewritten. Both are now checked
+  before any file is written, each `learned` item for a `topic` and a
+  `fact` too, and the tool error says the expected shape. The framework
+  contract and the handoff request now state both shapes, so the model
+  is told them, not only refused. The contract's bytes change, so each
+  `sdk` or `opencode` cousin's prompt cache starts over once, at its
+  restart.
+
 ## 3.27.0 - 2026-10-04
 
 ### Added

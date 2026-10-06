@@ -160,7 +160,10 @@ heading inside becomes `###`) are required, `active_threads` (one
 string per in-flight thread, written to `data/active-threads.md`) and
 `learned` (facts not yet in memory, each `{topic, fact, level, cite}`,
 remembered through the same path `cousin-memory remember` uses) are taken
-when the model has them. It writes `STATUS.md`'s open loops, then
+when the model has them. A wrong shape (`active_threads` that is not a
+list of strings, a `learned` that is not a list, or an item without a
+`topic` and a `fact`) is a tool error before any write, so `STATUS.md`
+does not move. It writes `STATUS.md`'s open loops, then
 `data/active-threads.md` when given, then the memories, then
 `data/handoff.md` last (the write order the module docstring calls the
 ritual), and returns one line naming what it wrote and how many memories,

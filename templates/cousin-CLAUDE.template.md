@@ -181,6 +181,7 @@ show.
 | `cousin-console` | the web console over the framework (operator-run) | `cousin-console --port 8600`; a view, never a source of truth; `cousin-console adduser <name>` adds a login |
 | `cousin-cache-audit` | prompt-cache hit rate and the files that likely invalidated it, read from the harness transcripts (operator-run) | `cousin-cache-audit --days 7` · `cousin-cache-audit --diagnose`; off until config/harness.toml names transcripts_dir |
 | `cousin-health` | which framework components are failing right now (loops, scheduled passes, runners) and since when | `cousin-health` (exit 1 when something fails) · `cousin-health --all` · `cousin-health --json` |
+| `cousin-upkeep` | how much of each cousin's spend went to keeping itself going (heartbeats, boots, its own schedules) versus work, from the stream logs | `cousin-upkeep --days 7 <slug>` · `cousin-upkeep --json`; it changes nothing |
 | `cousin-doctor` | checks the install for what the operator should fix by hand and prints the fix; today: cousin homes open to group or other users, each with its `chmod 700` line (operator-run) | `cousin-doctor` (exit 1 when something needs fixing) · `cousin-doctor homes --json`; it changes nothing |
 | `cousin-gate` | contamination scan for publishable trees | `cousin-gate --root <tree> --denylist <path>` |
 | `cousin-sweep` | fleet-wide memory compaction, every cousin in turn (operator-run, normally from its weekly timer) | `cousin-sweep compact --target both` |

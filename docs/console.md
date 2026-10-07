@@ -642,7 +642,9 @@ marks the job cancelled); a finished one has a delete button. A running
 job whose process died without closing it shows as "lost" (amber, with
 its own filter), within seconds while the console runs; jobs still
 "running" after 24 hours are marked failed by the store's reaper. See
-[jobs and loops](jobs-and-loops.md).
+[jobs and loops](jobs-and-loops.md). Below the jobs, the artifacts the
+cousins recorded with `cousin-artifact`, with "verify checksums" to check
+each file against its recorded sha256.
 
 ## Memory
 

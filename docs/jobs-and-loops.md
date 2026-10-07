@@ -119,6 +119,27 @@ More housekeeping happens when the console lists jobs: anything still
 still runs (a long `ssh ... tail -F` included), and only the newest 1000
 finished rows are kept, together with their logs in `data/job-logs/`.
 
+### Artifacts
+
+A job that builds something (an image, a binary, a report) can record
+what it built as a row instead of a note in `STATUS.md`:
+
+```
+cousin-artifact add out/image.bin --job 15 --commit 3f2a9c1 --note "rev A image"
+cousin-artifact list --mine --verify
+cousin-artifact verify 4
+```
+
+`add` records the file's absolute path, its sha256 and size, measured
+then, with the producing job, the commit it was built from and a one-line
+note. `list` shows them newest first (`--mine`, `--path FILE` or
+`--path DIR/`, `--job N`); `--verify` and `verify ID` check each file
+against its recorded checksum now: `ok`, `changed` or `missing` (`verify`
+exits 1 unless `ok`). The store is `data/artifacts.db` at the install
+root, which every cousin can read: a path or a note there is visible to
+the whole install, so keep private trees out of it. The console's Jobs
+page lists the artifacts below the jobs, with a button to verify them.
+
 ### Automatic tracking from Claude Code
 
 Every cousin records jobs on its own, so it doesn't have to remember. On

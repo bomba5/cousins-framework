@@ -96,6 +96,17 @@ def register():
             running_first=True)
         return 200, {"jobs": rows}
 
+    @router.route("GET", "/api/artifacts")
+    def list_artifacts(req):
+        """Build outputs (cousin_lib.artifacts), newest first; `?job=` filters
+        by the producing job, `?verify=1` checks each file's checksum now."""
+        from cousin_lib import artifacts
+        rows = artifacts.list_rows(job_id=req.int_query("job"), limit=req.int_query("limit", 100))
+        if req.query.get("verify") in ("1", "true"):
+            for r in rows:
+                r["state"] = artifacts.verify(r)
+        return 200, {"ok": True, "artifacts": rows}
+
     @router.route("GET", "/api/jobs/{job_id}")
     def show(req, job_id):
         _reap_lost()

@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.35.0 - 2026-10-07
+
+### Added
+
+- **Build outputs as rows.** `cousin-artifact add FILE --job N --commit
+  SHA --note TEXT` records what a job built: the file's path, sha256 and
+  size, measured then, with the job and the commit it came from. `list`
+  shows them (by owner, path or job), and `verify` or `list --verify`
+  says whether each file is still the recorded one (`ok`, `changed`,
+  `missing`). The console's Jobs page lists them, with a verify button
+  (`GET /api/artifacts`). It replaces the path-plus-checksum notes that
+  went stale in STATUS.md. The store is `data/artifacts.db`, readable by
+  every cousin: keep private paths out of it.
+
 ## 3.34.0 - 2026-10-07
 
 ### Added

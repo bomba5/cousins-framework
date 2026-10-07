@@ -235,6 +235,51 @@ function JobsView() {
           </div>
         </div>
       )}
+      <ArtifactsPanel />
+    </div>
+  );
+}
+
+// Build outputs recorded with cousin-artifact (GET /api/artifacts):
+// path, checksum, size, producing job, commit; "verify" checks each file
+// against its recorded checksum now.
+function ArtifactsPanel() {
+  const [rows, setRows] = React.useState(null);
+  const [checked, setChecked] = React.useState(false);
+  const load = React.useCallback(async (verify) => {
+    const d = await apiGet("/api/artifacts" + (verify ? "?verify=1" : ""));
+    setRows(d ? d.artifacts || [] : []);
+    setChecked(!!verify);
+  }, []);
+  React.useEffect(() => { load(false); }, [load]);
+  if (!rows) return null;
+  const tone = { ok: "green", changed: "amber", missing: "red" };
+  return (
+    <div className="panel" data-artifacts style={{ marginTop: 16, padding: "12px 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="eyebrow">artifacts</span>
+        <span className="muted" style={{ fontSize: 11 }}>build outputs recorded with cousin-artifact</span>
+        <span style={{ flex: 1 }} />
+        {rows.length > 0 && <button className="btn ghost" onClick={() => load(true)}>verify checksums</button>}
+      </div>
+      {rows.length === 0 ? <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>none recorded</div> : (
+        <div className="table-scroll">
+          <table className="data">
+            <thead><tr><th className="num">#</th><th>by</th><th>path</th><th>sha256</th><th className="num">size</th><th>job</th><th>commit</th>{checked && <th>now</th>}<th>note</th></tr></thead>
+            <tbody>{rows.map(r => <tr key={r.id}>
+              <td className="num">{r.id}</td>
+              <td className="mono">{r.created_by}</td>
+              <td className="mono" style={{ wordBreak: "break-all" }}>{r.path}</td>
+              <td className="mono" title={r.sha256}>{r.sha256.slice(0, 12)}</td>
+              <td className="num">{r.size}</td>
+              <td className="mono">{r.job_id ? "#" + r.job_id : ""}</td>
+              <td className="mono">{r.git_commit ? r.git_commit.slice(0, 12) : ""}</td>
+              {checked && <td><span className={"pill " + (tone[r.state] || "")}>{r.state}</span></td>}
+              <td>{r.note || ""}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -878,15 +878,8 @@ def register():
             except chat_api.NotDelivered as err:
                 raise HttpError(503, str(err), stored=False)
             return 200, {"ok": True, "to": to, "id": body.get("id")}
-        import uuid
-        from cousin_lib.console.proxy import retried_send
-        # a remote node's /api/send (the node template) keeps one row per
-        # msg_id, so the retry below never doubles a send that landed; a
-        # chat server that ignores msg_id would store a retried one twice
-        payload["msg_id"] = "peer-" + uuid.uuid4().hex
-        status, body = retried_send(
-            lambda: chat_call(dest, "/api/send", method="POST", payload=payload, timeout=10.0),
-            unreachable=lambda err: isinstance(err, HttpError) and err.status == 502)
+        status, body = chat_call(dest, "/api/send", method="POST", payload=payload,
+                                 timeout=10.0)
         if status != 200:
             return status, body
         return 200, {"ok": True, "to": to, "id": body.get("id")}

@@ -491,7 +491,7 @@ Body `{"hidden": true}`. Sets or removes `[cousin] hidden`. `200 {"ok": true, "s
 
 ### `POST /api/cousins/<slug>/peer`
 
-Send a message from one cousin to another. Body `{"to": "kestrel", "text": "..."}`. To a remote node it goes to the node's `/api/send` under one `msg_id`, tried again after 1 s and 2 s when the node did not answer ([chat API](chat-api.md#send)). Otherwise it's written to Kestrel's chat store and inbox in-process, with `user` set to Wren's display name, so it lands as `(Chat Wren): ...` like `cousin-chat send`. `200 {"ok": true, "to", "id"}`. `400` empty text or `to` is the same cousin, `404` either cousin unknown, `502` when Kestrel has no runner kind (no transport to it), `503 {"ok": false, "error", "stored": false}` when Kestrel's inbox did not take the message (nothing kept: send it again, [chat API](chat-api.md#send)).
+Send a message from one cousin to another, both on this install. Body `{"to": "kestrel", "text": "..."}`. It's written to Kestrel's chat store and inbox in-process, with `user` set to Wren's display name, so it lands as `(Chat Wren): ...` like `cousin-chat send`. `200 {"ok": true, "to", "id"}`. `400` empty text or `to` is the same cousin, `404` either cousin unknown, or Kestrel has no runner kind and no chat port (no transport to it), `503 {"ok": false, "error", "stored": false}` when Kestrel's inbox did not take the message (nothing kept: send it again, [chat API](chat-api.md#send)).
 
 ### `GET /api/cousins/<slug>/flip`
 
@@ -541,7 +541,7 @@ It needs `transcripts_dir` in `config/harness.toml`. Every transcript in the cou
 
 ## Chat
 
-No cousin on this machine runs a chat server of its own. For a runner cousin (`[agent] runner`, its home on this machine) the console answers these routes itself over the cousin's `data/chat.db`, through `server/chat_api.py`, with the bodies and `400` texts of the [chat API](chat-api.md). Its send stores the row and delivers it to the cousin's inbox (a `chat` item on the sender's thread, an image handed on as its file), then fires the cousin's chat hooks; a reaction tells the cousin with a `reaction` item. The console stores no messages. The cousin comes from `cousin` in the query or body. `400` bad slug, `404` unknown cousin. Any other cousin is forwarded upstream by its host and port: `502 {"ok": false, "error": ...}` if that server is unreachable, there is no port, or it answers non-JSON (a local cousin with no runner kind has none to answer); any JSON answer comes back with its own status.
+No cousin on this machine runs a chat server of its own. For a runner cousin (`[agent] runner`, its home on this machine) the console answers these routes itself over the cousin's `data/chat.db`, through `server/chat_api.py`, with the bodies and `400` texts of the [chat API](chat-api.md). Its send stores the row and delivers it to the cousin's inbox (a `chat` item on the sender's thread, an image handed on as its file), then fires the cousin's chat hooks; a reaction tells the cousin with a `reaction` item. The console stores no messages. The cousin comes from `cousin` in the query or body. `400` bad slug, `404` unknown cousin. Any other cousin is forwarded upstream by its host and port (a send is tried three times, below): `502 {"ok": false, "error": ...}` if that server is unreachable, there is no port, or it answers non-JSON (a local cousin with no runner kind has none to answer); any JSON answer comes back with its own status.
 
 For a slug that isn't local but is a hive node, the console proxies to where the node last checked in from and sends the node's token as a bearer. A revoked node is `404`, one that never checked in is `502`. Remote cousins have no pane, no inbox files and no media folders on this machine.
 
@@ -555,7 +555,7 @@ Query: `cousin` (required), `q`, `user`, `archived`. Forwards to `/api/search`. 
 
 ### `POST /api/chat/send`
 
-Body `{"cousin": "wren", "user": "ana", "message": "hi", "image": "data:image/png;base64,...", "reply_to": {...}}`. `cousin` and `user` required. Forwards `user`, `message`, and `image` / `reply_to` when present to `/api/send` with a 15 second timeout. Answers `{"ok": true, "id", "timestamp"}`. A message stored but not taken by the cousin's inbox is `503 {"ok": false, "error", "id", "stored": true}` ([chat API](chat-api.md#send)).
+Body `{"cousin": "wren", "user": "ana", "message": "hi", "image": "data:image/png;base64,...", "reply_to": {...}}`. `cousin` and `user` required. For a cousin on this machine the console stores and delivers it itself; for a remote node it forwards `user`, `message`, and `image` / `reply_to` when present to the node's `/api/send` with a `msg_id` (`console-<hex>`), 15 seconds a try, tried again after 1 s and 2 s when the node did not answer or answered a `5xx` (so up to about 48 s), the same `msg_id` every try. Answers `{"ok": true, "id", "timestamp"}`. A message the cousin's inbox did not take is `503 {"ok": false, "error", "stored": false}`: nothing was kept ([chat API](chat-api.md#send)).
 
 ### `POST /api/chat/archive`
 

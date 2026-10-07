@@ -63,7 +63,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 # The runtime's own version, reported at each checkin.
-NODE_VERSION = "0.2.0"
+NODE_VERSION = "0.3.0"          # 0.3.0: send msg_id dedup, queen retries
 DEFAULT_CHECKIN_SECONDS = 60
 
 # The three reply markers. A payload written as <placeholder> is the

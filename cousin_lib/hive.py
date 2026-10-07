@@ -852,8 +852,9 @@ HIVE_SEND_WAITS_S = (1.0, 2.0)
 
 def hive_send(*, queen_url, token, to, body, msg_id, sleep=None):
     """One message through the queen's /hive/msg, tried again after 1 s
-    and 2 s when the queen does not answer: the queen keeps one row per
-    (recipient, id), so a retry under the same msg_id never doubles it."""
+    and 2 s when the queen does not answer or answers 429/5xx (a refusal,
+    another 4xx, is not retried): the queen keeps one row per (recipient,
+    id), so a retry under the same msg_id never doubles it."""
     import time
     sleep = sleep or time.sleep
     waits = list(HIVE_SEND_WAITS_S)

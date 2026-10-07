@@ -4,7 +4,7 @@ The calls that read and write a [cousin](../glossary.md#cousin)'s chat history, 
 
 ## Where it runs
 
-No cousin on this machine runs a chat server or has a port. The console, `cousin-chat`, `cousin-reply` and the Telegram bridge make these calls in-process, through `cousin_lib/server/chat_api.py` (`history`, `search`, `send`, `reply`, `archive`, `react`), over the cousin's own `data/chat.db`. Each takes the body or query described below and gives back the JSON described below, or the `400` text (and a send the inbox did not take raises `NotDelivered`, below). A script on this machine goes through `cousin-chat` or the console's chat routes ([the console API](console-api.md)), which answer with these calls.
+No cousin on this machine runs a chat server or has a port. The console, `cousin-chat`, `cousin-reply` and the Telegram bridge make these calls in-process, through `cousin_lib/server/chat_api.py` (`history`, `search`, `send`, `reply`, `archive`, `react`), over the cousin's own `data/chat.db`. Each takes the body or query described below and gives back the JSON described below, or the `400` text (and a send the [inbox](../glossary.md#inbox) did not take raises `NotDelivered`, below). A script on this machine goes through `cousin-chat` or the console's chat routes ([the console API](console-api.md)), which answer with these calls.
 
 A local cousin with no `[agent] runner` has nothing to deliver to: 2.0.0 has no legacy tmux [lane](../glossary.md#lane). It is refused by name, and `cousin-chat send` to it exits 1.
 

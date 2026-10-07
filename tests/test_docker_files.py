@@ -400,6 +400,15 @@ class TestDockerfile(unittest.TestCase):
         self.assertIn("--from=builder /opt/venv /opt/venv", copies)
         self.assertIn("--from=builder /opt/framework /opt/framework", copies)
 
+    def test_the_source_is_readable_whatever_the_clone_umask(self):
+        # COPY keeps the checkout's modes: a clone made under umask 077
+        # gave a 0700 entrypoint the container user could not run. The
+        # builder normalises the tree before anything is installed in it.
+        builder = [a for w, a in self._stage("builder")[2] if w == "RUN"]
+        first = " ".join(builder[0].split())
+        self.assertTrue(first.startswith("chmod -R u=rwX,go=rX /opt/framework &&"),
+                        first)
+
     def test_pip_is_removed_from_the_image(self):
         # The venv's pip in the builder, the base image's own in the final
         # stage, as root: before the one USER line.

@@ -24,9 +24,13 @@ ARG PYTHON_IMAGE=python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181
 # place with no dependency resolution and the locked build backend instead
 # of a freshly downloaded one; pip check holds the result together. The
 # backend and pip leave the venv after: nothing at run time needs them.
+# COPY keeps the checkout's modes, so a clone made under umask 077 would
+# leave the code unreadable to the container user: the tree is normalised
+# to 0755 directories and executables, 0644 for the rest, root-owned.
 FROM ${PYTHON_IMAGE} AS builder
 COPY . /opt/framework
-RUN python -m venv /opt/venv \
+RUN chmod -R u=rwX,go=rX /opt/framework \
+ && python -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir --require-hashes \
       -r /opt/framework/docker/requirements.txt \
  && /opt/venv/bin/pip install --no-cache-dir --no-deps --no-build-isolation \

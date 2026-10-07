@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.28.1 - 2026-10-07
+
+### Fixed
+
+- **A clone made under a strict umask builds a working image.** `COPY`
+  kept the checkout's modes, so a clone under `umask 077` gave the
+  container user an entrypoint it could not read and the container
+  restarted in a loop. The build now makes the source tree world-readable
+  (0755 directories and executables, 0644 the rest) before installing it.
+
 ## 3.28.0 - 2026-10-06
 
 ### Added

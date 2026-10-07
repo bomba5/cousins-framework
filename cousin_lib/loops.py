@@ -447,12 +447,37 @@ _BEAT_FILES = ("CLAUDE.md", "STATUS.md", "MEMORY.md")
 _BEAT_INLINE_CAP = 6000
 
 
+def _beat_entry(name, path, text):
+    """What the beat says about one changed file. STATUS.md: its live
+    `## Open loops` section only (status_sections), never the history
+    above or below it, cut at _BEAT_INLINE_CAP with a note. CLAUDE.md
+    and MEMORY.md: a pointer, never the body: the identity file is in
+    the system prompt already, and MEMORY.md is append-only history."""
+    from cousin_lib import status_sections
+    if name == "STATUS.md":
+        section = status_sections.open_loops_section(text)
+        if not section:
+            return ("--- STATUS.md changed (%s): it has no `## Open loops` section;"
+                    " read the file if you need it ---" % path)
+        if len(section) > _BEAT_INLINE_CAP:
+            section = (section[:_BEAT_INLINE_CAP]
+                       + "\n[... cut at %d characters: read %s for the rest]"
+                       % (_BEAT_INLINE_CAP, path))
+        return ("--- STATUS.md changed since the last heartbeat (%s); its open loops now ---\n%s\n"
+                "--- end STATUS.md open loops ---" % (path, section.rstrip()))
+    return ("--- %s changed since the last heartbeat (%s, %d characters):"
+            " read it if you need what changed ---" % (name, path, len(text)))
+
+
 def _compose_beat(home, now):
     """(prompt, commit) for the context beat, or (None, None) when
     composition fails. The mtime state is captured here but WRITTEN
     only by commit() - which the tick calls after delivery succeeded.
     The source wrote state before injecting; a failed inject lost the
-    delta and the next beat reported 'no changes' over real ones."""
+    delta and the next beat reported 'no changes' over real ones.
+
+    A changed STATUS.md is shown as its live open loops only; a changed
+    CLAUDE.md or MEMORY.md as a pointer (_beat_entry)."""
     home = Path(home)
     state_path = home / "data" / "heartbeat-mtimes.json"
     try:
@@ -468,13 +493,9 @@ def _compose_beat(home, now):
             continue
         current[name] = mtime
         if seen.get(name) != mtime:
-            body = path.read_text(errors="replace")[:_BEAT_INLINE_CAP]
-            changed.append(
-                "--- %s CHANGED since last heartbeat (%s) ---\n%s\n"
-                "--- end %s ---" % (name, path, body, name))
+            changed.append(_beat_entry(name, path, path.read_text(errors="replace")))
     if changed:
-        delta = ("These are the AUTHORITATIVE current contents:\n\n"
-                 + "\n\n".join(changed))
+        delta = "What changed since the last heartbeat:\n\n" + "\n\n".join(changed)
     else:
         delta = ("No identity files changed since the last heartbeat;"
                  " use cousin-memory search for anything older.")

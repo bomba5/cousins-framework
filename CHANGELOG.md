@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.32.1 - 2026-10-07
+
+### Fixed
+
+- **The heartbeat sends the open loops, not whole files.** It pasted
+  every changed `CLAUDE.md`, `STATUS.md` and `MEMORY.md` up to 6000
+  characters and called that the "AUTHORITATIVE current contents", so a
+  cousin got STATUS.md's stale headers and archived sections as current,
+  and a long STATUS.md lost its open loops past the cut. Now a changed
+  `STATUS.md` sends only its live `## Open loops` section (cut with a
+  pointer past 6000 characters), and a changed `CLAUDE.md` or
+  `MEMORY.md` gets a one-line pointer instead of its body.
+
 ## 3.32.0 - 2026-10-07
 
 ### Added

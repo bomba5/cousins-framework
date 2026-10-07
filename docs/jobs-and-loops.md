@@ -270,8 +270,11 @@ drift). Loop details are in [reference/loops.md](reference/loops.md).
 ### Heartbeats
 
 The context heartbeat is built in. Every hour by default the daemon
-checks the cousin's `CLAUDE.md`, `STATUS.md` and `MEMORY.md`, pastes any
-that changed since the last beat into a prompt, and asks the cousin to
+checks the cousin's `CLAUDE.md`, `STATUS.md` and `MEMORY.md`. For a
+changed `STATUS.md` it pastes only the live `## Open loops` section (up
+to 6000 characters, then a pointer to the file), never the history
+around it; a changed `CLAUDE.md` or `MEMORY.md` gets a one-line pointer,
+not its body. Then it asks the cousin to
 checkpoint with `cousin-memory activity` and reply with one line,
 `Heartbeat at HH:MM`. If nothing changed it says so and points at
 `cousin-memory search`. Which versions the cousin has seen is kept in

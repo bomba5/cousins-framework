@@ -145,15 +145,19 @@ A file on another machine is recorded with `--host` and the checksum and
 size measured there (`sha256sum`, `stat -c %s`); its path must be
 absolute on that host. It reads `unverified` until you ask: `verify ID
 --remote` or `list --verify --remote` runs `sha256sum` on the host over
-ssh (batch mode, no prompts) and answers `ok`, `changed`, `missing` or
+ssh (batch mode, no prompts, `LC_ALL=C`) and answers `ok`, `changed`, `missing` or
 `unreachable`.
 
 The store is `data/artifacts.db` at the install root, which every cousin
 can read: a path, a host or a note there is visible to the whole
 install. For work whose paths must stay private, `--private --label L`
-puts only the label, checksum and size in the shared row; the path and
-host go to the owner's home (`data/artifacts-private.json`), so only the
-owner can verify it, and everyone else sees `private`.
+keeps the path and host out of the shared row: they go to the owner's
+home (`data/artifacts-private.json`), so only the owner can verify it
+and everyone else sees `private` (the owner sees `unknown` if the entry
+is gone). The label, checksum, size, mtime, job id and owner are still
+shared, and `--note` and `--commit` are refused on a private row. An
+`rm` from outside the cousin drops the shared row; the owner's next
+private write prunes the path from its home.
 
 `list` shows rows newest first, at most 100 (`--mine`, `--job N`,
 `--path FILE`, or `--path DIR/` for everything under a directory; both

@@ -7,14 +7,16 @@ keeps them in one place, and `verify` says whether the file is still the
 one recorded: same checksum, changed, or gone.
 
 The store is <root>/data/artifacts.db, the install's like jobs.db: every
-cousin can read it. A private row (`--private --label L`) keeps only the
-label there; its path stays in the owner's home
+cousin can read it. A private row (`--private --label L`) keeps its path
+and host out of it (and takes no note or commit); they stay in the owner's home
 (<home>/data/artifacts-private.json), so only the owner can verify it. A
 remote row (`--host H`) records a file on another machine with the
 checksum and size measured there; verifying it runs `sha256sum` on that
 host over ssh, and only when asked (`--remote`).
 """
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -73,7 +75,21 @@ def _private_paths(home):
         return {}
 
 
-def _save_private(home, paths):
+@contextlib.contextmanager
+def _private_lock(home):
+    """Serialise one owner's read-modify-write of its private paths."""
+    lock = _private_file(home).with_suffix(".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock, "a") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        yield
+
+
+def _save_private(home, paths, conn):
+    """Write the owner's private paths, dropping entries whose row is gone
+    (an operator's rm can't reach into the owner's home)."""
+    live = {str(r[0]) for r in conn.execute("SELECT id FROM artifacts WHERE private=1")}
+    paths = {k: v for k, v in paths.items() if k in live}
     path = _private_file(home)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
@@ -119,6 +135,8 @@ def add(path, *, created_by, job_id=None, git_commit=None, note=None, host=None,
         raise ValueError("no job #%d" % job_id)
     if private and not (label and home):
         raise ValueError("a private row needs --label and a cousin home")
+    if private and (note or git_commit):
+        raise ValueError("a private row shares its note and commit; leave them out (--label names it)")
     mtime = None
     if host:
         _check_host(host)
@@ -150,9 +168,10 @@ def add(path, *, created_by, job_id=None, git_commit=None, note=None, host=None,
             " :job_id, :git_commit, :note)", row)
         row_id = cur.lastrowid
         if private:
-            paths = _private_paths(home)
-            paths[str(row_id)] = {"path": path, "host": host}
-            _save_private(home, paths)
+            with _private_lock(home):
+                paths = _private_paths(home)
+                paths[str(row_id)] = {"path": path, "host": host}
+                _save_private(home, paths, conn)
         conn.commit()
         return dict(row, id=row_id)
     finally:
@@ -181,12 +200,11 @@ def remove(artifact_id, *, by=None, home=None):
     try:
         conn.execute("DELETE FROM artifacts WHERE id=?", (artifact_id,))
         conn.commit()
+        if row["private"] and home and by == row["created_by"]:
+            with _private_lock(home):
+                _save_private(home, _private_paths(home), conn)
     finally:
         conn.close()
-    if row["private"] and home and by == row["created_by"]:
-        paths = _private_paths(home)
-        if paths.pop(str(artifact_id), None) is not None:
-            _save_private(home, paths)
     return True
 
 
@@ -238,7 +256,7 @@ def _remote_sha(host, path):
     try:
         out = subprocess.run(
             ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host,
-             "sha256sum -- " + shlex.quote(path)],
+             "LC_ALL=C sha256sum -- " + shlex.quote(path)],
             capture_output=True, text=True, timeout=SSH_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired):
         return None, "unreachable"
@@ -255,7 +273,7 @@ def verify(row, *, quick=False, remote=False, me=None, home=None):
     `changed` (other size), `missing`, `unreadable`. A remote row is
     `unverified` unless `remote` (then hashed over ssh; `unreachable` when
     ssh fails); a private row is `private` unless `me` is its owner with
-    `home` set."""
+    `home` set, and `unknown` when its entry is gone from that home."""
     path, host = _where(row, me=me, home=home)
     if path is None:
         return host

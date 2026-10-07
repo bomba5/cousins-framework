@@ -140,7 +140,7 @@ class TestRemote(ArtifactCase):
         with mock.patch.object(artifacts.subprocess, "run", return_value=done) as run:
             self.assertEqual(artifacts.verify(row, remote=True), "ok")
         argv = run.call_args.args[0]
-        self.assertEqual(argv[-2:], ["buildbox", "sha256sum -- '/srv/out/it'\"'\"'s.bin'"])
+        self.assertEqual(argv[-2:], ["buildbox", "LC_ALL=C sha256sum -- '/srv/out/it'\"'\"'s.bin'"])
         gone = mock.Mock(returncode=1, stdout="", stderr="sha256sum: x: No such file or directory")
         with mock.patch.object(artifacts.subprocess, "run", return_value=gone):
             self.assertEqual(artifacts.verify(row, remote=True), "missing")
@@ -151,6 +151,10 @@ class TestRemote(ArtifactCase):
 class TestPrivate(ArtifactCase):
     def test_the_shared_row_keeps_only_the_label(self):
         self.assertEqual(self.main(["add", str(self.image), "--private"])[0], 2)
+        self.assertEqual(self.main(["add", str(self.image), "--private", "--label", "A",
+                                    "--note", "employer tree"])[0], 2)
+        self.assertEqual(self.main(["add", str(self.image), "--private", "--label", "A",
+                                    "--commit", "abc123"])[0], 2)
         rc, out = self.main(["add", str(self.image), "--private", "--label", "board A image",
                              "--json"])
         self.assertEqual(rc, 0)
@@ -172,3 +176,12 @@ class TestPrivate(ArtifactCase):
         self.assertEqual(self.main(["verify", str(row["id"])])[0], 0)
         self.assertEqual(self.main(["rm", str(row["id"])])[0], 0)
         self.assertEqual(json.loads((home / "data" / "artifacts-private.json").read_text()), {})
+
+    def test_an_operator_rm_is_pruned_at_the_owners_next_write(self):
+        home = self.root / "cousins" / "wren"
+        a = artifacts.add(self.image, created_by="wren", private=True, label="A", home=home)
+        artifacts.remove(a["id"])                   # the operator: no reach into the home
+        b = artifacts.add(self.image, created_by="wren", private=True, label="B", home=home)
+        paths = json.loads((home / "data" / "artifacts-private.json").read_text())
+        self.assertEqual(list(paths), [str(b["id"])])
+        self.assertEqual(artifacts.verify(a, me="wren", home=home), "unknown")

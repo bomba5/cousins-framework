@@ -14,8 +14,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   says whether each file is still the recorded one (`ok`, `changed`,
   `missing`, `unreadable`); `rm` drops a row. A file on a build host is
   recorded with `--host H --sha256 X --size N` and hashed over ssh only
-  on `--remote`. A private row (`--private --label L`) shares only its
-  label; its path stays in the owner's home and only the owner can
+  on `--remote`. A private row (`--private --label L`) keeps its path and
+  host in the owner's home (no note or commit), and only the owner can
   verify it. The console's Jobs page lists them with a quick check (size
   and mtime, no hashing), a per-row hash and remove (`GET
   /api/artifacts`, `GET /api/artifacts/<id>/verify`, `DELETE

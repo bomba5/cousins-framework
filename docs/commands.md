@@ -54,6 +54,7 @@ Each command has one class, so you know which ones to learn first:
 | `cousin-version` | core | the version and commit you run |
 | `cousin-watch` | core | a cousin's reasoning, live |
 | `cousin-cache-audit` | optional | the prompt cache hit rate, from the harness transcripts |
+| `cousin-upkeep` | optional | how much of each cousin's spend is upkeep (heartbeats, boots) and how much is work |
 | `cousin-chat-import` | optional | import a cousin's chat history from an older install |
 | `cousin-hive` | optional | the queen for cousins on other machines, and its node tokens |
 | `cousin-image` | optional | generate an image ([media](media.md)) |
@@ -849,6 +850,22 @@ lists each suspect invalidator with its turn pair.
 
 ```
 cousin-cache-audit --days 7 --diagnose
+```
+
+`cousin-upkeep` splits each cousin's spend over the last `--days` (default
+7) into upkeep and work, from what the runner already wrote: each turn's
+`result` and `usage` events in `data/stream/`, and the inbox rows the turn
+answered. Upkeep is a turn that answered only the context heartbeat, a
+boot or flip digest, or a memory proposal; a turn that also answered a
+chat, a meeting turn or a schedule is work. A turn with no inbox row (a
+drained or requeued result) is `other`. It prints one line per cousin and
+a row per kind; `--json` prints the numbers; name cousins to report only
+those. On a login lane the dollars are the API-equivalent estimate the
+tokens page shows: read them as a share. The console's Tokens page shows
+the same split (`GET /api/tokens/upkeep`).
+
+```
+cousin-upkeep --days 7 wren
 ```
 
 `cousin-version` prints the framework version (and commit in a git checkout),

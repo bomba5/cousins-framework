@@ -994,6 +994,20 @@ def register():
                                                 "phase": "cancelled"})
         return 200, {"ok": True, "slug": slug, "was_pending": was_pending}
 
+    @router.route("GET", "/api/tokens/upkeep")
+    def tokens_upkeep(req):
+        """Each cousin's spend split into upkeep and work (cousin_lib.upkeep),
+        over `?days=` (default 7)."""
+        from cousin_lib import upkeep
+        days = req.int_query("days", 7)
+        if days < 1 or days > 90:
+            raise HttpError(400, "days must be 1-90")
+        from cousin_lib.config import FrameworkConfig
+        fw = FrameworkConfig(req.server.root)
+        return 200, {"ok": True, "days": days,
+                     "cousins": {c.slug: upkeep.measure(c.home, days=days)
+                                 for c in fw.list_cousins()}}
+
     @router.route("GET", "/api/tokens")
     def token_series(req):
         server = req.server

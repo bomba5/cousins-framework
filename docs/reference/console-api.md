@@ -545,6 +545,10 @@ No cousin on this machine runs a chat server of its own. For a runner cousin (`[
 
 For a slug that isn't local but is a hive node, the console proxies to where the node last checked in from and sends the node's token as a bearer. A revoked node is `404`, one that never checked in is `502`. Remote cousins have no pane, no inbox files and no media folders on this machine.
 
+### `GET /api/tokens/upkeep`
+
+Each cousin's spend split into upkeep and work over `?days=` (1-90, default 7), as `cousin-upkeep --json` gives it: `{"ok": true, "days", "cousins": {"<slug>": {"days", "turns", "cost_usd", "tokens", "classes": {"upkeep" | "work" | "other": {"turns", "cost_usd", "tokens"}}, "kinds": {"<kind>": {...}}, "upkeep_share"}}}`. A kind is `heartbeat`, `schedule`, `loop`, or the inbox row's source (`chat`, `meeting`, `boot`, `flip`, `propose`, ...); `none` is a turn with no inbox row, `gone` one whose rows are gone. `upkeep_share` is null for a cousin with no cost. `400` for days out of range. See [commands](../commands.md#maintenance).
+
 ### `GET /api/messages`
 
 Query: `cousin`, `user` (both required), `limit` (default 200), `before`, `since`, `archived` (`0`, `1`, `all`; default `0`). Answers the chat API's `/api/history` body, `{"messages", "total", "has_more"}`, plus `"cousin"`. Each message gets an `attachment: {"url", "kind"}` when there is a file for it: an inbound image under `chat/inbound/<id>.<ext>` (kind `image`), or the row's `attachment_path` when it sits in `chat/images/`, `chat/audio/` or `chat/video/`. `kind` is `image`, `audio` or `video` (a stored `voice` shows as `audio`).

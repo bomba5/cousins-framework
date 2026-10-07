@@ -165,12 +165,13 @@ flight. After a death, a fresh session gets:
 ```
 [runner] a restart cut your last turn before this session began (at 2026-10-02T12:30:05+00:00: the last runner died with a row claimed). This is a new session, so you cannot see that turn.
 
-Before the cut, that turn had already run these tool calls (most recent last). The message it was answering is delivered again after this line: do not repeat what already ran, and check the state of anything marked NO RESULT before running it again.
+Before the cut, that turn had already run these tool calls (most recent last). The message it was answering is delivered again after this line: do not repeat what already ran, and check the state of anything marked NO RESULT before running it again. To check a NO RESULT call, look at its effect, don't rerun it: after a `git push`, compare `git ls-remote <remote> <branch>` with your commit; after a command over ssh, read the remote state over ssh first (the file, the service, the device) before acting again; after a send or a reply, read the chat history; after a file write, read the file.
 - Bash `git push origin docs/notes` (finished)
 - mcp__cousin__send `The notes branch is up.` (STARTED, NO RESULT: it may or may not have happened)
 ```
 
-After a stop, the list says instead that the message is not delivered
+The last sentence of the head, how to check a NO RESULT call, is there
+only when one of the listed calls has no result. After a stop, the list says instead that the message is not delivered
 again, to continue its work if still due without repeating what already
 ran, and quotes it: `The message was: "Push the notes branch and tell ana it
 is up."`. After a death whose recorded turn has every row closed, the file

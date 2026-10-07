@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.32.2 - 2026-10-07
+
+### Fixed
+
+- **A restart says how to check a call that left no result.** When a
+  cut turn's list has a call marked `STARTED, NO RESULT`, the note now
+  says how to look at its effect instead of running it again: compare
+  `git ls-remote` after a push, read the remote state over ssh first,
+  read the chat history after a send, read the file after a write.
+
 ## 3.32.1 - 2026-10-07
 
 ### Fixed

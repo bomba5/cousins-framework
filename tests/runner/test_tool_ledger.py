@@ -25,6 +25,19 @@ class TestToolLedger(unittest.TestCase):
         self.assertIn("`/etc/x` (failed)", text)
         self.assertIn("`hi` (STARTED, NO RESULT", text)
 
+    def test_a_no_result_call_comes_with_how_to_check_it(self):
+        # #252: the notice says HOW to look before redoing, a push first
+        tool_ledger.started(self.home, "p", "Bash", {"command": "git push origin main"})
+        for comes_again in (True, False):
+            text = tool_ledger.lines(self.home, comes_again=comes_again)
+            self.assertIn("git ls-remote", text)
+            self.assertIn("over ssh", text)
+
+    def test_no_hint_when_every_call_has_a_result(self):
+        tool_ledger.started(self.home, "p", "Bash", {"command": "git push origin main"})
+        tool_ledger.finished(self.home, "p")
+        self.assertNotIn("git ls-remote", tool_ledger.lines(self.home, comes_again=True))
+
     def test_read_only_tools_and_their_results_leave_no_line(self):
         tool_ledger.started(self.home, "r", "Read", {"file_path": "/x"})
         tool_ledger.finished(self.home, "r")

@@ -2,7 +2,7 @@
 
 The loop data model and exactly how the loops daemon decides what to deliver and when. Read it when a loop didn't fire (or fired twice) and you want to know why. For setting loops up, read [jobs and loops](../jobs-and-loops.md).
 
-One process, `cousin-loops run`, owns all scheduling: loops, context heartbeats, trigger files, one-shots and scheduled [flips](../glossary.md#flip). Nothing else fires anything. The console, the CLIs and scripts only read its state or leave requests for it to pick up on its next tick.
+One process, `cousin-loops run`, owns all scheduling: loops, context heartbeats, trigger files, one-shots, scheduled [flips](../glossary.md#flip) and the outbox's retries. Nothing else fires anything. The console, the CLIs and scripts only read its state or leave requests for it to pick up on its next tick.
 
 ```sh
 cousin-loops run                # the daemon: a tick every 30 s, forever

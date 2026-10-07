@@ -238,3 +238,95 @@ class TestSurfaces(OutboxCase):
         _, seen = self.send(http_error(502))
         self.assertEqual([r["msg_id"] for r in ob.list_rows(self.root, state="pending")], seen)
         self.assertEqual(ob.list_rows(self.root, state="delivered"), [])
+
+
+class TestReviewFixes(OutboxCase):
+    """#245 review: a fresh clock per row, a pass budget, one failure per
+    peer per pass, the window counted from the first attempt's start, a
+    broken-off answer retried, a refused cousin final at the gate."""
+
+    def _rows(self, n):
+        ids = []
+        for _ in range(n):
+            _, seen = self.send(http_error(503))
+            ids.append(seen[0])
+        return ids
+
+    def test_a_slow_send_does_not_let_the_next_row_out_past_the_deadline(self):
+        ids = self._rows(2)
+        created = max(r["created"] for r in outbox.list_rows(self.root))
+        ticks = [created + 800, created + 800, created + 845]
+
+        def clock():
+            return ticks.pop(0) if ticks else created + 846
+        sent = []
+
+        def slow(peer, message, msg_id):
+            sent.append(msg_id)             # delivered, but it took 45 s
+        with mock.patch("cousin_lib.outbox.time.time", clock):
+            out = outbox.drain(self.root, send=slow, budget_s=1000)
+        # the second row is past created+840 by the time its turn comes
+        self.assertEqual(sent, [ids[0]])
+        self.assertIn(ids[1], out["gave_up"])
+
+    def test_a_pass_stops_at_its_budget(self):
+        ids = self._rows(3)
+        created = outbox.list_rows(self.root)[-1]["created"]
+        out = outbox.drain(self.root, send=lambda *a: None, now=created + 20, budget_s=-1)
+        self.assertEqual(out, {"delivered": [], "gave_up": [], "retrying": []})
+        self.assertEqual(len(outbox.list_rows(self.root, state="pending")), 3)
+
+    def test_one_failure_to_a_peer_skips_its_other_rows_this_pass(self):
+        ids = self._rows(3)
+        created = outbox.list_rows(self.root)[-1]["created"]
+        sent = []
+
+        def down(peer, message, msg_id):
+            sent.append(msg_id)
+            raise urllib.error.URLError("refused")
+        out = outbox.drain(self.root, send=down, now=created + 20)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(out["retrying"], sent)
+
+    def test_the_window_starts_when_the_first_attempt_started(self):
+        with mock.patch("time.time", side_effect=[1000.0] + [1012.0] * 50):
+            self.send(http_error(504))
+        [row] = outbox.list_rows(self.root)
+        self.assertEqual(row["created"], 1000.0)
+
+    def test_a_broken_off_answer_is_retried(self):
+        import http.client
+        self.assertEqual(outbox.classify(http.client.IncompleteRead(b"")), outbox.QUEUED_FOR_RETRY)
+
+    def test_nobody_is_told_twice(self):
+        self._rows(1)
+        row = outbox.list_rows(self.root)[0]
+        conn = outbox._db(self.root)
+        try:
+            self.assertEqual(outbox._finish(conn, row, outbox.DELIVERED, None, row["created"]), 1)
+            self.assertEqual(outbox._finish(conn, row, outbox.GAVE_UP, "x", row["created"]), 0)
+        finally:
+            conn.close()
+
+    def test_a_409_on_a_retry_says_the_peer_already_had_it(self):
+        self._rows(1)
+        row = outbox.list_rows(self.root)[0]
+        outbox.drain(self.root, send=lambda *a: (_ for _ in ()).throw(http_error(409)),
+                     now=row["created"] + 20)
+        [item] = self._raw_inbox()
+        self.assertIn("already had this message id", item["body"])
+
+    def test_the_gate_refuses_a_cousin_with_no_runner_for_good(self):
+        import time as _t
+        from cousin_lib import peer_inbound
+        from cousin_lib.chat import DeliveryRefused
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "%s"\nname = "Wren"\npeer_visible = true\n[agent]\nrunner = "fake"\n'
+            % self.home.name)
+        with mock.patch("cousin_lib.chat.deliver_to", side_effect=DeliveryRefused("no runner")):
+            with self.assertRaises(peer_inbound.Refused) as caught:
+                peer_inbound.accept(self.root, identity="kestrel", display="Kestrel",
+                                    to=self.home.name, message="hi", msg_id="kestrel-0000000009",
+                                    sent_at=_t.time(), allowed=lambda s: True)
+        self.assertEqual(caught.exception.status, 404)
+        self.assertEqual(outbox.classify(http_error(404)), outbox.PERMANENT)

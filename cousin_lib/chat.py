@@ -288,8 +288,10 @@ def _post_external(peer, payload, guard, *, root=None, sender_slug=None):
     if not peer.token_file:
         check_peer_address(peer, guard)
         return _post(peer, payload, {})
+    import time
     from cousin_lib import outbox
     msg_id = uuid.uuid4().hex
+    first = time.time()
     try:
         return post_signed(root, peer, payload["message"], msg_id, guard=guard)
     except (MissingConfigError, PeerAddressRefused):
@@ -301,7 +303,7 @@ def _post_external(peer, payload, guard, *, root=None, sender_slug=None):
         if kind == outbox.PERMANENT or root is None or not sender_slug:
             raise
         outbox.enqueue(root, msg_id=msg_id, sender=sender_slug, dest=peer.slug,
-                       message=payload["message"], error=outbox.describe(err))
+                       message=payload["message"], error=outbox.describe(err), created=first)
         return {"ok": True, "queued": True, "msg_id": msg_id,
                 "note": "not confirmed yet (%s): the outbox sends it again under the same"
                         " id for up to 14 minutes and tells you how it ended"

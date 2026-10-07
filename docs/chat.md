@@ -261,20 +261,33 @@ the secret itself is never sent. The keys, and the peer's side
 [external-peers.toml](configuration.md#external-peerstoml).
 
 A signed send that can't be confirmed isn't lost. If the peer answers a
-5xx or 429, or the connection fails or times out, the message goes to
-the outbox (`data/outbox.db`) and the send answers `{"ok": true,
-"queued": true, "msg_id", "note"}`. The loops daemon sends it again on
-its ticks, 15 s, 30 s, 1, 2, 4 and then every 5 minutes, always under the
-same `msg_id` with a fresh `sent_at`. The peer's gate delivers an id only
-once, so a retry of a message that had landed answers 409 and counts as
-delivered, never shown twice. The outbox stops after 14 minutes (inside
-the 15 the gate remembers an id for), or at once on any other 4xx. Either
+5xx or 429, or the connection fails, breaks off or times out, the
+message goes to the outbox (`data/outbox.db`) and the send answers
+`{"ok": true, "to", "id": null, "queued": true, "msg_id", "note"}`
+(`cousin-chat send` prints that; the runner's `send` tool returns it).
+The loops daemon sends it again on its ticks, at least 15 s, 30 s, 1, 2,
+4 and then 5 minutes apart (seven tries in all, at about 0, 15 s, 45 s,
+2, 4, 8 and 13 minutes), always under the same `msg_id` with a fresh
+`sent_at`. The peer's gate delivers an id only once, so a retry of a
+message that had landed answers 409 and counts as delivered, never shown
+twice. Nothing is sent more than 14 minutes after the first attempt
+started (inside the 15 the gate remembers an id for). The outbox gives
+up at once on any other 4xx, a redirect or an error that won't pass on
+its own, when the peer is gone from `config/external-peers.toml` or lost
+its `token_file`, and on a row whose 14 minutes ran out while the
+daemon was down. A 5xx the peer gives for good (its 503 for an entry
+with no `reach`) is still retried until the 14 minutes run out. Either
 way the sending cousin gets a `system` item from `framework` saying how
 it ended (`[fw-outbox] Your message to kestrel ... was delivered on
-attempt 3`, or `was NOT delivered` with the last error). A legacy peer
-(no `token_file`) has no id to dedup by and is sent once, never retried.
-`cousin-chat outbox` and the console's System page (install config,
-under external peers) list what the outbox holds.
+attempt 3`, or `was NOT delivered` with the last error). One pass sends
+for at most 20 seconds and stops trying a peer after its first failure,
+so a dead peer never holds the daemon's tick; and a retried message can
+arrive after one sent later straight away, so the outbox keeps no order
+between them. A legacy peer (no `token_file`) has no id to dedup by and
+is sent once, never retried. `cousin-chat outbox` and the console's
+System page (install config, under external peers) list what the
+outbox holds.
+
 The address must pass the same allowlist the console uses (loopback,
 private ranges, plus `config/net-allowlist.json`). The request goes
 direct, no proxy, and a redirect is refused. A local cousin with the

@@ -297,6 +297,7 @@ was last seen. One ok result resets the streak.
 | `index-refresh`, `index:<slug>` | queueing the memory index refresh, and one home's finished refresh |
 | `dream-due:<slug>`, `dreaming:<slug>` | whether a dreaming pass is due, and each finished pass: `error` or `lost` fails, `done`, `no_change` and `budget` are ok |
 | `dreaming` | queueing the dreaming passes |
+| `outbox` | the outbox step: sending again what external peers did not confirm ([chat](chat.md#cousins-on-another-install)) |
 | `meetings` | the meetings step |
 | `harness:<slug>` | written by the cousin's runner at its start, not by the daemon: whether what it runs (the Agent SDK and its CLI, `claude` on PATH, opencode) is the version `config/harness.lock.toml` names; failing names the installed and the locked version ([configuration](configuration.md#agent-strict_harness)) |
 | `cap:<slug>` | written by the cousin's runner at each turn start while `[agent] daily_cost_cap_usd` is set: ok under the cap, failing at or over it (`daily cost cap reached: spent $X.XX of $Y.YY today (UTC)`) or when the value is not a number of dollars ([configuration](configuration.md#agent-daily_cost_cap_usd)) |

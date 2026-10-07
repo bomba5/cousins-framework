@@ -970,15 +970,11 @@ Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", 
 
 ## System (the System view)
 
-The supervisor, one-shot schedules, console users, backup and the install-wide config (`console/routes_system.py`, the view in `system.jsx`). Every change is a `POST`; a refusal is `{"ok": false, "error"}` with the status named below, and nothing is written.
+The supervisor, the outbox, one-shot schedules, console users, backup and the install-wide config (`console/routes_system.py`, the view in `system.jsx`). Every change is a `POST`; a refusal is `{"ok": false, "error"}` with the status named below, and nothing is written.
 
 ### `GET /api/system/supervisor`
 
 `cousin-supervisor status` over its socket: `{"ok": true, "running": true, "supervised", "pid", "started", "children": [{"name", "kind", "state", "pid", "restarts", "since", "reason", "last_exit", "actions": {"start", "stop", "restart", "confirm"?, "why"?}}]}`. `running` is false when no supervisor runs for the root, null when one took the connection but did not answer; `reason` says which. `supervised` is true when the console itself is a supervisor child.
-
-### `GET /api/system/outbox`
-
-What the outbox holds (messages to signed external peers sent again under the same id, [chat](../chat.md#cousins-on-another-install)), newest first, 100 at most: `{"ok": true, "rows": [{"id", "msg_id", "sender", "dest", "message", "created", "attempts", "next_at", "state", "last_error", "finished"}], "deadline_s": 840}`. `state` is `pending`, `delivered` or `gave_up`; `?state=` filters by it (`400` for another word).
 
 ### `POST /api/system/supervisor/start`
 
@@ -991,6 +987,10 @@ As start, with the supervisor's `stop`, not waiting (`state: "stopping"`), `by: 
 ### `POST /api/system/supervisor/reload`
 
 The supervisor's rescan: `200 {"ok": true, "added", "removed"}`.
+
+### `GET /api/system/outbox`
+
+What the outbox holds (messages to signed external peers sent again under the same id, [chat](../chat.md#cousins-on-another-install)), newest first, 100 at most: `{"ok": true, "rows": [{"id", "msg_id", "sender", "dest", "message", "created", "attempts", "next_at", "state", "last_error", "finished"}], "deadline_s": 840.0}`. `state` is `pending`, `delivered` or `gave_up`; `?state=` filters by it (`400` for another word).
 
 ### `GET /api/system/schedules`
 

@@ -559,10 +559,11 @@ A local cousin with no runner kind is refused with the one line
 `lane_refusal` gives, and nothing is sent (exit 1). `list` prints each
 cousin's kind (`kind=sdk`, `none` for no runner, `worker` for a
 [worker](glossary.md#worker)). Subcommands: `send SLUG TEXT [--from NAME]`,
-`list`, `outbox [--state pending|delivered|gave_up]` (messages to external
-peers kept for a retry, [chat](chat.md#cousins-on-another-install); needs no
-`COUSIN_HOME`). A send to a signed external peer that could not be
-confirmed answers `queued: true` with the `msg_id` it is retried under. To a local cousin, `--from` is the sending cousin's own name or
+`list`, `outbox [--state pending|delivered|gave_up]` (the newest 100
+messages to external peers kept for a retry; needs no `COUSIN_HOME`;
+[chat](chat.md#cousins-on-another-install)). A send to a signed external
+peer that could not be confirmed answers `queued: true` with the
+`msg_id` it is retried under. To a local cousin, `--from` is the sending cousin's own name or
 slug; any other name (the operator's, another cousin's) is refused with
 exit 2. To an external peer it may be a free-form display name, which the
 peer's own install checks.

@@ -161,6 +161,13 @@ def accept(root, *, identity, display, to, message, msg_id, sent_at, allowed, no
             print("peer_inbound: delivery of %s from %s to %s timed out: %s"
                   % (msg_id, identity, target.slug, err), file=sys.stderr)
             raise Refused(504, "delivery timed out; the message may have landed")
+        except chat.DeliveryRefused as err:
+            # the cousin has no runner kind: absent, as to anyone outside,
+            # and final (a 5xx would have the sender retry for nothing)
+            conn.execute("DELETE FROM seen WHERE identity = ? AND msg_id = ?", (identity, msg_id))
+            print("peer_inbound: delivery of %s from %s to %s refused: %s"
+                  % (msg_id, identity, target.slug, err), file=sys.stderr)
+            raise Refused(404, "no cousin %r here" % to)
         except chat_api.NotDelivered as err:
             # nothing was kept: free the id so the sender's retry delivers it
             conn.execute("DELETE FROM seen WHERE identity = ? AND msg_id = ?", (identity, msg_id))

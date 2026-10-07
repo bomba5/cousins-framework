@@ -17,9 +17,10 @@ What counts as what, for one attempt:
 - any other 4xx (a bad signature, an unknown cousin, a refused name):
   permanent, given up at once.
 
-The retry schedule is BACKOFF_S after the first attempt, and nothing is
-sent after DEADLINE_S from it (inside SEEN_KEEP_S, so a late retry can
-never land twice). The loops daemon drains the outbox on every tick. The
+The retry schedule is BACKOFF_S after the first attempt (each wait at
+least that: retries ride the loops tick), and nothing is sent after
+DEADLINE_S from the moment the first attempt started (inside SEEN_KEEP_S,
+so a late retry can never land twice; one send takes at most ~10 s). The loops daemon drains the outbox on every tick. The
 sending cousin hears the end either way: a `system` item from
 `framework`, delivered after a retry or given up with the last error.
 
@@ -33,6 +34,7 @@ from pathlib import Path
 
 BACKOFF_S = (15, 30, 60, 120, 240, 300)   # waits between attempts, the last one repeating
 DEADLINE_S = 840.0                          # 14 min: inside the gate's 900 s memory of an id
+PASS_BUDGET_S = 20.0                        # a drain pass leaves the rest for the next tick
 PENDING, DELIVERED, GAVE_UP = "pending", "delivered", "gave_up"
 DELIVERED_NOW, QUEUED_FOR_RETRY, PERMANENT = "delivered", "queued", "permanent"
 
@@ -66,7 +68,10 @@ def _db(root):
 
 def classify(err):
     """The outcome class of one failed attempt: QUEUED_FOR_RETRY for what
-    may pass later, PERMANENT for what will not."""
+    may pass later (a request that went out but whose answer broke off,
+    http.client's IncompleteRead and kin, included: the same-id retry
+    settles it), PERMANENT for what will not."""
+    import http.client
     if isinstance(err, urllib.error.HTTPError):
         if err.code == 409:
             return DELIVERED_NOW
@@ -74,7 +79,7 @@ def classify(err):
             return QUEUED_FOR_RETRY
         return PERMANENT
     if isinstance(err, (urllib.error.URLError, TimeoutError, socket.timeout,
-                        ConnectionError)):
+                        ConnectionError, http.client.HTTPException)):
         return QUEUED_FOR_RETRY
     return PERMANENT
 
@@ -89,16 +94,18 @@ def _delay(attempts):
     return BACKOFF_S[min(max(attempts, 1), len(BACKOFF_S)) - 1]
 
 
-def enqueue(root, *, msg_id, sender, dest, message, error, now=None):
+def enqueue(root, *, msg_id, sender, dest, message, error, created=None, now=None):
     """Keep a message whose first attempt was transient; returns its row
-    as a dict."""
+    as a dict. `created` is when that first attempt STARTED (the peer may
+    have recorded the id from then on): the window is counted from it."""
     now = time.time() if now is None else now
+    created = now if created is None else created
     conn = _db(root)
     try:
         conn.execute(
             "INSERT OR IGNORE INTO outbox (msg_id, sender, dest, message, created,"
             " attempts, next_at, state, last_error) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
-            (msg_id, sender, dest, message, now, now + _delay(1), PENDING, error))
+            (msg_id, sender, dest, message, created, now + _delay(1), PENDING, error))
         return dict(conn.execute("SELECT * FROM outbox WHERE msg_id = ?", (msg_id,)).fetchone())
     finally:
         conn.close()
@@ -121,8 +128,10 @@ def list_rows(root, *, state=None, limit=100):
 
 
 def _finish(conn, row, state, error, now):
-    conn.execute("UPDATE outbox SET state = ?, last_error = ?, finished = ?, next_at = NULL"
-                 " WHERE id = ? AND state = ?", (state, error, now, row["id"], PENDING))
+    """Close a pending row; the number of rows it changed (0 when another
+    pass closed it first, and then nobody is told twice)."""
+    return conn.execute("UPDATE outbox SET state = ?, last_error = ?, finished = ?, next_at = NULL"
+                        " WHERE id = ? AND state = ?", (state, error, now, row["id"], PENDING)).rowcount
 
 
 def _tell_sender(root, row, text):
@@ -149,37 +158,52 @@ def _excerpt(text, limit=200):
     return text if len(text) <= limit else text[:limit - 3] + "..."
 
 
-def drain(root, *, send=None, now=None):
+def drain(root, *, send=None, now=None, budget_s=None):
     """One pass over the due rows: send each again, finish it delivered,
     given up (a permanent answer, the deadline passed, the peer gone from
     config/external-peers.toml), or due again later. `send(peer, message,
     msg_id)` is the attempt (chat.post_signed by default). Returns
-    {"delivered": [...], "gave_up": [...], "retrying": [...]} of msg_ids."""
+    {"delivered": [...], "gave_up": [...], "retrying": [...]} of msg_ids.
+
+    Time is read afresh for every row (a slow send must not let the next
+    one go out past the deadline on a stale clock); `now` pins it, for a
+    test. A pass stops after `budget_s` (PASS_BUDGET_S) and leaves the
+    rest due, so a backlog never holds the loops tick; and after one
+    transient failure to a peer it sends that peer nothing more this
+    pass."""
     from cousin_lib import chat
-    now = time.time() if now is None else now
+    clock = (lambda: now) if now is not None else time.time
+    budget = PASS_BUDGET_S if budget_s is None else budget_s
     out = {"delivered": [], "gave_up": [], "retrying": []}
     if not store_path(root).exists():
         return out
     send = send or (lambda peer, message, msg_id: chat.post_signed(root, peer, message, msg_id))
     peers = chat.load_external_peers(root)
     conn = _db(root)
+    started = clock()
+    failing = set()
+
+    def give_up(row, error, at):
+        if _finish(conn, row, GAVE_UP, error, at):
+            out["gave_up"].append(row["msg_id"])
+            _tell_sender(root, dict(row, finished=at), _gave_up_text(row, error))
+
     try:
         due = [dict(r) for r in conn.execute(
             "SELECT * FROM outbox WHERE state = ? AND next_at <= ? ORDER BY id",
-            (PENDING, now))]
+            (PENDING, started))]
         for row in due:
-            peer = peers.get(row["dest"])
-            if now - row["created"] > DEADLINE_S:
-                error = row["last_error"] or "the retry window closed"
-                _finish(conn, row, GAVE_UP, error, now)
-                out["gave_up"].append(row["msg_id"])
-                _tell_sender(root, dict(row, finished=now), _gave_up_text(row, error))
+            at = clock()
+            if at - started > budget:
+                break                                   # the rest stay due for the next tick
+            if row["dest"] in failing:
+                continue                                # this pass already found it down
+            if at - row["created"] > DEADLINE_S:
+                give_up(row, row["last_error"] or "the retry window closed", at)
                 continue
+            peer = peers.get(row["dest"])
             if peer is None or not peer.token_file:
-                error = "peer %s is no longer a signed external peer" % row["dest"]
-                _finish(conn, row, GAVE_UP, error, now)
-                out["gave_up"].append(row["msg_id"])
-                _tell_sender(root, dict(row, finished=now), _gave_up_text(row, error))
+                give_up(row, "peer %s is no longer a signed external peer" % row["dest"], at)
                 continue
             attempts = row["attempts"] + 1
             try:
@@ -187,22 +211,25 @@ def drain(root, *, send=None, now=None):
                 outcome, error = DELIVERED_NOW, None
             except Exception as err:  # noqa: BLE001 - classified, never raised out of a tick
                 outcome, error = classify(err), describe(err)
+            at = clock()
             conn.execute("UPDATE outbox SET attempts = ?, last_error = ? WHERE id = ?",
                          (attempts, error, row["id"]))
             row = dict(row, attempts=attempts)
             if outcome == DELIVERED_NOW:
-                _finish(conn, row, DELIVERED, error, now)
-                out["delivered"].append(row["msg_id"])
-                _tell_sender(root, row, "[fw-outbox] Your message to %s (msg_id %s) was delivered"
-                             " on attempt %d. It was: %s"
-                             % (row["dest"], row["msg_id"], attempts, _excerpt(row["message"])))
-            elif outcome == PERMANENT or now + _delay(attempts) - row["created"] > DEADLINE_S:
-                _finish(conn, row, GAVE_UP, error, now)
-                out["gave_up"].append(row["msg_id"])
-                _tell_sender(root, dict(row, finished=now), _gave_up_text(row, error))
+                if _finish(conn, row, DELIVERED, error, at):
+                    out["delivered"].append(row["msg_id"])
+                    how = ("on attempt %d" % attempts if error is None else
+                           "earlier: on attempt %d the peer answered it already had this"
+                           " message id" % attempts)
+                    _tell_sender(root, row, "[fw-outbox] Your message to %s (msg_id %s) was"
+                                 " delivered %s. It was: %s"
+                                 % (row["dest"], row["msg_id"], how, _excerpt(row["message"])))
+            elif outcome == PERMANENT or at + _delay(attempts) - row["created"] > DEADLINE_S:
+                give_up(row, error, at)
             else:
+                failing.add(row["dest"])
                 conn.execute("UPDATE outbox SET next_at = ? WHERE id = ?",
-                             (now + _delay(attempts), row["id"]))
+                             (at + _delay(attempts), row["id"]))
                 out["retrying"].append(row["msg_id"])
         return out
     finally:

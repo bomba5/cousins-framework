@@ -706,3 +706,64 @@ class TestConsoleAndCliRetries(unittest.TestCase):
             hive.hive_send(queen_url="http://q", token="t", to="sam", body="hi",
                            msg_id="cli-0001", sleep=lambda s: None)
         self.assertEqual(seen, ["cli-0001"] * 3)
+
+
+class TestRetryReviewFixes(NodeCase):
+    """#251 review: concurrent tries of one send store once; no queen is
+    not an outage; the window starts at the first try; nothing pending is
+    dropped silently; a permanent hive answer is not retried."""
+
+    def test_two_concurrent_tries_of_one_send_store_once(self):
+        node = self._node()
+        real_add = node.store.add
+
+        def slow_add(**kw):
+            time.sleep(0.5)                 # the first try is still storing
+            return real_add(**kw)
+        node.store.add = slow_add
+        body = {"user": "Sam", "message": "hello", "msg_id": "console-00000002"}
+        results = []
+        threads = [threading.Thread(target=lambda: results.append(
+            self._call(node, "/api/send", "POST", body))) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(sorted(r[0] for r in results), [200, 200])
+        self.assertEqual(len({r[1]["id"] for r in results}), 1)
+        self.assertEqual(sum(1 for r in results if r[1].get("duplicate")), 1)
+
+    def test_no_queen_is_not_queued(self):
+        node = self._node(QUEEN_URL="", TELL_HOME="1")
+        self.assertFalse(node.brain._tell_home("anyone there?"))
+        self.assertEqual(node.retrier.pending(), [])
+
+    def test_the_window_starts_at_the_first_try(self):
+        node = self._node(QUEEN_URL="http://127.0.0.1:9", TELL_HOME="1")
+        before = time.time()
+        node.brain._tell_home("is the build done?")
+        [row] = node.retrier._rows
+        self.assertLessEqual(row["created"], before + 1)
+        self.assertGreaterEqual(row["created"], before - 1)
+
+    def test_stop_says_what_it_drops(self):
+        logged = []
+        hive = self.module.Hive("", "t")
+        r = self.module.Retrier(hive, log=logged.append)
+        r.add("/hive/msg", lambda: {}, "testa-9")
+        r.stop()
+        self.assertTrue(any("testa-9" in line and "dropped" in line for line in logged))
+
+    def test_hive_send_does_not_retry_a_refusal(self):
+        from unittest import mock
+        from cousin_lib import hive
+        calls = []
+
+        def call(*a, **kw):
+            calls.append(1)
+            raise hive.HiveError("refused", transient=False)
+        with mock.patch.object(hive, "_client_call", call):
+            with self.assertRaises(hive.HiveError):
+                hive.hive_send(queen_url="http://q", token="t", to="sam", body="hi",
+                               msg_id="cli-0002", sleep=lambda s: None)
+        self.assertEqual(len(calls), 1)

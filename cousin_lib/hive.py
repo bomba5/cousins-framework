@@ -53,7 +53,13 @@ TOKEN_ENV = "HIVE_TOKEN"
 
 
 class HiveError(Exception):
-    """A hive call could not complete; the caller falls back to local."""
+    """A hive call could not complete; the caller falls back to local.
+    `transient` is False for an answer the queen gives for good (a 4xx
+    other than 429), True for anything that may pass on its own."""
+
+    def __init__(self, message, *, transient=True):
+        super().__init__(message)
+        self.transient = transient
 
 
 class HiveConfigError(Exception):
@@ -833,6 +839,9 @@ def _client_call(queen_url, path, token, *, method="GET", body=None):
     try:
         with urllib.request.urlopen(request, timeout=5) as resp:
             return json.loads(resp.read())
+    except urllib.error.HTTPError as err:
+        raise HiveError("hive refused (HTTP %d); falling back to local" % err.code,
+                        transient=err.code == 429 or err.code >= 500)
     except Exception as err:
         raise HiveError("hive unreachable (%s); falling back to local"
                         % err)
@@ -852,8 +861,8 @@ def hive_send(*, queen_url, token, to, body, msg_id, sleep=None):
         try:
             return _client_call(queen_url, "/hive/msg", token, method="POST",
                                 body={"to": to, "id": msg_id, "body": body})
-        except HiveError:
-            if not waits:
+        except HiveError as err:
+            if not err.transient or not waits:
                 raise
             sleep(waits.pop(0))
 

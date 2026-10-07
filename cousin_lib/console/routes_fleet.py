@@ -876,7 +876,7 @@ def register():
             except chat_api.BadRequest as err:
                 raise HttpError(400, str(err))
             except chat_api.NotDelivered as err:
-                raise HttpError(503, str(err), id=err.message_id, stored=True)
+                raise HttpError(503, str(err), stored=False)
             return 200, {"ok": True, "to": to, "id": body.get("id")}
         status, body = chat_call(dest, "/api/send", method="POST", payload=payload,
                                  timeout=10.0)

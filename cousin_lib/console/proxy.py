@@ -159,14 +159,14 @@ def serves_locally(cousin):
 
 def _local(fn, *args, **kw):
     """(status, body) from a chat_api call: its 200, the 400 the chat
-    server would have answered, or a 503 for a stored message its cousin
-    did not take."""
+    server would have answered, or a 503 for a message its cousin's inbox
+    did not take (nothing kept)."""
     try:
         return 200, fn(*args, **kw)
     except chat_api.BadRequest as err:
         return 400, {"error": str(err)}
     except chat_api.NotDelivered as err:
-        return 503, {"ok": False, "error": str(err), "id": err.message_id, "stored": True}
+        return 503, {"ok": False, "error": str(err), "stored": False}
 
 
 def _require(mapping, *keys):

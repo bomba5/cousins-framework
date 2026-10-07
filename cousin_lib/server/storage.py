@@ -166,6 +166,13 @@ class ChatStore:
         self.conn.commit()
         return {"id": cur.lastrowid, "timestamp": timestamp}
 
+    def delete_message(self, message_id):
+        """Remove one row and its reactions: a message that was never
+        delivered (chat_api.send) leaves no trace in the history."""
+        self.conn.execute("DELETE FROM reactions WHERE message_id = ?", (message_id,))
+        self.conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+        self.conn.commit()
+
     def _archive_clause(self, archived):
         """WHERE fragment for the archived filter: live rows by default,
         archived-only on '1', everything on 'all'."""

@@ -375,9 +375,9 @@ if __name__ == "__main__":
 
 
 class TestASendWhoseDeliveryFailedIsNotOk(HermeticCase):
-    """#243: a stored message whose inbox write failed never reaches the
-    runner, so the send must not answer ok: chat_api.send raises
-    NotDelivered after the row is stored and the hooks ran."""
+    """#243: a message the cousin's inbox did not take never reaches the
+    runner, so the send must not answer ok, and nothing is kept: the row
+    is removed again and no hook fires, so a send again leaves one row."""
 
     def setUp(self):
         super().setUp()
@@ -396,7 +396,7 @@ class TestASendWhoseDeliveryFailedIsNotOk(HermeticCase):
         finally:
             store.close()
 
-    def test_a_failed_inbox_write_raises_with_the_stored_id(self):
+    def test_a_failed_inbox_write_raises_and_keeps_nothing(self):
         import sqlite3
         from cousin_lib.runner.inbox import Inbox
         from cousin_lib.server import chat_api
@@ -405,11 +405,22 @@ class TestASendWhoseDeliveryFailedIsNotOk(HermeticCase):
             with self.assertRaises(chat_api.NotDelivered) as caught:
                 chat_api.send(config, {"user": "Priya", "message": "hi"},
                               deliver=chat_api.make_deliver(config))
-        rows = self._rows()
-        self.assertEqual([r["message"] for r in rows], ["hi"])
-        self.assertEqual(caught.exception.message_id, rows[0]["id"])
+        self.assertEqual(self._rows(), [])
         self.assertIn("not delivered", str(caught.exception))
-        self.assertIn("send it again", str(caught.exception))
+        self.assertIn("nothing was kept", str(caught.exception))
+
+    def test_a_send_again_leaves_one_row(self):
+        import sqlite3
+        from cousin_lib.runner.inbox import Inbox
+        from cousin_lib.server import chat_api
+        config = self._config()
+        with mock.patch.object(Inbox, "put", side_effect=sqlite3.OperationalError("locked")):
+            with self.assertRaises(chat_api.NotDelivered):
+                chat_api.send(config, {"user": "Priya", "message": "hi"},
+                              deliver=chat_api.make_deliver(config))
+        chat_api.send(config, {"user": "Priya", "message": "hi"},
+                      deliver=chat_api.make_deliver(config))
+        self.assertEqual([r["message"] for r in self._rows()], ["hi"])
 
     def test_a_queued_send_is_still_ok(self):
         from cousin_lib.server import chat_api
@@ -418,7 +429,7 @@ class TestASendWhoseDeliveryFailedIsNotOk(HermeticCase):
                              deliver=chat_api.make_deliver(config))
         self.assertTrue(body["ok"])
 
-    def test_the_hooks_still_fire_before_the_failure_is_raised(self):
+    def test_no_hook_fires_for_a_message_nobody_will_see(self):
         from cousin_lib.server import chat_api
         config = self._config()
         fired = []
@@ -427,7 +438,7 @@ class TestASendWhoseDeliveryFailedIsNotOk(HermeticCase):
             with self.assertRaises(chat_api.NotDelivered):
                 chat_api.send(config, {"user": "Priya", "message": "hi"},
                               deliver=lambda **kw: delivery.FAILED)
-        self.assertEqual(len(fired), 1)
+        self.assertEqual(fired, [])
 
     def test_a_peer_send_through_deliver_local_raises_too(self):
         import sqlite3
@@ -438,12 +449,36 @@ class TestASendWhoseDeliveryFailedIsNotOk(HermeticCase):
             with self.assertRaises(chat_api.NotDelivered):
                 chat.deliver_local(self._config(), {"user": "Kestrel", "message": "hi"})
 
-    def test_the_console_route_answers_503_with_stored_true(self):
+    def test_the_console_route_answers_503_with_stored_false(self):
         from cousin_lib.console import proxy
         from cousin_lib.server import chat_api
         status, body = proxy._local(chat_api.send, self._config(),
                                     {"user": "Priya", "message": "hi"},
                                     deliver=lambda **kw: delivery.FAILED)
         self.assertEqual(status, 503)
-        self.assertEqual((body["ok"], body["stored"]), (False, True))
-        self.assertIsInstance(body["id"], int)
+        self.assertEqual((body["ok"], body["stored"]), (False, False))
+
+
+class TestThePeerGateFreesTheIdOnNotDelivered(HermeticCase):
+    """#243 review: a message the peer gate stored but the inbox did not
+    take answers 502 and frees its id, so the sender's retry delivers it."""
+
+    def test_502_and_the_id_is_free_again(self):
+        from cousin_lib import peer_inbound
+        from cousin_lib.server import chat_api
+        from tests.runner._home import temp_home
+        home = temp_home(self, runner="fake")
+        root = home.parent.parent
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\npeer_visible = true\n[agent]\nrunner = "fake"\n')
+        import time as _t
+        args = dict(identity="kestrel", display="Kestrel", to="wren", message="hi",
+                    msg_id="kestrel-0000000001", sent_at=_t.time(), allowed=lambda s: True)
+        with mock.patch("cousin_lib.chat.deliver_to",
+                        side_effect=chat_api.NotDelivered("wren: not delivered")):
+            with self.assertRaises(peer_inbound.Refused) as caught:
+                peer_inbound.accept(root, **args)
+        self.assertEqual(caught.exception.status, 502)
+        self.assertIn("not delivered", caught.exception.error)
+        with mock.patch("cousin_lib.chat.deliver_to", return_value={"ok": True, "id": 2}):
+            self.assertEqual(peer_inbound.accept(root, **args)["id"], 2)

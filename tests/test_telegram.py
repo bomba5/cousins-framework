@@ -153,7 +153,7 @@ class TestInboundNotDelivered(_BridgeFixture):
         replied, logged = [], []
 
         def failing_send(**kw):
-            raise chat_api.NotDelivered("wren: stored as message 7, but not delivered", 7)
+            raise chat_api.NotDelivered("wren: not delivered: its inbox did not take it")
 
         relay_inbound(
             cfg,

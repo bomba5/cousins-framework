@@ -27,9 +27,10 @@ What `accept` enforces, for every caller:
 - delivery is chat.deliver_to: in-process for a runner cousin, refused
   by name for a cousin with no runner kind, under the display name. A
   refusal or a
-  connection error frees the id (the sender may retry), a timeout keeps
-  it (the message may have landed); both answer the sender (502, 504)
-  and are logged, never raised into the route.
+  connection error frees the id (the sender may retry), and so does a
+  message the cousin's inbox did not take (NotDelivered: nothing was
+  kept); a timeout keeps it (the message may have landed). Each answers the
+  sender (502, 504) and is logged, never raised into the route.
 
 The seen store is `<root>/data/inbound-seen.db`, mode 0600."""
 import math
@@ -115,6 +116,7 @@ def accept(root, *, identity, display, to, message, msg_id, sent_at, allowed, no
     """Deliver one authenticated message or raise Refused. Returns the
     delivery's body ({"ok", "id", ...})."""
     from cousin_lib import chat
+    from cousin_lib.server import chat_api
     now = time.time() if now is None else now
     if not isinstance(msg_id, str) or not _ID.match(msg_id):
         raise Refused(400, "msg_id must be 8-128 letters, digits, '-' or '_'")
@@ -159,6 +161,12 @@ def accept(root, *, identity, display, to, message, msg_id, sent_at, allowed, no
             print("peer_inbound: delivery of %s from %s to %s timed out: %s"
                   % (msg_id, identity, target.slug, err), file=sys.stderr)
             raise Refused(504, "delivery timed out; the message may have landed")
+        except chat_api.NotDelivered as err:
+            # nothing was kept: free the id so the sender's retry delivers it
+            conn.execute("DELETE FROM seen WHERE identity = ? AND msg_id = ?", (identity, msg_id))
+            print("peer_inbound: delivery of %s from %s to %s: %s"
+                  % (msg_id, identity, target.slug, err), file=sys.stderr)
+            raise Refused(502, "not delivered: the cousin's inbox did not take it; retry")
         except Exception as err:  # noqa: BLE001 - answered as a 502, logged here
             conn.execute("DELETE FROM seen WHERE identity = ? AND msg_id = ?", (identity, msg_id))
             print("peer_inbound: delivery of %s from %s to %s failed: %s: %s"

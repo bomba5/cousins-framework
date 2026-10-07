@@ -248,9 +248,10 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
                           message_id=row["id"], slug=cfg.slug,
                           deliver=deliver)
     if outcome == delivery.FAILED:
-        # Stored, but the runner will never see it: relay_inbound tells
-        # the sender instead of leaving them waiting on a silent cousin.
-        raise chat_api.not_delivered(config, row["id"])
+        # the runner will never see it: keep nothing, and relay_inbound
+        # tells the sender instead of leaving them waiting on a silent cousin
+        chat_api.drop_undelivered(cfg.home, row["id"], [str(path)] if path else [])
+        raise chat_api.not_delivered(config)
 
 
 def _default_log(line):

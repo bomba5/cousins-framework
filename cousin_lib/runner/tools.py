@@ -96,7 +96,8 @@ def _m_remember(ctx, a):
     from cousin_lib import memory
     return memory.remember(ctx.home, a.get("topic"), a.get("fact"),
                            level=a.get("level"), cite=a.get("cite"),
-                           derived_from=a.get("derived_from"))
+                           derived_from=a.get("derived_from"),
+                           scope=a.get("scope"), valid_until=a.get("valid_until"))
 
 
 def _m_why(ctx, a):

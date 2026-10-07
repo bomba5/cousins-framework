@@ -790,7 +790,7 @@ What the write forms may offer the current user: `{"user", "operator", "can_writ
 
 ### `POST /api/memory/<slug>/remember`
 
-Body `{"topic", "fact", "level"?, "note"?}`. One fact into raw memory (`cousin-memory remember`). `level` is `operator`, `tool`, `conclusion` (default) or `hypothesis`; `framework` and `obsolete` are `400` (the framework writes its own entries, and obsolete is the retire action). `operator` from anyone but the operator account is `403`. The cite is filled here, never taken from the body: `console user <name>, <UTC time>` (`console (no login), <time>` without logins), then `; <note>` when a note (at most 300 characters) is given. `200 {"ok": true, "line"}` and a `memory-change` event.
+Body `{"topic", "fact", "level"?, "note"?, "scope"?, "valid_until"?}`. One fact into raw memory (`cousin-memory remember`). `scope` (at most 200 characters) and `valid_until` (an ISO date or time in the future) are the fact's declared scope and end ([memory](../memory.md#what-a-fact-holds-for-and-until-when)); a bad or past `valid_until` is `400`. `level` is `operator`, `tool`, `conclusion` (default) or `hypothesis`; `framework` and `obsolete` are `400` (the framework writes its own entries, and obsolete is the retire action). `operator` from anyone but the operator account is `403`. The cite is filled here, never taken from the body: `console user <name>, <UTC time>` (`console (no login), <time>` without logins), then `; <note>` when a note (at most 300 characters) is given. `200 {"ok": true, "line"}` and a `memory-change` event.
 
 ### `POST /api/memory/<slug>/decide`
 

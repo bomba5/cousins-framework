@@ -20,7 +20,7 @@ import shlex
 import sys
 import zlib
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from cousin_lib import memory_lock, perimeter
 from cousin_lib.trace import traced_cli
@@ -322,10 +322,14 @@ def is_entry_mark(entry):
 def hidden_ids(entries):
     """The ids the memory views (distilled, the boot packet) leave out,
     from `entries` (the whole history, `_all_raw`): every entry an
-    entry-level mark retired, and every entry the review gate holds."""
+    entry-level mark retired, every entry whose declared `valid_to` has
+    passed, and every entry the review gate holds."""
     from cousin_lib import review_gate
     entries = list(entries)
-    return {e["entry"] for e in entries if is_entry_mark(e)} | review_gate.pending_ids(entries)
+    now = datetime.now(timezone.utc)
+    return ({e["entry"] for e in entries if is_entry_mark(e)}
+            | {entry_id(e) for e in entries if not _is_mark(e) and expired(e, now=now)}
+            | review_gate.pending_ids(entries))
 
 
 def digest_unsafe_ids(entries):
@@ -335,7 +339,10 @@ def digest_unsafe_ids(entries):
     of its digest while it was held; kept later, only the history has it)."""
     from cousin_lib import review_gate
     entries = list(entries)
-    return hidden_ids(entries) | review_gate.held_ever(entries)
+    # an entry with a declared end may expire after its month was folded,
+    # and the digest would still carry its text
+    ending = {entry_id(e) for e in entries if e.get("valid_to") and not _is_mark(e)}
+    return hidden_ids(entries) | review_gate.held_ever(entries) | ending
 
 
 def view_noise(entry):
@@ -656,8 +663,97 @@ def decide(home, topic, decision, reasoning, *, level=None, cite=None, derived_f
     return "\n".join(lines)
 
 
+SCOPE_CHARS = 200
+
+
+def parse_valid_until(value, *, now=None):
+    """`valid_until` as the ISO time a claim stops holding, or ValueError.
+    A date (2026-10-31) holds through that day (UTC): the stored `valid_to`
+    is the next midnight. A time without a zone is UTC. It must be in the
+    future: a claim already over is not worth writing."""
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("valid_until is empty")
+    try:
+        if len(text) == 10:
+            when = datetime.fromisoformat(text).replace(tzinfo=timezone.utc) + timedelta(days=1)
+        else:
+            when = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise ValueError("valid_until must be an ISO date or time (2026-10-31,"
+                         " 2026-10-31T18:00Z), not %r" % text)
+    now = now or datetime.now(timezone.utc)
+    if when <= now:
+        raise ValueError("valid_until %s is already past" % text)
+    return when.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+def check_scope(value):
+    """`scope`, what a claim holds for ("board rev A", "the main office"), as
+    one stripped line of at most SCOPE_CHARS, or None; ValueError beyond."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        return None
+    if len(text) > SCOPE_CHARS:
+        raise ValueError("scope is longer than %d characters" % SCOPE_CHARS)
+    return text
+
+
+def expired(entry, *, now=None):
+    """True when the entry declared a `valid_to` that has passed."""
+    end = entry.get("valid_to")
+    if not end:
+        return False
+    try:
+        when = datetime.fromisoformat(str(end))
+    except ValueError:
+        return False
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when <= (now or datetime.now(timezone.utc))
+
+
+def is_live(row, *, now=None):
+    """A `validity` row still holds: no mark retired it and its own
+    declared end, if any, is ahead. (A row's `valid_to` alone does not
+    say: a fact may declare an end it has not reached.)"""
+    return not row.get("retired_by") and not expired(row, now=now)
+
+
+def qualifiers(entry, *, now=None):
+    """The short suffix a view or a recall puts after a claim with a
+    declared scope or end: "scope: board rev A; through 2026-10-31" (an end
+    at midnight UTC, as a date gives), "until 2026-10-31 18:00 UTC" (any
+    other), "expired after 2026-10-31" / "expired 2026-10-31 18:00 UTC"
+    once past; "" for a plain claim."""
+    parts = []
+    if entry.get("scope"):
+        parts.append("scope: %s" % entry["scope"])
+    end = entry.get("valid_to")
+    if end:
+        try:
+            when = datetime.fromisoformat(str(end))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            when = when.astimezone(timezone.utc)
+        except ValueError:
+            when = None
+        gone = expired(entry, now=now)
+        if when is None:
+            parts.append(("expired %s" if gone else "until %s") % str(end)[:10])
+        elif (when.hour, when.minute, when.second) == (0, 0, 0):
+            day = (when - timedelta(seconds=1)).date().isoformat()
+            parts.append(("expired after %s" if gone else "through %s") % day)
+        else:
+            stamp = when.strftime("%Y-%m-%d %H:%M UTC")
+            parts.append(("expired %s" if gone else "until %s") % stamp)
+    return "; ".join(parts)
+
+
 def remember_entry(home, topic, fact, *, level=None, cite=None, derived_from=None,
-                   source="remember"):
+                   source="remember", scope=None, valid_until=None):
     """The raw entry a `remember` writes, as written (timestamp stamped),
     or ValueError. Every writer that journals what it changed needs the
     entry, not the line: `entry_id` is a sha1 over the entry's own stamp,
@@ -668,6 +764,12 @@ def remember_entry(home, topic, fact, *, level=None, cite=None, derived_from=Non
 
     `derived_from`: the entry ids this claim was built from (check_derived),
     one hop, nothing inherited along it. `why` walks it.
+
+    `scope`: what the claim holds for (check_scope), shown beside it.
+    `valid_until`: when it stops holding (parse_valid_until), stored as the
+    entry's `valid_to`; past it, the claim is retired from the views, the
+    boot packet and `tensions` as if marked obsolete, and recall and
+    search label it expired.
     """
     topic, fact = str(topic or "").strip(), str(fact or "").strip()
     if not (topic and fact):
@@ -676,24 +778,34 @@ def remember_entry(home, topic, fact, *, level=None, cite=None, derived_from=Non
     if err:
         raise ValueError(err)
     derived = check_derived(derived_from)
+    scope = check_scope(scope)
+    valid_to = parse_valid_until(valid_until) if valid_until not in (None, "") else None
     entry = {"topic": topic, "content": fact, "truth_level": resolved, "source": source}
     if cite:
         entry["cite"] = cite
     if derived:
         entry["derived_from"] = derived
+    if scope:
+        entry["scope"] = scope
+    if valid_to:
+        entry["valid_to"] = valid_to
     return _append_raw(Path(home), entry)
 
 
 def remember(home, topic, fact, *, level=None, cite=None, derived_from=None,
-             source="remember"):
+             source="remember", scope=None, valid_until=None):
     """One durable fact into raw memory. Raises ValueError. Returns the line,
     and under it the demotion line when an uncited level was demoted.
     `derived_from`: the entry ids it was built from (check_derived), one hop;
-    `why` walks it."""
+    `why` walks it. `scope` and `valid_until`: see remember_entry."""
     entry = remember_entry(home, topic, fact, level=level, cite=cite,
-                           derived_from=derived_from, source=source)
+                           derived_from=derived_from, source=source,
+                           scope=scope, valid_until=valid_until)
     line = "Remembered [%s] (%s): %s" % (entry["topic"], entry["truth_level"],
                                          entry["content"])
+    extra = qualifiers(entry)
+    if extra:
+        line += " (%s)" % extra
     note = demotion(level, cite)
     return line + "\n" + note if note else line
 
@@ -979,7 +1091,9 @@ def _cmd_remember(args):
         return 2
     try:
         print(remember(home, args.topic, args.fact, level=args.level, cite=args.cite,
-                       derived_from=getattr(args, "derived_from", None)))
+                       derived_from=getattr(args, "derived_from", None),
+                       scope=getattr(args, "scope", None),
+                       valid_until=getattr(args, "valid_until", None)))
     except ValueError as err:
         print("error: %s" % err, file=sys.stderr)
         return 2
@@ -1402,6 +1516,10 @@ def memory_main(argv=None):
     p.add_argument("fact", nargs="?")
     _level_args(p)
     _derived_args(p)
+    p.add_argument("--scope", help="what the fact holds for (\"board rev A\"), shown beside it")
+    p.add_argument("--valid-until", dest="valid_until",
+                   help="when it stops holding: an ISO date (through that day, UTC) or"
+                        " time; past it the fact leaves the views and recall says expired")
     p.set_defaults(func=_cmd_remember)
     p = sub.add_parser(
         "why",

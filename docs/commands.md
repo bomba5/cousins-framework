@@ -464,7 +464,7 @@ cousin-migrate tidy --all --yes
 | subcommand | does |
 |---|---|
 | `search QUERY [--top N] [--collection memory\|notes\|harness] [--json]` | keyword search, plus semantic when embeddings are configured |
-| `remember TOPIC FACT [--level L] [--cite SRC] [--derived-from ID]...` | one fact into raw memory with its truth level; `--derived-from` (repeatable) names the entry ids it was built from |
+| `remember TOPIC FACT [--level L] [--cite SRC] [--derived-from ID]... [--scope TEXT] [--valid-until WHEN]` | one fact into raw memory with its truth level; `--derived-from` (repeatable) names the entry ids it was built from; `--scope` what it holds for, `--valid-until` when it stops holding ([memory](memory.md#what-a-fact-holds-for-and-until-when)) |
 | `decide TOPIC DECISION REASONING [--level L] [--cite SRC] [--derived-from ID]... [--stdin]` | log a decision (and a raw copy of it); `--derived-from` as for `remember` |
 | `why ID [--json]` | one raw entry by its id, what it was built from and what was built from it, and the mark that retired it, if any: one hop each way. Exit 1 for an id no raw entry has |
 | `obsolete TOPIC --why REASON [--force] [--entry ID]` | retire a topic (L5): out of the [distilled](glossary.md#distilled) views, history kept; with `--entry`, retire one of its claims by its id and keep the topic |

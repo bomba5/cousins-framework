@@ -42,6 +42,8 @@ why = { type = "string", description = "what superseded the topic (obsolete); re
 force = { type = "boolean", description = "mark a topic that has no raw entries yet (obsolete)" }
 entry = { type = "string", optional = true, description = "retire one claim of the topic by its id, from `tensions` or `history`; the topic stays (obsolete)" }
 derived_from = { type = "array", items = "string", optional = true, description = "entry ids this was built from, one hop (decide, remember); `why` walks it" }
+scope = { type = "string", optional = true, description = "what the fact holds for, e.g. 'board rev A' (remember)" }
+valid_until = { type = "string", optional = true, description = "when the fact stops holding: ISO date (through that day, UTC) or time; past it the fact leaves the views (remember)" }
 id = { type = "string", description = "an entry id, from `history` or a recall line (why)" }
 keyword = { type = "string", optional = true, description = "what to recall; empty lists the newest entries (recall)" }
 last = { type = "integer", description = "how many entries (recall)" }
@@ -59,7 +61,7 @@ stdin_sep = "---"
 
 [tools.memory.commands.remember]
 argv = ["remember", "{topic}", "{fact}"]
-options = { level = "--level", cite = "--cite", derived_from = "--derived-from" }
+options = { level = "--level", cite = "--cite", derived_from = "--derived-from", scope = "--scope", valid_until = "--valid-until" }
 
 [tools.memory.commands.why]
 argv = ["why", "{id}"]

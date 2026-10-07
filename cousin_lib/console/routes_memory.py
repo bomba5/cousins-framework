@@ -326,7 +326,7 @@ def _guard_operator_claims(req, slug, home, topic, claim):
     if claim:
         rows = [r for r in rows if r["id"] == claim]
     else:
-        rows = [r for r in rows if not r.get("valid_to")]
+        rows = [r for r in rows if memory.is_live(r)]
     if any(memory.normalize_level(r.get("truth_level")) == memory.OPERATOR_LEVEL
            for r in rows) and not _is_operator(req, slug):
         operator = _operator_of(req, slug)
@@ -582,10 +582,13 @@ def _register_actions():
         topic = _text(body, "topic", limit=200)
         fact = _text(body, "fact", limit=4000)
         note = _text(body, "note", required=False, limit=NOTE_MAX)
+        scope = _text(body, "scope", required=False, limit=memory.SCOPE_CHARS)
+        valid_until = _text(body, "valid_until", required=False, limit=40)
         level = _write_level(req, slug, body)
         try:
             line = memory.remember(home, topic, fact, level=level,
-                                   cite=_console_cite(req, note))
+                                   cite=_console_cite(req, note),
+                                   scope=scope or None, valid_until=valid_until or None)
         except ValueError as err:
             raise HttpError(400, str(err))
         req.server.emit("memory-change", {"slug": slug, "action": "remember",

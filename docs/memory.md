@@ -149,6 +149,31 @@ stderr and no mark is written, so the next read tries again.
 `consolidate` runs the backfill unguarded, since it is a command you run
 and a loud failure there is the right one.
 
+### What a fact holds for, and until when
+
+A fact can say, when it is written, what it holds for and when it stops
+holding. `remember` takes `--scope TEXT` (one line, at most 200
+characters: "board rev A", "the main office") and `--valid-until WHEN` (an
+ISO date, which holds through that day in UTC, or an ISO time; a time with
+no zone is UTC; a time already past is refused). The memory tool takes
+them as `scope` and `valid_until`, and the console's memory write form has
+both fields.
+
+```
+cousin-memory remember "office wifi" "The guest password is on the fridge." \
+  --scope "the main office" --valid-until 2026-10-31
+#   -> Remembered [office wifi] (L3_COUSIN_CONCLUSION): The guest password is on the fridge. (scope: the main office; through 2026-10-31)
+```
+
+The end is stored as the entry's `valid_to` (the next midnight, for a
+date), the same field an obsolete mark sets, so the valid-time reads
+below treat it alike: past it, the fact is no longer live, the distilled
+views and the boot packet leave it out, and `tensions` stops counting it.
+Nothing is written when it expires; raw keeps it, and a recall or search
+that still finds it says so (`office wifi [scope: the main office; expired
+after 2026-10-31]`). A live fact with a scope or an end shows them in its
+distilled line and on its claim card in the console.
+
 ### What an entry was built from
 
 `remember` and `decide` take `--derived-from ID` (repeatable; the memory

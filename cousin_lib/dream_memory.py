@@ -628,9 +628,9 @@ def _claims(home, attempt, ids, *, for_derivation=False):
                                  " what the operator, the framework or a tool"
                                  " stated (L0-L2) is not a pass's to"
                                  " consolidate" % (eid, level))
-        if row.get("valid_to"):
+        if not memory.is_live(row):
             raise ValueError("claim %s is already retired, by %s"
-                             % (eid, row.get("retired_by") or "an earlier mark"))
+                             % (eid, row.get("retired_by") or "its own declared end"))
         if eid not in seen:
             raise ValueError("claim %s was not in this pass's slice: a pass"
                              " may only act on what it was shown, by id"
@@ -659,7 +659,7 @@ def _same_topic(rows, topic):
 def _live_topic(home, topic):
     """The live claims on `topic`."""
     return [r for r in memory.validity(home)
-            if str(r.get("topic") or "").strip() == topic and not r.get("valid_to")]
+            if str(r.get("topic") or "").strip() == topic and memory.is_live(r)]
 
 
 def _level(args, what="level"):

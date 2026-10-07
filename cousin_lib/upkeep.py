@@ -84,7 +84,7 @@ def _file_turns(path):
     key = (str(path), st.st_mtime, st.st_size)
     if key in _CACHE:
         return _CACHE[key]
-    out, pending = [], None
+    out, pending, notified = [], None, False
     try:
         lines = path.read_text(errors="replace").splitlines()
     except OSError:
@@ -95,9 +95,15 @@ def _file_turns(path):
         except ValueError:
             continue
         kind, payload = ev.get("kind"), ev.get("payload") or {}
-        if kind == "result":
-            pending = (ev.get("ts") or 0.0, list(payload.get("inbox_ids") or []),
-                       bool(payload.get("background")))
+        if kind == "system" and payload.get("subtype") == "task_notification":
+            notified = True
+        elif kind == "result":
+            ids = list(payload.get("inbox_ids") or [])
+            # Streams written before the runner set `background` carry
+            # only the task_notification that woke the turn.
+            pending = (ev.get("ts") or 0.0, ids,
+                       bool(payload.get("background")) or (notified and not ids))
+            notified = False
         elif kind == "usage" and pending is not None and "cost_usd" in payload:
             out.append(pending + (float(payload.get("cost_usd") or 0.0),
                                   int(payload.get("total") or 0)))

@@ -69,6 +69,20 @@ class TestMeasure(UpkeepCase):
         self.assertEqual(set(m["kinds"]), {"heartbeat", "chat", "boot", "schedule", "none", "task"})
         self.assertIn("upkeep 15% (with its own schedules 31%)", upkeep.format_measure("wren", m))
 
+    def test_an_old_stream_marks_a_task_turn_by_its_notification(self):
+        self.row(1, "chat", "operator:ana", "hi")
+        self.events.append({"ts": self.now - 70, "kind": "system",
+                            "payload": {"subtype": "task_notification"}})
+        self.turn([], 1.5)          # written before the runner set `background`
+        self.turn([], 0.5)          # no notification: still a row-less turn
+        self.events.append({"ts": self.now - 50, "kind": "system",
+                            "payload": {"subtype": "task_notification"}})
+        self.turn([1], 2.0)         # a chat turn stays a chat turn
+        self.write()
+        m = upkeep.measure(self.home, days=7, now=self.now)
+        self.assertEqual(set(m["kinds"]), {"task", "none", "chat"})
+        self.assertAlmostEqual(m["classes"]["work"]["cost_usd"], 3.5)
+
     def test_the_window(self):
         self.row(1, "chat", "operator:ana", "hi")
         self.turn([1], 1.0, ago=10 * 86400)

@@ -147,7 +147,7 @@ A node (`cousin_node.py`, shipped in the archive) is one Python file with no dep
 | route | what it does |
 |---|---|
 | `GET /health` | `{"status": "ok", "slug", "port", "brain": "agent" \| "placeholder"}`. Always open |
-| `POST /api/send` | `{"user", "message", "msg_id"?}`, the first two required. Stores the message and answers `{"ok": true, "id", "timestamp"}` straight away; the node thinks on a background thread and its reply shows up in the history. A repeat of a `msg_id` seen in the last 15 minutes (in memory) answers the stored row with `"duplicate": true`, with no second row or [turn](../glossary.md#turn) |
+| `POST /api/send` | `{"user", "message", "msg_id"?}`, the first two required. Stores the message and answers `{"ok": true, "id", "timestamp"}` straight away; the node thinks on a background thread and its reply shows up in the history. A repeat of a `msg_id` seen in the last 15 minutes (in memory) answers the stored row with `"duplicate": true`, with no second row or [turn](../glossary.md#turn); one that arrives while the first try is still storing waits up to 10 s, then answers `503` (try again) |
 | `GET /api/history` | `user` required, plus `since`, `before`, `limit` (default 200). Same answer and paging as [history](chat-api.md#history) on this machine; no `archived`, no reactions |
 
 No search, archive, reactions or pane. Messages are kept in `data/chat.jsonl` next to the node.

@@ -769,10 +769,16 @@ class _Handler(BaseHTTPRequestHandler):
             raise _BadRequest("msg_id must be 8-128 letters, digits, '-' or '_'")
         if msg_id:
             claim = self.node.claim_send(msg_id)
+            if claim is self.node.STILL_PENDING:
+                # the first try is still storing past the wait: not ok yet,
+                # and a 503 has the sender try again rather than trust it
+                self._send_json(503, {"ok": False, "error": "the first try of this"
+                                      " msg_id is still being stored; retry"})
+                return
             if claim is not None:
-                # the same send retried (the console's, after a timeout),
-                # maybe while the first is still storing: the row it stored,
-                # never a second one, and no second turn
+                # the same send retried (the console's, after a timeout):
+                # the row the first try stored, never a second one, and no
+                # second turn
                 self._send_json(200, dict(claim, ok=True, duplicate=True))
                 return
         try:
@@ -838,7 +844,7 @@ class Node:
         self._thread = None
 
     SEND_IDS_KEPT_S = 900.0
-    SEND_CLAIM_WAIT_S = 20.0
+    SEND_CLAIM_WAIT_S = 10.0          # under the console's 15 s a try
 
     def claim_send(self, msg_id):
         """Claim a /api/send's msg_id, atomically: None when this request is
@@ -864,7 +870,9 @@ class Node:
             if hit is None:
                 self._sends[msg_id] = (time.time(), None)   # the first gave up: ours now
                 return None
-            return hit[1] or {"id": None, "timestamp": None, "pending": True}
+            return hit[1] or self.STILL_PENDING
+
+    STILL_PENDING = {"pending": True}
 
     def settle_send(self, msg_id, row):
         with self._sends_cond:

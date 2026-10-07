@@ -767,3 +767,32 @@ class TestRetryReviewFixes(NodeCase):
                 hive.hive_send(queen_url="http://q", token="t", to="sam", body="hi",
                                msg_id="cli-0002", sleep=lambda s: None)
         self.assertEqual(len(calls), 1)
+
+
+class TestClaimWaitBounds(NodeCase):
+    """#251 re-look: a try that waits out a still-storing first one is a
+    503, not an ok, and the wait stays under the console's 15 s a try."""
+
+    def test_a_still_pending_first_try_is_503(self):
+        node = self._node()
+        node.SEND_CLAIM_WAIT_S = 0.2
+        real_add = node.store.add
+
+        def slow_add(**kw):
+            time.sleep(1.0)
+            return real_add(**kw)
+        node.store.add = slow_add
+        body = {"user": "Sam", "message": "hello", "msg_id": "console-00000003"}
+        first = []
+        t = threading.Thread(target=lambda: first.append(self._call(node, "/api/send", "POST", body)))
+        t.start()
+        time.sleep(0.1)
+        status, answer = self._call(node, "/api/send", "POST", body)
+        t.join()
+        self.assertEqual(status, 503)
+        self.assertFalse(answer["ok"])
+        self.assertEqual(first[0][0], 200)
+
+    def test_the_wait_is_under_the_console_timeout(self):
+        from cousin_lib.console import proxy
+        self.assertLess(self.module.Node.SEND_CLAIM_WAIT_S, proxy._SEND_TIMEOUT)

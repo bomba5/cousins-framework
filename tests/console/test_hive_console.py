@@ -347,7 +347,9 @@ class TestRemoteChat(HiveConsoleCase):
                                  {"cousin": "kestrel", "user": "Sam",
                                   "message": "hi"})
         self.assertEqual((status, body["id"]), (200, 7))
-        self.assertEqual(node.calls[-1][3], {"user": "Sam", "message": "hi"})
+        sent = dict(node.calls[-1][3])
+        self.assertTrue(sent.pop("msg_id").startswith("console-"))
+        self.assertEqual(sent, {"user": "Sam", "message": "hi"})
         for call in node.calls:
             self.assertEqual(call[2], "Bearer %s" % token)
         self.assertEqual(self.get(

@@ -504,13 +504,16 @@ class Brain:
     def _tell_home(self, text):
         """Sent through the queen (docs/reference/hive-api.md). One the
         queen does not take for now is retried under the same id (the
-        Retrier); one it refuses for good, or any message without
-        TELL_HOME=1, is dropped, and the log says so."""
+        Retrier); one it refuses for good, one it did not take when no
+        Retrier runs, or any message without TELL_HOME=1, is dropped, and
+        the log says so."""
         if self.config.tell_home:
             state = self.hive.tell_home(text, msg_id="%s-%s" % (
                 self.config.slug, uuid.uuid4().hex))
             if state == "permanent":
                 self.log("tell-home dropped: the queen refused it")
+            elif state == "transient":      # no retrier to send it again
+                self.log("tell-home dropped: the queen did not take it")
             return state in ("ok", "queued")
         self.log("tell-home dropped: TELL_HOME is not 1")
         return False

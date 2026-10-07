@@ -852,17 +852,32 @@ lists each suspect invalidator with its turn pair.
 cousin-cache-audit --days 7 --diagnose
 ```
 
-`cousin-upkeep` splits each cousin's spend over the last `--days` (default
-7) into upkeep and work, from what the runner already wrote: each turn's
-`result` and `usage` events in `data/stream/`, and the inbox rows the turn
-answered. Upkeep is a turn that answered only the context heartbeat, a
-boot or flip digest, or a memory proposal; a turn that also answered a
-chat, a meeting turn or a schedule is work. A turn with no inbox row (a
-drained or requeued result) is `other`. It prints one line per cousin and
-a row per kind; `--json` prints the numbers; name cousins to report only
-those. On a login lane the dollars are the API-equivalent estimate the
-tokens page shows: read them as a share. The console's Tokens page shows
-the same split (`GET /api/tokens/upkeep`).
+`cousin-upkeep` splits each cousin's spend over the last `--days` (1-90,
+default 7) from what the runner already wrote: each turn's `result` and
+`usage` events in `data/stream/`, and the inbox rows the turn answered.
+Four classes:
+
+- **upkeep**: every row the turn answered is the context heartbeat, a
+  boot or flip digest, or a memory proposal;
+- **self**: a prompt the cousin scheduled for itself (`cousin-schedule`).
+  The tool can't tell a cousin's self-set heartbeat from a real reminder,
+  so this is shown apart: read upkeep as a floor and upkeep plus self as a
+  ceiling;
+- **work**: any row is a chat, a meeting turn, a reaction, a hook, a
+  loop or the operator stopping a turn (`interrupt`), or the turn is one
+  the SDK started when a background task finished (`task`); a heartbeat
+  that a message joined is work;
+- **other**: a row gone from the inbox, a source in no list (an `outbox`
+  report), or a turn with no row that isn't a `task`.
+
+It prints one line per cousin and a row per kind; `--json` prints the
+numbers (`{"<slug>": {...}}`); name cousins to report only those. Tokens
+are usage totals, cache reads included, so a heartbeat in a long session
+shows a large count. On a login lane the dollars are the API-equivalent
+estimate the tokens page shows: read them as a share. The console's Tokens
+page shows the same split (`GET /api/tokens/upkeep`). Only the `sdk` and
+`opencode` runners write the `usage` events it reads, so a `tmux` cousin
+always shows no costed turns.
 
 ```
 cousin-upkeep --days 7 wren

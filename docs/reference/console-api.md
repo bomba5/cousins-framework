@@ -547,7 +547,7 @@ For a slug that isn't local but is a hive node, the console proxies to where the
 
 ### `GET /api/tokens/upkeep`
 
-Each cousin's spend split into upkeep and work over `?days=` (1-90, default 7), as `cousin-upkeep --json` gives it: `{"ok": true, "days", "cousins": {"<slug>": {"days", "turns", "cost_usd", "tokens", "classes": {"upkeep" | "work" | "other": {"turns", "cost_usd", "tokens"}}, "kinds": {"<kind>": {...}}, "upkeep_share"}}}`. A kind is `heartbeat`, `schedule`, `loop`, or the inbox row's source (`chat`, `meeting`, `boot`, `flip`, `propose`, ...); `none` is a turn with no inbox row, `gone` one whose rows are gone. `upkeep_share` is null for a cousin with no cost. `400` for days out of range. See [commands](../commands.md#maintenance).
+Each cousin's spend split into upkeep, self, work and other over `?days=` (1-90, default 7): `{"ok": true, "days", "cousins": {"<slug>": {"days", "turns", "cost_usd", "tokens", "classes": {"upkeep" | "self" | "work" | "other": {"turns", "cost_usd", "tokens"}}, "kinds": {"<kind>": {...}}, "upkeep_share", "upkeep_or_self_share"}}}`; each cousin's object is what `cousin-upkeep --json` prints for it. A kind is `heartbeat`, `schedule`, `loop`, `task` (a turn the SDK started when a background task finished), or the inbox row's source (`chat`, `meeting`, `boot`, `flip`, `propose`, `outbox`, ...); `none` is a turn with no row, `gone` one whose rows are gone. `tokens` includes cache reads. The two shares are null for a cousin with no cost. `400` for days out of range. See [commands](../commands.md#maintenance).
 
 ### `GET /api/messages`
 

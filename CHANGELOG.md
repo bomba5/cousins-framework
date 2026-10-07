@@ -11,11 +11,14 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `cousin-upkeep` (and a panel on the console's Tokens page, from
   `GET /api/tokens/upkeep`) splits each cousin's spend over the last N
   days into upkeep (turns that only answered the context heartbeat, a
-  boot or flip digest, or a memory proposal), work (chat, meetings,
-  schedules, loops, and any heartbeat a message joined) and other (a
-  turn with no inbox row). It is measured from what the runner already
-  wrote, its stream's `result` and `usage` events and the inbox rows,
-  so history counts too. Dollars on a login lane are the usual estimate.
+  boot or flip digest, or a memory proposal), self (prompts
+  the cousin scheduled for itself, shown apart because a self-set
+  heartbeat looks like a reminder: upkeep is a floor, upkeep + self a
+  ceiling), work (chat, meetings, reactions, hooks, loops, background-task
+  turns, and any heartbeat a message joined) and other. It is measured
+  from what the runner already wrote, its stream's `result` and `usage`
+  events and the inbox rows, so history counts too. Tokens include cache
+  reads; dollars on a login lane are the usual estimate.
 
 ## 3.33.0 - 2026-10-07
 

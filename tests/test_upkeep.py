@@ -29,9 +29,12 @@ class UpkeepCase(HermeticCase):
         self.db.execute("INSERT INTO inbox VALUES (?, ?, ?, ?)", (i, thread, source, body))
         self.db.commit()
 
-    def turn(self, ids, cost, tokens=100, ago=60):
+    def turn(self, ids, cost, tokens=100, ago=60, background=False):
         ts = self.now - ago
-        self.events.append({"ts": ts, "kind": "result", "payload": {"inbox_ids": ids}})
+        payload = {"inbox_ids": ids}
+        if background:
+            payload["background"] = True
+        self.events.append({"ts": ts, "kind": "result", "payload": payload})
         self.events.append({"ts": ts, "kind": "usage", "payload": {"cost_usd": cost, "total": tokens}})
 
     def write(self):
@@ -52,16 +55,19 @@ class TestMeasure(UpkeepCase):
         self.turn([3], 1.0)
         self.turn([4], 2.0)
         self.turn([5, 6], 4.0)      # a heartbeat the operator's message joined is work
-        self.turn([], 0.5)          # a drained result
+        self.turn([], 0.5)          # a result with no rows
+        self.turn([], 1.5, background=True)     # the SDK woke it for a finished task
         self.write()
         m = upkeep.measure(self.home, days=7, now=self.now)
-        self.assertEqual(m["turns"], 6)
+        self.assertEqual(m["turns"], 7)
         self.assertAlmostEqual(m["classes"]["upkeep"]["cost_usd"], 2.0)
-        self.assertAlmostEqual(m["classes"]["work"]["cost_usd"], 9.0)
+        self.assertAlmostEqual(m["classes"]["self"]["cost_usd"], 2.0)
+        self.assertAlmostEqual(m["classes"]["work"]["cost_usd"], 8.5)
         self.assertAlmostEqual(m["classes"]["other"]["cost_usd"], 0.5)
-        self.assertAlmostEqual(m["upkeep_share"], 2.0 / 11.5)
-        self.assertEqual(set(m["kinds"]), {"heartbeat", "chat", "boot", "schedule", "none"})
-        self.assertIn("upkeep 17%", upkeep.format_measure("wren", m))
+        self.assertAlmostEqual(m["upkeep_share"], 2.0 / 13.0)
+        self.assertAlmostEqual(m["upkeep_or_self_share"], 4.0 / 13.0)
+        self.assertEqual(set(m["kinds"]), {"heartbeat", "chat", "boot", "schedule", "none", "task"})
+        self.assertIn("upkeep 15% (with its own schedules 31%)", upkeep.format_measure("wren", m))
 
     def test_the_window(self):
         self.row(1, "chat", "operator:ana", "hi")
@@ -73,6 +79,20 @@ class TestMeasure(UpkeepCase):
         m = upkeep.measure(self.home, days=7, now=self.now)
         self.assertEqual((m["turns"], m["upkeep_share"]), (0, None))
         self.assertIn("no costed turns", upkeep.format_measure("wren", m))
+
+    def test_the_file_cache_sees_a_grown_file(self):
+        self.row(1, "chat", "operator:ana", "hi")
+        self.turn([1], 1.0)
+        self.write()
+        self.assertEqual(upkeep.measure(self.home, days=7, now=self.now)["turns"], 1)
+        self.turn([1], 1.0)
+        self.write()
+        self.assertEqual(upkeep.measure(self.home, days=7, now=self.now)["turns"], 2)
+
+    def test_the_cli_bounds_days(self):
+        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(self.home.parent.parent)}), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(upkeep.upkeep_main(["--days", "0"]), 2)
 
     def test_the_cli_prints_one_cousin(self):
         self.row(1, "chat", "operator:ana", "hi")

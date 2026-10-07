@@ -72,7 +72,7 @@ the home: an absolute path, `~`, `..` or anything under `.secrets` is
 refused before a row exists. From there it's the usual launcher: the command runs detached in its own process group, from the
 cousin's home, its output streams into the row's log for the console's
 Jobs view, and the row closes `done` or `failed` with the command's exit
-code (or turns `lost` if its runner dies without closing it,
+code (or turns `lost` if its [runner](glossary.md#runner) dies without closing it,
 [jobs and loops](jobs-and-loops.md)). The call returns at once with `{"job_id": ..., "log_path": ...}`
 and never waits for the command. An empty `argv`, one with an element
 that isn't a string, or a program starting with `-`, is refused before

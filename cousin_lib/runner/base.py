@@ -30,6 +30,7 @@ SOURCE_PRIORITY = {
     "flip": 0,
     "interrupt": 0,   # the out-of-process interrupt, ahead of everything
     "chat": 3,        # the peer case; operator/person chat is 1, below
+    "outbox": 3,      # how a message to an external peer ended, as a peer's would
     "reaction": 1,
     "hook": 1,
     "boot": 1,

@@ -226,6 +226,36 @@ function SchedulesPanel({ slug, cousins }) {
   </SysPanel>;
 }
 
+// ---- outbox ---------------------------------------------------------------------
+
+function SysOutboxPanel() {
+  const [rows, setRows] = React.useState(null);
+  const load = React.useCallback(async () => {
+    const d = await apiGet("/api/system/outbox");
+    setRows(d ? d.rows || [] : []);
+  }, []);
+  React.useEffect(() => { load(); const id = setInterval(load, 15000); return () => clearInterval(id); }, [load]);
+  const tone = { pending: "amber", delivered: "green", gave_up: "red" };
+  return <SysPanel title="outbox" sub="messages to external peers sent again under the same id until they land (up to 14 min)">
+    {rows === null ? <span className="muted">loading...</span> : rows.length === 0
+      ? <span className="muted" style={{ fontSize: 12 }}>nothing kept: every message to an external peer was confirmed on its first try</span>
+      : <div className="table-scroll">
+          <table className="data">
+            <thead><tr><th>msg_id</th><th>from</th><th>to</th><th>state</th><th className="num">tries</th><th>last error</th><th>message</th></tr></thead>
+            <tbody>{rows.map(r => <tr key={r.id}>
+              <td className="mono" title={r.msg_id}>{r.msg_id.slice(0, 8)}</td>
+              <td className="mono">{r.sender}</td>
+              <td className="mono">{r.dest}</td>
+              <td><Pill tone={tone[r.state] || "gray"}>{r.state.replace("_", " ")}</Pill></td>
+              <td className="num">{r.attempts}</td>
+              <td style={{ wordBreak: "break-word" }}>{r.last_error || ""}</td>
+              <td style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{r.message.length > 160 ? r.message.slice(0, 157) + "..." : r.message}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
+  </SysPanel>;
+}
+
 // ---- console users --------------------------------------------------------------
 
 function SysUsersPanel() {
@@ -727,6 +757,7 @@ function SysConfigEditors() {
     <SysPlainTomlEditor title="hive" sub="config/hive.toml: the console as the hive's queen"
                      name="hive" file={cfg.hive} fields={SYS_HIVE_FIELDS} reload={load} />
     <SysPeersEditor file={cfg.peers} reload={load} />
+    <SysOutboxPanel />
     <SysTextFileEditor title="outbound filter" sub="config/outbound-filter.json" file={cfg.outbound_filter}
                     route="/api/system/outbound-filter" reload={load}
                     hint='{"terms": [...], "protected": [...], "trusted_peers": [...], "surfaces": {"<surface>": {"add": [...]}}}' />

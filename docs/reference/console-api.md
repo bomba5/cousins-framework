@@ -976,6 +976,10 @@ The supervisor, one-shot schedules, console users, backup and the install-wide c
 
 `cousin-supervisor status` over its socket: `{"ok": true, "running": true, "supervised", "pid", "started", "children": [{"name", "kind", "state", "pid", "restarts", "since", "reason", "last_exit", "actions": {"start", "stop", "restart", "confirm"?, "why"?}}]}`. `running` is false when no supervisor runs for the root, null when one took the connection but did not answer; `reason` says which. `supervised` is true when the console itself is a supervisor child.
 
+### `GET /api/system/outbox`
+
+What the outbox holds (messages to signed external peers sent again under the same id, [chat](../chat.md#cousins-on-another-install)), newest first, 100 at most: `{"ok": true, "rows": [{"id", "msg_id", "sender", "dest", "message", "created", "attempts", "next_at", "state", "last_error", "finished"}], "deadline_s": 840}`. `state` is `pending`, `delivered` or `gave_up`; `?state=` filters by it (`400` for another word).
+
 ### `POST /api/system/supervisor/start`
 
 `{"child": "loops" | "runner:<slug>"}`: the supervisor's `start`. A runner cousin is held exclusively for the call, as the fleet's start does (`409` while a flip or an operation runs on it). `200` the supervisor's answer; `400` the console (it restarts through `POST /api/admin/restart/framework`, never stops from its own page) or a bridge (`telegram:<slug>` follows its runner); `404` no such cousin; `409` the supervisor refused, with its reason; `503` no supervisor.

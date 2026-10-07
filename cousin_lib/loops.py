@@ -1050,7 +1050,7 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     firing), `delivery:<slug>` a delivery to the cousin, `distill:<slug>`,
     `requests`, `schedules`, `index-refresh` and `index:<slug>`,
     `dream-due:<slug>` and `dreaming:<slug>` (a finished pass: error or
-    lost fails, done, no_change and budget are ok), `meetings`."""
+    lost fails, done, no_change and budget are ok), `outbox`, `meetings`."""
     now = now or time.time()
     state = _load_state()
     report = {"fired": [], "errors": [], "requests": 0, "flips": [],
@@ -1177,6 +1177,15 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
             _health(report, "dreaming", True)
         for slug, out in report.get("dreamed", []):
             _health(report, "dreaming:" + slug, *dream_outcome(out))
+    try:
+        from cousin_lib import outbox
+        report["outbox"] = outbox.drain(FrameworkConfig.from_env().root, now=now)
+    except Exception as err:
+        # A broken outbox never costs the loops their tick.
+        report["errors"].append("outbox: %s" % err)
+        _health(report, "outbox", False, err)
+    else:
+        _health(report, "outbox", True)
     try:
         from cousin_lib import meetings
         report["meetings"] = meetings.tick(deliver=deliver, now=now)

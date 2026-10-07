@@ -259,6 +259,22 @@ install by). `send_path` then defaults to `/peer/send`, the body is
 the secret itself is never sent. The keys, and the peer's side
 (`inbound_token_file`, `reach`), are in
 [external-peers.toml](configuration.md#external-peerstoml).
+
+A signed send that can't be confirmed isn't lost. If the peer answers a
+5xx or 429, or the connection fails or times out, the message goes to
+the outbox (`data/outbox.db`) and the send answers `{"ok": true,
+"queued": true, "msg_id", "note"}`. The loops daemon sends it again on
+its ticks, 15 s, 30 s, 1, 2, 4 and then every 5 minutes, always under the
+same `msg_id` with a fresh `sent_at`. The peer's gate delivers an id only
+once, so a retry of a message that had landed answers 409 and counts as
+delivered, never shown twice. The outbox stops after 14 minutes (inside
+the 15 the gate remembers an id for), or at once on any other 4xx. Either
+way the sending cousin gets a `system` item from `framework` saying how
+it ended (`[fw-outbox] Your message to kestrel ... was delivered on
+attempt 3`, or `was NOT delivered` with the last error). A legacy peer
+(no `token_file`) has no id to dedup by and is sent once, never retried.
+`cousin-chat outbox` and the console's System page (install config,
+under external peers) list what the outbox holds.
 The address must pass the same allowlist the console uses (loopback,
 private ranges, plus `config/net-allowlist.json`). The request goes
 direct, no proxy, and a redirect is refused. A local cousin with the

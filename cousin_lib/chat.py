@@ -238,33 +238,13 @@ def read_secret(root, rel, what):
     return value
 
 
-def _post_external(peer, payload, guard, *, root=None):
-    """One message to an external peer. With a `token_file` (a peer whose
-    console takes POST /peer/send) the message is signed with it
-    (`Authorization: HMAC <sender>:<hex>`, peer_signature; the secret never
-    travels) and the body carries what that route needs: `to`, a `msg_id`
-    and a `sent_at` (its replay window). Without one, the legacy body,
-    {user, message}, to the peer's chat server."""
-    import time
-    import uuid
-    check_peer_address(peer, guard)
+def _post(peer, payload, headers):
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({}), _NoRedirect())
-    headers = {"Content-Type": "application/json"}
-    if peer.token_file:
-        if not peer.sender:
-            raise MissingConfigError("external peer %s: token_file needs sender, the name that"
-                                     " peer knows this install by" % peer.slug)
-        secret = read_secret(root, peer.token_file, "external peer %s token_file" % peer.slug)
-        payload = {"to": peer.slug, "message": payload["message"], "msg_id": uuid.uuid4().hex,
-                   "sent_at": round(time.time(), 3)}
-        headers["Authorization"] = "HMAC %s:%s" % (peer.sender, peer_signature(
-            secret, peer.sender, peer.slug, payload["sent_at"], payload["msg_id"],
-            payload["message"]))
     req = urllib.request.Request(
         peer.send_url,
         data=json.dumps(payload).encode(),
-        headers=headers,
+        headers=dict({"Content-Type": "application/json"}, **headers),
         method="POST",
     )
     with opener.open(req, timeout=5) as r:
@@ -273,6 +253,59 @@ def _post_external(peer, payload, guard, *, root=None):
         return json.loads(body or b"{}")
     except ValueError:
         return {}
+
+
+def post_signed(root, peer, message, msg_id, *, guard=None):
+    """One signed attempt to a peer whose console takes POST /peer/send:
+    `Authorization: HMAC <sender>:<hex>` (peer_signature; the secret never
+    travels) over `to`, the `msg_id` and a fresh `sent_at` (the gate's
+    replay window). A retry passes the same `msg_id`: the gate delivers an
+    id once. Raises what urllib raises."""
+    import time
+    if guard is None:
+        from cousin_lib.server.netguard import NetGuard
+        guard = NetGuard.from_config(root)
+    check_peer_address(peer, guard)
+    if not peer.sender:
+        raise MissingConfigError("external peer %s: token_file needs sender, the name that"
+                                 " peer knows this install by" % peer.slug)
+    secret = read_secret(root, peer.token_file, "external peer %s token_file" % peer.slug)
+    payload = {"to": peer.slug, "message": message, "msg_id": msg_id,
+               "sent_at": round(time.time(), 3)}
+    auth = "HMAC %s:%s" % (peer.sender, peer_signature(
+        secret, peer.sender, peer.slug, payload["sent_at"], msg_id, message))
+    return _post(peer, payload, {"Authorization": auth})
+
+
+def _post_external(peer, payload, guard, *, root=None, sender_slug=None):
+    """One message to an external peer. A signed peer (`token_file`) gets
+    post_signed under a fresh msg_id; an attempt that may pass later (a
+    5xx, a 429, a connection error, a timeout) goes to the outbox, which
+    sends it again under the same id for up to 14 minutes, and the answer
+    says `queued`; a 409 means it already landed. Without a token_file,
+    the legacy body, {user, message}, to the peer's chat server, once."""
+    import uuid
+    if not peer.token_file:
+        check_peer_address(peer, guard)
+        return _post(peer, payload, {})
+    from cousin_lib import outbox
+    msg_id = uuid.uuid4().hex
+    try:
+        return post_signed(root, peer, payload["message"], msg_id, guard=guard)
+    except (MissingConfigError, PeerAddressRefused):
+        raise
+    except Exception as err:  # noqa: BLE001 - classified below
+        kind = outbox.classify(err)
+        if kind == outbox.DELIVERED_NOW:
+            return {"ok": True, "msg_id": msg_id}
+        if kind == outbox.PERMANENT or root is None or not sender_slug:
+            raise
+        outbox.enqueue(root, msg_id=msg_id, sender=sender_slug, dest=peer.slug,
+                       message=payload["message"], error=outbox.describe(err))
+        return {"ok": True, "queued": True, "msg_id": msg_id,
+                "note": "not confirmed yet (%s): the outbox sends it again under the same"
+                        " id for up to 14 minutes and tells you how it ended"
+                        % outbox.describe(err)}
 
 
 def login_marker(home):
@@ -355,7 +388,7 @@ def send_message(fw, sender, dest_slug, text, policy=None, display_name=None,
         if guard is None:
             from cousin_lib.server.netguard import NetGuard
             guard = NetGuard.from_config(fw.root)
-        return _post_external(target, payload, guard, root=fw.root)
+        return _post_external(target, payload, guard, root=fw.root, sender_slug=sender.slug)
     return deliver_to(target, payload)
 
 
@@ -380,7 +413,26 @@ def chat_main(argv=None):
                    help="sender display name: this cousin's own name or"
                         " slug only")
     sub.add_parser("list", help="list addressable cousins")
+    o = sub.add_parser("outbox", help="messages to external peers kept for a retry")
+    o.add_argument("--state", choices=("pending", "delivered", "gave_up"))
     args = parser.parse_args(argv)
+
+    if args.cmd == "outbox":
+        # The operator's view too: no sender needed.
+        from cousin_lib import outbox
+        try:
+            fw = FrameworkConfig.for_command()
+        except MissingConfigError as e:
+            print("cousin-chat: %s" % e, file=sys.stderr)
+            return 2
+        rows = outbox.list_rows(fw.root, state=args.state)
+        if not rows:
+            print("(outbox empty)")
+        for r in rows:
+            print("%s  %-9s %-12s -> %-12s tries=%d  %s"
+                  % (r["msg_id"][:8], r["state"], r["sender"], r["dest"], r["attempts"],
+                     r["last_error"] or ""))
+        return 0
 
     try:
         fw = FrameworkConfig.for_command()
@@ -425,5 +477,8 @@ def chat_main(argv=None):
     except (DeliveryRefused, NotDelivered, urllib.error.URLError) as e:
         print("cousin-chat: %s" % e, file=sys.stderr)
         return 1
-    print(json.dumps({"ok": True, "to": args.slug, "id": result.get("id")}, sort_keys=True))
+    out = {"ok": True, "to": args.slug, "id": (result or {}).get("id")}
+    if (result or {}).get("queued"):
+        out.update(queued=True, msg_id=result.get("msg_id"), note=result.get("note"))
+    print(json.dumps(out, sort_keys=True))
     return 0

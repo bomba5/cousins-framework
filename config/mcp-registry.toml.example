@@ -25,7 +25,7 @@ max_output = 16000    # characters of stdout returned per call; the rest is cut 
 
 [tools.memory]
 command = "cousin-memory"
-description = "Durable memory: search what you wrote, log a decision with its reasoning, remember a fact with its truth level (operator = the operator said it, needs cite), mark a topic obsolete when something superseded it (why required; it leaves the distilled views, raw keeps the history), recall what you wrote (the best matches for a keyword, or the newest entries), walk an entry's provenance (why: what it was built from and what was built on it), checkpoint your current activity."
+description = "Durable memory: search what you wrote, log a decision with its reasoning, remember a fact with its truth level (operator = the operator said it, needs cite), mark a topic obsolete when something superseded it (why required; it leaves the distilled views, raw keeps the history), recall what you wrote (the best matches for a keyword, or the newest entries), checkpoint your current activity."
 
 [tools.memory.properties]
 query = { type = "string", description = "search text (search)" }

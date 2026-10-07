@@ -489,33 +489,84 @@ def mark_obsolete(home, topic, why, *, by=None, force=False,
     return _append_raw(home, mark)
 
 
-def why(home, eid):
-    """One entry and one hop around it: what it was built from (its
+WHY_MAX_DEPTH = 12
+
+
+def why(home, eid, *, depth=None):
+    """One entry and its provenance: what it was built from (its
     `derived_from`, each resolved or marked missing), what was built from
     it (entries naming it), and the mark that retired it, if any. KeyError
-    for an id no raw entry has. Nothing is inherited along the hop: each
-    entry keeps its own truth level."""
+    for an id no raw entry has. Nothing is inherited along the chain: each
+    entry keeps its own truth level.
+
+    `depth` is how many hops to walk each way (None: the whole chain, up
+    to WHY_MAX_DEPTH). The top level's `derived_from` and `used_by` are
+    the first hop; past it, each of their entries carries its own next
+    hop as `built_from` / `built_on_by`. An entry already on the path is
+    `{"id", "cycle": true}`; one cut by the depth carries `more: true`."""
     entries = _all_raw(home)
     by_id = {entry_id(e): e for e in entries}
     if eid not in by_id:
         raise KeyError(eid)
+    users = {}
+    for e in entries:
+        for d in e.get("derived_from") or []:
+            users.setdefault(d, []).append(e)
+    limit = WHY_MAX_DEPTH if depth is None else max(1, min(int(depth), WHY_MAX_DEPTH))
+
+    def sources(e):
+        return e.get("derived_from") or []
+
+    def walk_back(i, level, path):
+        if i not in by_id:
+            return {"id": i, "missing": True}
+        node = dict(by_id[i], id=i)
+        if i in path:
+            return {"id": i, "cycle": True, "topic": node.get("topic")}
+        nxt = sources(node)
+        if level < limit and nxt:
+            node["built_from"] = [walk_back(d, level + 1, path | {i}) for d in nxt]
+        elif nxt:
+            node["more"] = True
+        return node
+
+    def walk_forward(e, level, path):
+        i = entry_id(e)
+        node = dict(e, id=i)
+        if i in path:
+            return {"id": i, "cycle": True, "topic": node.get("topic")}
+        nxt = users.get(i, [])
+        if level < limit and nxt:
+            node["built_on_by"] = [walk_forward(u, level + 1, path | {i}) for u in nxt]
+        elif nxt:
+            node["more"] = True
+        return node
+
     entry = by_id[eid]
-    built_from = [dict(by_id[d], id=d) if d in by_id else {"id": d, "missing": True}
-                  for d in entry.get("derived_from") or []]
-    used_by = [dict(e, id=entry_id(e)) for e in entries
-               if eid in (e.get("derived_from") or [])]
+    built_from = [walk_back(d, 1, {eid}) for d in sources(entry)]
+    used_by = [walk_forward(u, 1, {eid}) for u in users.get(eid, [])]
     info = next((row for row in validity(home) if row["id"] == eid), {})
     return {"entry": dict(entry, id=eid), "derived_from": built_from, "used_by": used_by,
-            "retired_by": info.get("retired_by"), "valid_to": info.get("valid_to")}
+            "retired_by": info.get("retired_by"), "valid_to": info.get("valid_to"),
+            "depth": limit}
 
 
 def format_why(out):
-    def line(e):
+    def line(e, indent):
+        pad = "  " * indent
         if e.get("missing"):
-            return "  %s (not in raw memory)" % e["id"]
+            return [pad + "%s (not in raw memory)" % e["id"]]
+        if e.get("cycle"):
+            return [pad + "%s (already on this chain: a cycle)" % e["id"]]
         text = " ".join(str(e.get("content") or "").split())
-        return "  %s [%s] %s: %s" % (e["id"], e.get("truth_level", "?"), e.get("topic", "?"),
-                                    text[:200])
+        out_lines = [pad + "%s [%s] %s: %s%s" % (e["id"], e.get("truth_level", "?"),
+                                                 e.get("topic", "?"), text[:200],
+                                                 " (and further)" if e.get("more") else "")]
+        for child in e.get("built_from") or []:
+            out_lines += line(child, indent + 1)
+        for child in e.get("built_on_by") or []:
+            out_lines += line(child, indent + 1)
+        return out_lines
     entry = out["entry"]
     lines = ["%s [%s] %s: %s" % (entry["id"], entry.get("truth_level", "?"),
                                  entry.get("topic", "?"),
@@ -523,9 +574,11 @@ def format_why(out):
     if out.get("retired_by"):
         lines.append("retired by %s (%s)" % (out["retired_by"], out.get("valid_to") or "?"))
     lines.append("built from:" if out["derived_from"] else "built from: nothing recorded")
-    lines += [line(e) for e in out["derived_from"]]
+    for e in out["derived_from"]:
+        lines += line(e, 1)
     lines.append("built on by:" if out["used_by"] else "built on by: nothing")
-    lines += [line(e) for e in out["used_by"]]
+    for e in out["used_by"]:
+        lines += line(e, 1)
     return "\n".join(lines)
 
 
@@ -1119,7 +1172,7 @@ def _cmd_why(args):
     """One entry, what it was built from and what was built from it."""
     home = _home(args)
     try:
-        out = why(home, args.id)
+        out = why(home, args.id, depth=getattr(args, "depth", None))
     except KeyError:
         print("error: no raw entry with id %s (cousin-memory history TOPIC lists ids)"
               % args.id, file=sys.stderr)
@@ -1546,9 +1599,12 @@ def memory_main(argv=None):
     p = sub.add_parser(
         "why",
         help="one entry by its id, what it was built from (derived_from) and"
-             " what was built from it: one hop each way, nothing inherited")
+             " what was built from it: the whole chain each way, nothing inherited")
     p.add_argument("id")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--depth", type=int,
+                   help="hops to walk each way (default: the whole chain, up to %d)"
+                        % WHY_MAX_DEPTH)
     p.set_defaults(func=_cmd_why)
     p = sub.add_parser(
         "obsolete",

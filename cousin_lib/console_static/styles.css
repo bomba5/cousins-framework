@@ -1435,6 +1435,8 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
 .mx-why { color: var(--fg-2); }
 .mx-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-family: var(--mono); font-size: 10px; color: var(--fg-2); }
 .mx-meta b { color: var(--fg-1); font-weight: 500; }
+.mx-why-tree { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.mx-why { list-style: none; margin: 2px 0 2px 6px; padding-left: 10px; border-left: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 3px; }
 .btn.danger-text { color: var(--red); }
 .btn[data-confirm="armed"] { background: oklch(0.72 0.22 25 / 0.2); border-color: var(--red); color: var(--red); }
 .mx-files { display: grid; grid-template-columns: 280px 1fr; gap: 12px; flex: 1; min-height: 0; }

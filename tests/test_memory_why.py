@@ -56,6 +56,72 @@ class TestDerivedFrom(HomeCase):
         with self.assertRaises(KeyError):
             memory.why(self.home, "ffffffffffff")
 
+    def _chain(self):
+        """raw -> fact -> plan -> decision: a -> b -> c -> d (each built
+        from the one before)."""
+        memory.remember(self.home, "measure", "the NAS snapshot runs at 02:00", level="tool",
+                        cite="crontab")
+        (a,) = self.ids("measure")
+        memory.remember(self.home, "fact", "verify after 02:30", derived_from=[a])
+        (b,) = self.ids("fact")
+        memory.remember(self.home, "plan", "check at 02:45 nightly", derived_from=[b])
+        (c,) = self.ids("plan")
+        memory.remember(self.home, "decision", "a loop checks at 02:45", derived_from=[c])
+        (d,) = self.ids("decision")
+        return a, b, c, d
+
+    def test_why_walks_the_whole_chain_back(self):
+        a, b, c, d = self._chain()
+        out = memory.why(self.home, d)
+        [hop1] = out["derived_from"]
+        [hop2] = hop1["built_from"]
+        [hop3] = hop2["built_from"]
+        self.assertEqual([hop1["id"], hop2["id"], hop3["id"]], [c, b, a])
+        self.assertNotIn("built_from", hop3)            # the chain's root
+        self.assertEqual(hop3["truth_level"], "L2_TOOL")  # nothing inherited
+        text = memory.format_why(out)
+        self.assertIn("the NAS snapshot runs at 02:00", text)
+        self.assertIn("      " + a, text)                # three levels in
+
+    def test_why_walks_forward_too(self):
+        a, b, c, d = self._chain()
+        out = memory.why(self.home, a)
+        [hop1] = out["used_by"]
+        self.assertEqual(hop1["id"], b)
+        self.assertEqual(hop1["built_on_by"][0]["built_on_by"][0]["id"], d)
+
+    def test_depth_cuts_the_chain_and_says_there_is_more(self):
+        a, b, c, d = self._chain()
+        out = memory.why(self.home, d, depth=1)
+        [hop1] = out["derived_from"]
+        self.assertNotIn("built_from", hop1)
+        self.assertTrue(hop1["more"])
+        self.assertIn("(and further)", memory.format_why(out))
+
+    def test_a_cycle_stops_the_walk(self):
+        a, b, c, d = self._chain()
+        # an entry that names itself (by a later copy's id) cannot loop: hand-made cycle
+        raw = next((self.home / "memory" / "raw").glob("*.jsonl"))
+        rows = [json.loads(l) for l in raw.read_text().splitlines()]
+        out = memory.why(self.home, d)
+        self.assertEqual(out["depth"], memory.WHY_MAX_DEPTH)
+        with mock.patch.object(memory, "_all_raw", return_value=[
+                dict(rows[0], derived_from=[d])] + rows[1:]):
+            looped = memory.why(self.home, d)
+        tail = looped["derived_from"][0]["built_from"][0]["built_from"][0]["built_from"][0]
+        self.assertTrue(tail["cycle"])
+
+    def test_the_cli_takes_depth(self):
+        a, b, c, d = self._chain()
+        out = io.StringIO()
+        with mock.patch.dict("os.environ", {"COUSIN_HOME": str(self.home)}), \
+                contextlib.redirect_stdout(out):
+            rc = memory.memory_main(["why", d, "--depth", "1", "--json"])
+        self.assertEqual(rc, 0)
+        body = json.loads(out.getvalue())
+        self.assertEqual(body["depth"], 1)
+        self.assertTrue(body["derived_from"][0]["more"])
+
     def test_a_bad_id_is_refused(self):
         for bad in (["roof"], ["0123456789AB"], 7):
             with self.assertRaisesRegex(ValueError, "derived_from"):

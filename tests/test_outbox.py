@@ -330,3 +330,14 @@ class TestReviewFixes(OutboxCase):
                                     sent_at=_t.time(), allowed=lambda s: True)
         self.assertEqual(caught.exception.status, 404)
         self.assertEqual(outbox.classify(http_error(404)), outbox.PERMANENT)
+
+
+class TestTheTickDoesNotPinTheClock(OutboxCase):
+    """#245 re-review: loops.tick drains with the outbox's own clock."""
+
+    def test_drain_gets_no_now(self):
+        from cousin_lib import loops
+        seen = []
+        with mock.patch("cousin_lib.outbox.drain", lambda root, **kw: seen.append(kw) or {}):
+            loops.tick(deliver=lambda *a, **k: None, is_alive=lambda slug: False, now=12345.0)
+        self.assertEqual(seen, [{}])

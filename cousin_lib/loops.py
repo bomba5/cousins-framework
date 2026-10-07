@@ -1179,7 +1179,9 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
             _health(report, "dreaming:" + slug, *dream_outcome(out))
     try:
         from cousin_lib import outbox
-        report["outbox"] = outbox.drain(FrameworkConfig.from_env().root, now=now)
+        # its own clock, never the tick's start: the outbox's deadline and
+        # pass budget have to see the time a slow send actually took
+        report["outbox"] = outbox.drain(FrameworkConfig.from_env().root)
     except Exception as err:
         # A broken outbox never costs the loops their tick.
         report["errors"].append("outbox: %s" % err)

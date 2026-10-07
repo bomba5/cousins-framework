@@ -166,6 +166,7 @@ class Hive:
         self.queen_url = queen_url
         self.token = token
         self.timeout = timeout
+        self.retrier = None
 
     def _call(self, path, *, method="GET", body=None):
         if not self.queen_url:
@@ -201,17 +202,49 @@ class Hive:
         return self._call("/hive/memory", method="POST",
                           body={"text": text, "scope": scope}) is not None
 
+    def post(self, path, body):
+        """One POST to the queen: "ok" (a 2xx, or 409: the queen already
+        has this id), "transient" (no queen, a timeout, a connection
+        error, 429, 5xx) or "permanent" (any other 4xx)."""
+        if not self.queen_url:
+            return "transient"
+        request = urllib.request.Request(
+            self.queen_url + path, data=json.dumps(body).encode(), method="POST",
+            headers={"Authorization": "Bearer %s" % self.token,
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as r:
+                r.read()
+            return "ok"
+        except urllib.error.HTTPError as err:
+            if err.code == 409:
+                return "ok"
+            return "transient" if err.code == 429 or err.code >= 500 else "permanent"
+        except Exception:  # noqa: BLE001 - connection, timeout, broken answer
+            return "transient"
+
+    def _send_or_queue(self, path, make_body, msg_id):
+        state = self.post(path, make_body())
+        if state == "transient" and self.retrier is not None:
+            self.retrier.add(path, make_body, msg_id)
+            return "queued"
+        return state
+
     def send(self, to, body, *, msg_id):
-        return self._call("/hive/msg", method="POST",
-                          body={"to": to, "id": msg_id, "body": body}
-                          ) is not None
+        """A message through the queen's /hive/msg, which keeps one row per
+        (recipient, id): a retry under the same id never doubles it."""
+        return self._send_or_queue(
+            "/hive/msg", lambda: {"to": to, "id": msg_id, "body": body},
+            msg_id) in ("ok", "queued")
 
     def tell_home(self, text, *, msg_id):
         """[tell-home: ...] through the queen: the token is the sender,
-        msg_id and sent_at let the queen refuse a replay."""
-        return self._call("/hive/tell-home", method="POST",
-                          body={"message": text, "msg_id": msg_id,
-                                "sent_at": time.time()}) is not None
+        msg_id and sent_at let the queen refuse a replay. A retry is signed
+        again with a fresh sent_at under the same msg_id."""
+        return self._send_or_queue(
+            "/hive/tell-home",
+            lambda: {"message": text, "msg_id": msg_id, "sent_at": time.time()},
+            msg_id)
 
     def inbox(self, *, since):
         out = self._call("/hive/inbox?since=%d" % since)
@@ -467,17 +500,102 @@ class Brain:
             return reply
 
     def _tell_home(self, text):
-        """Sent once, never retried (docs/reference/hive-api.md): a
-        message the queen does not take, or any message without
+        """Sent through the queen (docs/reference/hive-api.md). One the
+        queen does not take for now is retried under the same id (the
+        Retrier); one it refuses for good, or any message without
         TELL_HOME=1, is dropped, and the log says so."""
         if self.config.tell_home:
-            sent = self.hive.tell_home(text, msg_id="%s-%s" % (
+            state = self.hive.tell_home(text, msg_id="%s-%s" % (
                 self.config.slug, uuid.uuid4().hex))
-            if not sent:
-                self.log("tell-home dropped: the queen did not take it")
-            return sent
+            if state == "permanent":
+                self.log("tell-home dropped: the queen refused it")
+            return state in ("ok", "queued")
         self.log("tell-home dropped: TELL_HOME is not 1")
         return False
+
+
+# ---- the retrier: what the queen did not take, sent again ----------------
+
+class Retrier:
+    """Messages to the queen whose first try was transient (no queen, a
+    timeout, 429, 5xx), sent again under the SAME id until the queen takes
+    them (a 409 means it already had it), answers for good (another 4xx),
+    or RETRY_DEADLINE_S passes: inside the queen's 900 s memory of an id,
+    so a retry of one that did land is never stored twice. Kept in memory:
+    a queen outage is covered, a node restart is not."""
+
+    BACKOFF_S = (15, 30, 60, 120, 240, 300)
+    RETRY_DEADLINE_S = 840.0
+    TICK_S = 5.0
+
+    def __init__(self, hive, *, log=None, clock=time.time):
+        self.hive = hive
+        self.log = log or (lambda text: None)
+        self.clock = clock
+        self._lock = threading.Lock()
+        self._rows = []
+        self._stop = threading.Event()
+        self._thread = None
+
+    def add(self, path, make_body, msg_id):
+        now = self.clock()
+        with self._lock:
+            self._rows.append({"path": path, "make_body": make_body, "msg_id": msg_id,
+                               "created": now, "attempts": 1,
+                               "next_at": now + self.BACKOFF_S[0]})
+        self.log("queen did not take %s: retrying under the same id" % msg_id)
+
+    def pending(self):
+        with self._lock:
+            return [r["msg_id"] for r in self._rows]
+
+    def run_once(self):
+        """One pass over the due rows; returns {msg_id: outcome}."""
+        now = self.clock()
+        out = {}
+        with self._lock:
+            due = [r for r in self._rows if r["next_at"] <= now]
+        for row in due:
+            now = self.clock()
+            if now - row["created"] > self.RETRY_DEADLINE_S:
+                outcome = "gave_up"
+            else:
+                state = self.hive.post(row["path"], row["make_body"]())
+                row["attempts"] += 1
+                now = self.clock()
+                delay = self.BACKOFF_S[min(row["attempts"], len(self.BACKOFF_S)) - 1]
+                if state == "ok":
+                    outcome = "delivered"
+                elif state == "permanent" or now + delay - row["created"] > self.RETRY_DEADLINE_S:
+                    outcome = "gave_up"
+                else:
+                    row["next_at"] = now + delay
+                    outcome = "retrying"
+            if outcome != "retrying":
+                with self._lock:
+                    if row in self._rows:
+                        self._rows.remove(row)
+                self.log("%s %s after %d attempts" % (
+                    "delivered" if outcome == "delivered" else "dropped", row["msg_id"],
+                    row["attempts"]))
+            out[row["msg_id"]] = outcome
+        return out
+
+    def _loop(self):
+        while not self._stop.wait(self.TICK_S):
+            try:
+                self.run_once()
+            except Exception as err:  # noqa: BLE001 - a retry never takes the node down
+                self.log("retrier: %s" % err)
+
+    def start(self):
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=5)
 
 
 # ---- the inbox poller ---------------------------------------------------
@@ -637,9 +755,22 @@ class _Handler(BaseHTTPRequestHandler):
         message = body.get("message")
         if not user or not message:
             raise _BadRequest("user and a non-empty message are required")
+        msg_id = body.get("msg_id")
+        if msg_id is not None and (not isinstance(msg_id, str)
+                                   or not re.match(r"^[A-Za-z0-9_-]{8,128}$", msg_id)):
+            raise _BadRequest("msg_id must be 8-128 letters, digits, '-' or '_'")
+        if msg_id:
+            seen = self.node.seen_send(msg_id)
+            if seen is not None:
+                # the same send retried (the console's, after a timeout):
+                # the row it stored, not a second one, and no second turn
+                self._send_json(200, dict(seen, ok=True, duplicate=True))
+                return
         row = self.node.store.add(
             chat_user=normalize_chat_user(user), user=user,
             message=message, msg_type="user")
+        if msg_id:
+            self.node.remember_send(msg_id, {"id": row["id"], "timestamp": row["timestamp"]})
         # Think off the request thread: the send returns as soon as the
         # message is stored, and the reply lands in the thread for the
         # next history poll.
@@ -674,6 +805,9 @@ class Node:
         self.log = log or (lambda text: print(text, file=sys.stderr,
                                               flush=True))
         self.hive = Hive(config.queen_url, config.token)
+        self.retrier = Retrier(self.hive, log=self.log)
+        self.hive.retrier = self.retrier
+        self._sends, self._sends_lock = {}, threading.Lock()
         self.store = ChatStore(config.data_dir)
         self.brain = Brain(config, self.hive, self.store, log=self.log)
         self.poller = InboxPoller(config, self.hive, self.store, self.brain,
@@ -689,6 +823,21 @@ class Node:
         self.httpd = ThreadingHTTPServer((config.host, config.port), Handler)
         self._thread = None
 
+    SEND_IDS_KEPT_S = 900.0
+
+    def seen_send(self, msg_id):
+        """The row a /api/send with this msg_id stored in the last 900 s."""
+        now = time.time()
+        with self._sends_lock:
+            for key in [k for k, (at, _) in self._sends.items() if now - at > self.SEND_IDS_KEPT_S]:
+                del self._sends[key]
+            hit = self._sends.get(msg_id)
+            return hit[1] if hit else None
+
+    def remember_send(self, msg_id, row):
+        with self._sends_lock:
+            self._sends[msg_id] = (time.time(), row)
+
     @property
     def port(self):
         return self.httpd.server_address[1]
@@ -699,8 +848,10 @@ class Node:
         self._thread.start()
         self.poller.start()
         self.checkin.start()
+        self.retrier.start()
 
     def stop(self):
+        self.retrier.stop()
         self.checkin.stop()
         self.poller.stop()
         self.httpd.shutdown()

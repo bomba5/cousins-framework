@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.33.0 - 2026-10-07
+
+### Added
+
+- **Messages between machines are retried instead of dropped.** A hive
+  node used to send a tell-home or a `/hive/msg` once: with the queen
+  away, the message was lost. Now the node retries what the queen did
+  not take for now under the same id (at least 15 s, 30 s, 1, 2, 4 and
+  5 minutes apart, nothing after 14 minutes), and the queen shows it
+  once even if an earlier try landed. A node's `/api/send` takes an
+  optional `msg_id` and answers a repeat with the row it already stored
+  (`duplicate: true`). The console puts one `msg_id` in each send it
+  proxies to a remote node and tries again after 1 s and 2 s when the
+  node did not answer, and `cousin-hive send` retries the same way. A
+  node's retries live in its memory: a node restart drops them.
+
 ## 3.32.2 - 2026-10-07
 
 ### Fixed

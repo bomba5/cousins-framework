@@ -86,6 +86,8 @@ What happens on an ordinary (non-diverted) send on this machine, in order:
 
 If the inbox didn't take the message in step 3 (its write failed; or, in a race, the cousin lost its runner kind after the caller checked), the cousin would never see it, so nothing is kept: the row and any image saved for it are removed again, steps 4 and 5 don't run, and the in-process call raises `NotDelivered`. The console's `POST /api/chat/send` and `POST /api/cousins/<slug>/peer` answer `503 {"ok": false, "error": "<slug>: not delivered: ...; nothing was kept, send it again", "stored": false}`. `cousin-chat send` prints `cousin-chat: <that line>` on stderr and exits 1, the runner's `send` tool fails with it, the Telegram bridge answers the sender "Not delivered: ...", and an external peer's `POST /peer/send` answers `502` with the id freed for its retry. Since nothing was kept, a send again leaves one row, not two.
 
+A send may carry a `msg_id` (8-128 letters, digits, `-` or `_`). A node keeps the row a `msg_id` stored for 15 minutes, and a second send with the same one answers that row, `200 {"ok": true, "id", "timestamp", "duplicate": true}`, with no second row and no second turn. The console puts one in every send it proxies to a remote node, and tries a send again after 1 s and 2 s when the node did not answer or answered a `5xx`, so a try that did land is never stored twice. A bad `msg_id` is `400`.
+
 On a node the row is stored and the answer goes back at once. The node's brain runs the [turn](../glossary.md#turn) on a background thread, and its reply shows up in the history. A node has no login codes, no corrections and no chat hooks.
 
 ## Reply

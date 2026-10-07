@@ -838,9 +838,24 @@ def _client_call(queen_url, path, token, *, method="GET", body=None):
                         % err)
 
 
-def hive_send(*, queen_url, token, to, body, msg_id):
-    return _client_call(queen_url, "/hive/msg", token, method="POST",
-                        body={"to": to, "id": msg_id, "body": body})
+HIVE_SEND_WAITS_S = (1.0, 2.0)
+
+
+def hive_send(*, queen_url, token, to, body, msg_id, sleep=None):
+    """One message through the queen's /hive/msg, tried again after 1 s
+    and 2 s when the queen does not answer: the queen keeps one row per
+    (recipient, id), so a retry under the same msg_id never doubles it."""
+    import time
+    sleep = sleep or time.sleep
+    waits = list(HIVE_SEND_WAITS_S)
+    while True:
+        try:
+            return _client_call(queen_url, "/hive/msg", token, method="POST",
+                                body={"to": to, "id": msg_id, "body": body})
+        except HiveError:
+            if not waits:
+                raise
+            sleep(waits.pop(0))
 
 
 def hive_recall(*, queen_url, token, query):

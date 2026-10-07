@@ -491,7 +491,7 @@ Body `{"hidden": true}`. Sets or removes `[cousin] hidden`. `200 {"ok": true, "s
 
 ### `POST /api/cousins/<slug>/peer`
 
-Send a message from one cousin to another. Body `{"to": "kestrel", "text": "..."}`. It's written to Kestrel's chat store and inbox in-process, with `user` set to Wren's display name, so it lands as `(Chat Wren): ...` like `cousin-chat send`. `200 {"ok": true, "to", "id"}`. `400` empty text or `to` is the same cousin, `404` either cousin unknown, `502` when Kestrel has no runner kind (no transport to it), `503 {"ok": false, "error", "stored": false}` when Kestrel's inbox did not take the message (nothing kept: send it again, [chat API](chat-api.md#send)).
+Send a message from one cousin to another. Body `{"to": "kestrel", "text": "..."}`. To a remote node it goes to the node's `/api/send` under one `msg_id`, tried again after 1 s and 2 s when the node did not answer ([chat API](chat-api.md#send)). Otherwise it's written to Kestrel's chat store and inbox in-process, with `user` set to Wren's display name, so it lands as `(Chat Wren): ...` like `cousin-chat send`. `200 {"ok": true, "to", "id"}`. `400` empty text or `to` is the same cousin, `404` either cousin unknown, `502` when Kestrel has no runner kind (no transport to it), `503 {"ok": false, "error", "stored": false}` when Kestrel's inbox did not take the message (nothing kept: send it again, [chat API](chat-api.md#send)).
 
 ### `GET /api/cousins/<slug>/flip`
 

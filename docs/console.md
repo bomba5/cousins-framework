@@ -643,8 +643,10 @@ job whose process died without closing it shows as "lost" (amber, with
 its own filter), within seconds while the console runs; jobs still
 "running" after 24 hours are marked failed by the store's reaper. See
 [jobs and loops](jobs-and-loops.md). Below the jobs, the artifacts the
-cousins recorded with `cousin-artifact`, with "verify checksums" to check
-each file against its recorded sha256.
+cousins recorded with `cousin-artifact`: "check files" compares each
+file's size and mtime with the recorded ones (no hashing), "hash" checks
+one file against its recorded sha256, and "remove" drops a row (the file
+stays). A private row shows only its label.
 
 ## Memory
 

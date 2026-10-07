@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 from cousin_lib import jobs
 from tests.console._harness import ConsoleCase
@@ -146,6 +147,35 @@ class TestJobs(ConsoleCase):
         self.assertEqual(self.delete("/api/jobs/%d" % b)[0], 404)
         self.assertEqual(self.post("/api/jobs", {"title": "x"})[0], 405)
 
+
+
+class TestArtifacts(ConsoleCase):
+    def test_list_check_hash_and_remove(self):
+        from cousin_lib import artifacts
+        img = self.root / "image.bin"
+        img.write_bytes(b"firmware v1")
+        job = jobs.register_job(kind="shell", title="build", spawned_by="wren")
+        a = artifacts.add(img, created_by="wren", job_id=job)
+        b = artifacts.add("/srv/img.bin", created_by="wren", host="buildbox", sha256="ab" * 32, size=3)
+        self.serve()
+        _, body = self.get("/api/artifacts")
+        self.assertEqual([r["id"] for r in body["artifacts"]], [b["id"], a["id"]])
+        self.assertNotIn("state", body["artifacts"][0])
+        _, body = self.get("/api/artifacts?job=%d" % job)
+        self.assertEqual([r["id"] for r in body["artifacts"]], [a["id"]])
+        self.assertEqual(self.get("/api/artifacts?job=bad")[0], 400)
+        _, body = self.get("/api/artifacts?limit=1000")
+        self.assertEqual(len(body["artifacts"]), 2)
+        with mock.patch.object(artifacts, "sha256_of", side_effect=AssertionError("hashed")):
+            _, body = self.get("/api/artifacts?verify=1")
+        self.assertEqual([r["state"] for r in body["artifacts"]], ["unverified", "unchanged"])
+        img.write_bytes(b"firmware v2")
+        _, body = self.get("/api/artifacts/%d/verify" % a["id"])
+        self.assertEqual(body["state"], "changed")
+        self.assertEqual(self.get("/api/artifacts/999/verify")[0], 404)
+        self.assertEqual(self.delete("/api/artifacts/%d" % a["id"])[0], 200)
+        self.assertIsNone(artifacts.get(a["id"]))
+        self.assertEqual(self.delete("/api/artifacts/%d" % a["id"])[0], 404)
 
 if __name__ == "__main__":
     unittest.main()

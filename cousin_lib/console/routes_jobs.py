@@ -98,14 +98,40 @@ def register():
 
     @router.route("GET", "/api/artifacts")
     def list_artifacts(req):
-        """Build outputs (cousin_lib.artifacts), newest first; `?job=` filters
-        by the producing job, `?verify=1` checks each file's checksum now."""
+        """Build outputs (cousin_lib.artifacts), newest first, at most 100;
+        `?job=` filters by the producing job, `?verify=1` adds each row's
+        quick state (a stat, no hashing: the request stays short)."""
         from cousin_lib import artifacts
-        rows = artifacts.list_rows(job_id=req.int_query("job"), limit=req.int_query("limit", 100))
+        rows = artifacts.list_rows(job_id=req.int_query("job"),
+                                   limit=req.int_query("limit", artifacts.LIST_CAP))
         if req.query.get("verify") in ("1", "true"):
             for r in rows:
-                r["state"] = artifacts.verify(r)
+                r["state"] = artifacts.verify(r, quick=True)
         return 200, {"ok": True, "artifacts": rows}
+
+    def _artifact(raw):
+        from cousin_lib import artifacts
+        try:
+            row = artifacts.get(int(raw))
+        except (TypeError, ValueError):
+            row = None
+        if row is None:
+            raise HttpError(404, "unknown artifact")
+        return row
+
+    @router.route("GET", "/api/artifacts/{artifact_id}/verify")
+    def verify_artifact(req, artifact_id):
+        """One row's full check: hashes a local file (one per request).
+        A remote row answers `unverified`, a private one `private`."""
+        from cousin_lib import artifacts
+        row = _artifact(artifact_id)
+        return 200, {"ok": True, "id": row["id"], "state": artifacts.verify(row)}
+
+    @router.route("DELETE", "/api/artifacts/{artifact_id}")
+    def delete_artifact(req, artifact_id):
+        from cousin_lib import artifacts
+        artifacts.remove(_artifact(artifact_id)["id"])
+        return 200, {"ok": True}
 
     @router.route("GET", "/api/jobs/{job_id}")
     def show(req, job_id):

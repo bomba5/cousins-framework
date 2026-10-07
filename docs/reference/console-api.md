@@ -651,7 +651,15 @@ Query: `status`, `spawned_by`, `kind`, `active_only` (`1`/`true`), `since_hours`
 
 ### `GET /api/artifacts`
 
-Build outputs recorded with `cousin-artifact` ([jobs and loops](../jobs-and-loops.md#artifacts)), newest first, 100 at most (`?limit=`): `{"ok": true, "artifacts": [{"id", "created_at", "created_by", "path", "sha256", "size", "job_id", "git_commit", "note"}]}`. `?job=N` keeps one job's; `?verify=1` adds each file's `state` now (`ok`, `changed`, `missing`).
+Build outputs recorded with `cousin-artifact` ([jobs and loops](../jobs-and-loops.md#artifacts)), newest first: `{"ok": true, "artifacts": [{"id", "created_at", "created_by", "path", "host", "label", "private", "sha256", "size", "mtime", "job_id", "git_commit", "note"}]}`. `?limit=` (default and maximum 100). A private row has `path` and `host` null. `?job=N` keeps one job's; `?verify=1` adds each row's quick `state`, a stat with no hashing: `unchanged` (same size and mtime), `touched` (same size, new mtime), `changed`, `missing`, `unreadable`; `unverified` for a remote row, `private` for a private one.
+
+### `GET /api/artifacts/<id>/verify`
+
+Hashes one local file now: `{"ok": true, "id", "state"}` with `ok`, `changed`, `missing` or `unreadable` (`unverified` for a remote row, `private` for a private one; the console never runs ssh or reads a cousin's home). `404` for an unknown id.
+
+### `DELETE /api/artifacts/<id>`
+
+Drops the row, any cousin's (the file stays). `{"ok": true}` or `404`.
 
 ### `GET /api/jobs/<id>`
 

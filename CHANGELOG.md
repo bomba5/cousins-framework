@@ -12,10 +12,16 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   size, measured then, with the job and the commit it came from. `list`
   shows them (by owner, path or job), and `verify` or `list --verify`
   says whether each file is still the recorded one (`ok`, `changed`,
-  `missing`). The console's Jobs page lists them, with a verify button
-  (`GET /api/artifacts`). It replaces the path-plus-checksum notes that
+  `missing`, `unreadable`); `rm` drops a row. A file on a build host is
+  recorded with `--host H --sha256 X --size N` and hashed over ssh only
+  on `--remote`. A private row (`--private --label L`) shares only its
+  label; its path stays in the owner's home and only the owner can
+  verify it. The console's Jobs page lists them with a quick check (size
+  and mtime, no hashing), a per-row hash and remove (`GET
+  /api/artifacts`, `GET /api/artifacts/<id>/verify`, `DELETE
+  /api/artifacts/<id>`). It replaces the path-plus-checksum notes that
   went stale in STATUS.md. The store is `data/artifacts.db`, readable by
-  every cousin: keep private paths out of it.
+  every cousin: a path there is visible to the whole install.
 
 ## 3.34.0 - 2026-10-07
 

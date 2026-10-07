@@ -22,7 +22,8 @@ A cousin's tools come from its own `mcp-registry.toml`, copied from the
 install's at spawn. `why`, and `derived_from` on `remember` and `decide`,
 are in the shipped `config/mcp-registry.toml.example` since 3.8.0, and
 `scope` and `valid_until` on `remember` since 3.31.0; a cousin spawned
-before that has them only once its own copy is updated.
+before that, or from an install whose own `config/mcp-registry.toml`
+predates them, has them only once its copy is updated.
 
 A call names the command and its arguments:
 

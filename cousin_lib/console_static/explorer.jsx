@@ -881,6 +881,17 @@ function ClaimRetire({ topic, id, onRetire }) {
   );
 }
 
+// A declared end as the CLI says it: a midnight-UTC end (what a date
+// gives) is "through" the day before, any other end is its own time.
+function claimEnd(validTo) {
+  const d = new Date(validTo);
+  if (isNaN(d)) return String(validTo || "");
+  if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0) {
+    return "through " + new Date(d.getTime() - 1000).toISOString().slice(0, 10);
+  }
+  return "until " + d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+}
+
 // `operator`: the viewer is the operator account; an operator-level claim
 // is theirs alone to retire (the server refuses anyone else).
 function ClaimRow({ c, topic, onRetire, showTopic, operator }) {
@@ -903,8 +914,9 @@ function ClaimRow({ c, topic, onRetire, showTopic, operator }) {
         {c.cite && <span>cite · <b>{c.cite}</b></span>}
         {c.scope && <span data-claim-scope>scope · <b>{c.scope}</b></span>}
         <span>{live
-          ? (c.valid_to ? <><b>live</b> until <b>{fmtStamp(c.valid_to)}</b></> : <b>live</b>)
-          : <>{c.retired_by ? "valid to" : "expired"} <b>{fmtStamp(c.valid_to)}</b>{c.retired_by ? ` (mark ${c.retired_by})` : ""}</>}</span>
+          ? (c.valid_to ? <><b>live</b> {claimEnd(c.valid_to)}</> : <b>live</b>)
+          : c.retired_by ? <>valid to <b>{fmtStamp(c.valid_to)}</b>{` (mark ${c.retired_by})`}</>
+          : <>expired ({claimEnd(c.valid_to).replace(/^through /, "after ").replace(/^until /, "")})</>}</span>
         <span style={{ flex: 1 }} />
         {live && onRetire && !theirs && <ClaimRetire topic={topic || c.topic} id={c.id} onRetire={onRetire} />}
         {live && onRetire && theirs && <span className="muted" data-operator-only>the operator's to retire</span>}

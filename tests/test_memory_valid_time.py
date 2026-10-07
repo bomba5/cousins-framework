@@ -349,3 +349,39 @@ class TestALiveFactWithAnEndIsLiveEverywhere(HermeticCase):
         end = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
         memory.remember(home, "spi base", "SPI1 is at 0x40013000.", valid_until=end)
         self.assertEqual(len(dream_memory._live_topic(home, "spi base")), 1)
+
+
+class TestAMarkBeforeTheDeclaredEndRetiresIt(HermeticCase):
+    """#246 review: a claim with a future end that a mark retires is not
+    live, not in tensions, and its valid_to is the mark's time."""
+
+    def test_the_mark_wins_when_it_comes_first(self):
+        home = _home(self)
+        end = (datetime.now(timezone.utc) + timedelta(days=60)).date().isoformat()
+        memory.remember(home, "lease", "The lease runs to the end of the year.", valid_until=end)
+        memory.remember(home, "lease", "The lease was cancelled.")
+        first = [r for r in memory.validity(home) if r["content"].startswith("The lease runs")][0]
+        mark = memory.mark_obsolete(home, "lease", "cancelled", entry=first["id"])
+        row = [r for r in memory.validity(home) if r["id"] == first["id"]][0]
+        self.assertEqual(row["valid_to"], mark["timestamp"])
+        self.assertFalse(memory.is_live(row))
+        self.assertNotIn(first["id"], [r["id"] for r in memory.live_entries(home)])
+        self.assertEqual(memory.tensions(home), [])
+
+    def test_history_says_live_through_and_scope(self):
+        home = _home(self)
+        end = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
+        memory.remember(home, "spi base", "SPI1 is at 0x40013000.", scope="board rev A",
+                        valid_until=end)
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"COUSIN_HOME": str(home)}), contextlib.redirect_stdout(out):
+            memory.memory_main(["history", "spi base"])
+        self.assertIn("live, through %s; scope: board rev A" % end, out.getvalue())
+
+    def test_recall_prints_the_labels(self):
+        home = _home(self)
+        end = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
+        memory.remember(home, "spi base", "SPI1 is at 0x40013000.", scope="board rev A",
+                        valid_until=end)
+        text = memory.format_recall(memory.list_raw(home))
+        self.assertIn("scope: board rev A; through %s" % end, text)

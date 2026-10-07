@@ -98,6 +98,10 @@ object per line:
  "source": "remember", "cite": "chat #412, 2026-09-17"}
 ```
 
+A fact written with a [scope or an end](#what-a-fact-holds-for-and-until-when)
+also carries `"scope"` and `"valid_to"`, and one built from other entries
+`"derived_from"`.
+
 **Corrections** are captured when a chat message is stored (the console,
 `cousin-chat`, the Telegram bridge): when a message from
 the configured operator contains "stop", "don't", "no", "actually",
@@ -115,10 +119,11 @@ writes it. It only searches and displays it, and only when
 
 ```
 cousin-memory decide TOPIC DECISION REASONING [--level L] [--cite SRC]
-cousin-memory remember TOPIC FACT [--level L] [--cite SRC]
+cousin-memory remember TOPIC FACT [--level L] [--cite SRC] [--derived-from ID]...
+                       [--scope TEXT] [--valid-until WHEN]
 cousin-memory activity "what I'm doing now"
 cousin-memory recall [KEYWORD] [--last N]
-cousin-memory why ID
+cousin-memory why ID [--json]
 ```
 
 `decide` appends to `data/decisions.jsonl` and also writes a raw entry
@@ -153,11 +158,13 @@ and a loud failure there is the right one.
 
 A fact can say, when it is written, what it holds for and when it stops
 holding. `remember` takes `--scope TEXT` (one line, at most 200
-characters: "board rev A", "the main office") and `--valid-until WHEN` (an
-ISO date, which holds through that day in UTC, or an ISO time; a time with
-no zone is UTC; a time already past is refused). The memory tool takes
-them as `scope` and `valid_until`, and the console's memory write form has
-both fields.
+characters: "board rev A", "the main office") and `--valid-until WHEN`:
+a date in the `YYYY-MM-DD` form holds through that day in UTC, anything
+longer is read as an ISO time (no zone means UTC), and a date or time
+already past is refused. The memory tool takes them as `scope` and
+`valid_until`, and the console's memory write form has both fields. This
+`scope` is the fact's own; it has nothing to do with a cousin's `[memory]
+scope` (private or shared).
 
 ```
 cousin-memory remember "office wifi" "The guest password is on the fridge." \
@@ -165,14 +172,19 @@ cousin-memory remember "office wifi" "The guest password is on the fridge." \
 #   -> Remembered [office wifi] (L3_COUSIN_CONCLUSION): The guest password is on the fridge. (scope: the main office; through 2026-10-31)
 ```
 
-The end is stored as the entry's `valid_to` (the next midnight, for a
-date), the same field an obsolete mark sets, so the valid-time reads
-below treat it alike: past it, the fact is no longer live, the distilled
-views and the boot packet leave it out, and `tensions` stops counting it.
-Nothing is written when it expires; raw keeps it, and a recall or search
-that still finds it says so (`office wifi [scope: the main office; expired
-after 2026-10-31]`). A live fact with a scope or an end shows them in its
-distilled line and on its claim card in the console.
+The end is stored on the entry as `valid_to` (the next midnight, for a
+date). The valid-time reads below derive a claim's end from it and from
+any obsolete mark that retired the claim, whichever comes first. Past
+its end the fact is no longer live: `tensions` stops counting it, and
+the distilled views and the boot packet leave it out from their next
+rebuild (a boot, a flip, a raw write, a distill). Nothing is written
+when it expires: raw keeps it. Proactive recall, `cousin-memory recall`
+and `history` label it (`office wifi [scope: the main office; expired
+after 2026-10-31]`, `live, through 2026-10-31`); `search` prints paths
+and snippets only. A live fact with a scope or an end shows them in its
+distilled line and on its claim card in the console, and a dreaming
+pass sees them on each claim of its slice (a claim it writes by merging
+carries no scope or end of its own).
 
 ### What an entry was built from
 
@@ -394,7 +406,7 @@ Raw memory is append-only, so when a claim was true is worked out from
 raw rather than written into it. Every entry is valid from when it was
 written (or its own `valid_from`) until an obsolete mark covers it (or
 its own `valid_to`). `cousin-memory history <topic>` lists a topic's
-claims with an id each and `live` or `valid to <time>`. To retire one
+claims with an id each and `live` (with `through <date>` or `until <time>` for one with a declared end), `expired ...`, or `valid to <time>` for one an obsolete mark retired. To retire one
 claim and keep the topic, pass its id:
 
 ```

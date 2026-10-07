@@ -469,7 +469,7 @@ cousin-migrate tidy --all --yes
 | `why ID [--json]` | one raw entry by its id, what it was built from and what was built from it, and the mark that retired it, if any: one hop each way. Exit 1 for an id no raw entry has |
 | `obsolete TOPIC --why REASON [--force] [--entry ID]` | retire a topic (L5): out of the [distilled](glossary.md#distilled) views, history kept; with `--entry`, retire one of its claims by its id and keep the topic |
 | `tensions [--json]` | topics whose live claims disagree: an authored topic with two or more live claims of different content, each claim's id, and how to settle it (retire one with `obsolete --entry`) |
-| `history TOPIC` | a topic's claims, oldest first: each one's id, when it became valid, and `live` or when an obsolete mark retired it (valid time is derived from raw, never written back) |
+| `history TOPIC` | a topic's claims, oldest first: each one's id, when it became valid, and `live` (with its declared end, if any), `expired`, or when an obsolete mark retired it, plus its scope (valid time is derived from raw, never written back) |
 | `review [--keep ID... \| --drop ID... [--why REASON]]` | the entries the review gate holds (more than `[memory] review_batch` written on authored topics since it last looked), or the operator's verdict on some: keep releases them into the memory views, drop retires them; a verdict is refused inside a cousin's own process tree |
 | `recall [KEYWORD] [--last N]` | raw memory through the search index: with a keyword the best-ranked N entries, without one the newest N you wrote (the framework's own log left out); a decision prints with its `Why:` line |
 | `activity TEXT` | set the "what I'm doing now" line |

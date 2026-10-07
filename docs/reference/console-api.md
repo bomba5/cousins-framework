@@ -748,7 +748,7 @@ Query `path`, `start`, `count`, and `layer=harness` to read from the harness aut
 
 ### `GET /api/memory/<slug>/tensions`
 
-`{"tensions": [{"topic", "claims": [...]}]}`, newest first: the cousin's authored topics with two or more live claims of different content (`cousin-memory tensions`). Each claim is a raw entry with its `id`, `valid_from` and `valid_to` (null while live). Nothing judges whether the claims are opposite; the operator settles a tension by retiring one claim, `cousin-memory obsolete <topic> --why <reason> --entry <id>` or `POST /api/memory/<slug>/obsolete` with `entry`.
+`{"tensions": [{"topic", "claims": [...]}]}`, newest first: the cousin's authored topics with two or more live claims of different content (`cousin-memory tensions`). Each claim is a raw entry with its `id`, `valid_from`, `valid_to` (null for a live claim with no declared end; a declared end still ahead keeps it live) and `scope` when it has one. Nothing judges whether the claims are opposite; the operator settles a tension by retiring one claim, `cousin-memory obsolete <topic> --why <reason> --entry <id>` or `POST /api/memory/<slug>/obsolete` with `entry`.
 
 ### `GET /api/memory/<slug>/trash`
 
@@ -798,7 +798,7 @@ Body `{"topic", "decision", "reasoning", "level"?, "note"?}`. Logs the decision 
 
 ### `GET /api/memory/<slug>/history`
 
-Query `topic` (required). `{"topic", "claims"}`: the topic's claims, oldest first, each a raw entry with `id`, `valid_from`, `valid_to` (null while live) and `retired_by` (`cousin-memory history`).
+Query `topic` (required). `{"topic", "claims"}`: the topic's claims, oldest first, each a raw entry with `id`, `valid_from`, `valid_to` (the earlier of its declared end and the mark that retired it; null for a live claim with no end), `retired_by` and, when it has one, `scope` (`cousin-memory history`).
 
 ### `GET /api/memory/<slug>/review`
 

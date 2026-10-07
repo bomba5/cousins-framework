@@ -477,8 +477,10 @@ def _render(entry, entry_id):
     content = " ".join(str(entry.get("content") or "").split())
     if len(content) > ENTRY_CHARS:
         content = content[:ENTRY_CHARS] + "... (truncated)"
-    return "[%s %s] (%s) %s: %s" % (when, level, entry_id,
-                                    str(entry.get("topic") or "").strip(), content)
+    held = memory.qualifiers(entry)
+    return "[%s %s] (%s) %s: %s%s" % (when, level, entry_id,
+                                      str(entry.get("topic") or "").strip(), content,
+                                      " [%s]" % held if held else "")
 
 
 def slice_for(home, *, chars=40000, since=None):

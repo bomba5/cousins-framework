@@ -51,7 +51,7 @@ class DreamCase(unittest.TestCase):
 
     def live(self, topic):
         return [r for r in memory.validity(self.home)
-                if str(r.get("topic") or "") == topic and not r.get("valid_to")]
+                if str(r.get("topic") or "") == topic and memory.is_live(r)]
 
     def run_op(self, name, args, *, pass_id=None):
         """Call an operation the way the harness does: by its schema

@@ -387,10 +387,23 @@ def validity(home):
                 candidates.append(by_topic[topic][i])
         cover = min(candidates, key=lambda m: entry_timestamp(m) or 0.0) if candidates else None
         row["valid_from"] = e.get("valid_from") or e.get("timestamp") or e.get("created_at")
-        row["valid_to"] = e.get("valid_to") or (cover.get("timestamp") if cover else None)
+        # the earlier of a declared end and the mark that retired it: a
+        # mark before the end retires the claim then, not at its end
+        ends = [str(v) for v in (e.get("valid_to"), cover.get("timestamp") if cover else None) if v]
+        row["valid_to"] = min(ends, key=_end_key) if ends else None
         row["retired_by"] = entry_id(cover) if cover else None
         out.append(row)
     return out
+
+
+def _end_key(value):
+    try:
+        when = datetime.fromisoformat(str(value))
+    except ValueError:
+        return float("inf")
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.timestamp()
 
 
 def live_entries(home, *, at=None):
@@ -1025,7 +1038,9 @@ def format_recall(entries, keyword=""):
             out.append("  Why: %s" % why)
         else:
             out.append("[%s] %s: %s" % (when, topic, content))
-            out.append("  (%s, %s)" % (entry.get("truth_level", "?"), entry.get("source", "?")))
+            held = qualifiers(entry)
+            out.append("  (%s, %s%s)" % (entry.get("truth_level", "?"), entry.get("source", "?"),
+                                         "; " + held if held else ""))
         out.append("")
     return "\n".join(out)
 
@@ -1137,7 +1152,14 @@ def _cmd_history(args):
         print("no claims for topic %r" % topic)
         return 1
     for r in rows:
-        state = ("valid to %s" % r["valid_to"]) if r["valid_to"] else "live"
+        if r.get("retired_by"):
+            state = "valid to %s" % r["valid_to"]
+        elif r.get("valid_to"):
+            state = ("live, %s" if is_live(r) else "%s") % qualifiers({"valid_to": r["valid_to"]})
+        else:
+            state = "live"
+        if r.get("scope"):
+            state += "; scope: %s" % r["scope"]
         print("%s [%s] %s  (%s)" % (r["id"], str(r["valid_from"] or "?")[:16],
                                    " ".join(str(r.get("content", "")).split())[:200], state))
     return 0

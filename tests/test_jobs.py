@@ -599,3 +599,29 @@ class TestLostJobs(JobsCase):
         job_id = self._row_with(pid=self._dead_pid())
         jobs.reap_lost()
         self.assertEqual([j["id"] for j in list_jobs(status="lost")], [job_id])
+
+
+class TestAZombieRunsNothing(JobsCase):
+    """#244 re-review: a runner that exited but was not yet reaped (a
+    zombie) still has /proc/<pid>/stat; it runs nothing, so its job is
+    lost. Fails on the code before ad0ae6d (the zombie kept the job
+    running)."""
+
+    def test_an_unreaped_runner_makes_its_job_lost(self):
+        import subprocess
+        from cousin_lib import jobs
+        job_id = register_job(kind="shell", title="exits, never reaped")
+        proc = subprocess.Popen(["sleep", "0.3"], start_new_session=True)
+        self.addCleanup(proc.wait)
+        jobs.record_spawn(job_id, proc.pid)
+        self.assertIsNotNone(get_job(job_id)["start_ticks"])
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            with open("/proc/%d/stat" % proc.pid) as fh:
+                stat = fh.read()
+            if stat[stat.rfind(")") + 2:].split()[0] == "Z":
+                break
+            time.sleep(0.05)
+        else:
+            self.fail("the child never became a zombie")
+        self.assertEqual(jobs.reap_lost(), [job_id])

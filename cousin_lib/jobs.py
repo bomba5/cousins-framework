@@ -489,7 +489,10 @@ def pid_start_ticks(pid):
     try:
         with open("/proc/%d/stat" % int(pid)) as fh:
             stat = fh.read()
-        return int(stat[stat.rfind(")") + 2:].split()[19])
+        fields = stat[stat.rfind(")") + 2:].split()
+        if fields[0] == "Z":
+            return None                         # a zombie has exited: nothing runs
+        return int(fields[19])
     except (OSError, ValueError, TypeError, IndexError):
         return None
 
@@ -533,6 +536,8 @@ def _groups():
             with open("/proc/%s/stat" % name) as fh:
                 stat = fh.read()
             fields = stat[stat.rfind(")") + 2:].split()
+            if fields[0] == "Z":
+                continue                        # a zombie runs nothing
             pgrp, ticks = int(fields[2]), int(fields[19])
         except (OSError, IndexError, ValueError):
             continue

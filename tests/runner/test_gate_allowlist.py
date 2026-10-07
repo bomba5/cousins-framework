@@ -418,3 +418,56 @@ class TestLanes(HermeticCase):
         from cousin_lib.delivery import RUNNER_KINDS
         self.assertEqual(sorted(perimeter.UNGATED_KINDS),
                          sorted(k for k in RUNNER_KINDS if k not in ("sdk", "fake")))
+
+
+class TestTheDocsTableMatchesTheGate(HermeticCase):
+    """#249: docs/memory.md "Boundary or policy, at a glance" says, per
+    kind of path, whether the gate refuses a subagent's write and whether
+    the primary session is free. It must say what TABLE above enforces."""
+
+    # the docs row's opening words -> the TABLE rows it summarises
+    DOC_ROWS = {
+        "Its own home": ("A1",),
+        "Its own configuration": ("A9",),
+        "Another cousin's home": ("A10",),
+        "`config/law.md`": ("A4",),
+        "A committed `self-portrait.md`": ("A3", "A11"),
+        "A canonical `shared/*.md`": ("A5",),
+        "A proposal in `shared/proposed/` not under its own name": ("A7",),
+        "`shared/audit.jsonl`": ("A8",),
+        "Anything outside the install": ("A12",),
+    }
+
+    def test_each_row_says_what_the_gate_does(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        text = (root / "docs" / "memory.md").read_text()
+        section = text[text.index("### Boundary or policy, at a glance"):]
+        rows = {}
+        for line in section.splitlines():
+            if line.startswith("| ") and not line.startswith("| Path") and not line.startswith("|---"):
+                cells = [c.strip() for c in line.strip("|").split("|")]
+                rows[cells[0]] = cells
+            elif rows and not line.startswith("|"):
+                break
+        table = {r[0]: r for r in TABLE}
+        self.assertEqual(len(rows), len(self.DOC_ROWS))
+        # a TABLE row the docs leave out must be one a subagent may write:
+        # a new refusal with no docs row fails here
+        covered = {rid for ids in self.DOC_ROWS.values() for rid in ids}
+        for rid, _paths, _p, s_write, _f in TABLE:
+            if rid not in covered:
+                self.assertEqual(s_write, ALLOW, "%s is refused but has no row in the docs table" % rid)
+        for label, ids in self.DOC_ROWS.items():
+            cells = next(c for k, c in rows.items() if k.startswith(label))
+            primary, sub_tool = cells[2], cells[3]
+            for rid in ids:
+                _, _paths, p_write, s_write, _f = table[rid]
+                self.assertEqual(p_write, ALLOW, rid)
+                self.assertTrue(primary.startswith("Policy"), (label, primary))
+                self.assertEqual(sub_tool == "Refused", s_write == REFUSE, (label, rid, sub_tool))
+            # the columns TABLE does not drive: reads are never stopped, a
+            # subagent's Bash is best-effort wherever its tools are refused,
+            # and opencode/tmux have no gate at all
+            self.assertEqual(cells[1], "Policy", label)
+            self.assertEqual(cells[4], "Best-effort" if sub_tool == "Refused" else "Policy", label)
+            self.assertEqual(cells[5], "Policy", label)

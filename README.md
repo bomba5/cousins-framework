@@ -96,7 +96,9 @@ command it catches what it can parse), and reads always pass. The `opencode`
 and `tmux` lanes have no gate and say so at every start. Homes are created
 0700 and the [supervisor](docs/glossary.md#supervisor) runs everything under umask 077, which keeps other
 users on the host and other uids out, not one cousin from another: a
-cousin's own shell can still read another cousin's files. See
+cousin's own shell can still read another cousin's files. One table
+shows what is refused and what is only policy, per lane and path:
+[boundary or policy, at a glance](docs/memory.md#boundary-or-policy-at-a-glance). See
 [the perimeter](docs/memory.md#the-perimeter) and
 [`cousin-doctor homes`](docs/commands.md#maintenance).
 

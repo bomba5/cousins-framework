@@ -240,6 +240,11 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
 
     outcome = deliver(user=user, message=message, message_id=row["id"],
                       attachments=(str(path),) if path else ())
+    if outcome == delivery.FAILED:
+        # the runner will never see it: keep nothing, fire nothing, and
+        # relay_inbound tells the sender instead of leaving them waiting
+        chat_api.drop_undelivered(cfg.home, row["id"], [str(path)] if path else [])
+        raise chat_api.not_delivered(config)
     # After delivery, same order chat_api.send has: the marker's mtime is
     # the gap baseline for the NEXT message, and the correction capture
     # rides along on the same call.
@@ -247,11 +252,6 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
     chat_hooks.on_message(cfg.home, user=user, message=message,
                           message_id=row["id"], slug=cfg.slug,
                           deliver=deliver)
-    if outcome == delivery.FAILED:
-        # the runner will never see it: keep nothing, and relay_inbound
-        # tells the sender instead of leaving them waiting on a silent cousin
-        chat_api.drop_undelivered(cfg.home, row["id"], [str(path)] if path else [])
-        raise chat_api.not_delivered(config)
 
 
 def _default_log(line):

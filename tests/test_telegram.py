@@ -734,3 +734,28 @@ class TestLoginNotice(HermeticCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheBridgeKeepsNothingUndelivered(_BridgeFixture):
+    """#243 review: a message the inbox did not take leaves no row and
+    fires no hook in the bridge either."""
+
+    def test_no_row_and_no_hook(self):
+        from cousin_lib import delivery, telegram
+        from cousin_lib.server import chat_api
+        self._bridge()
+        (self.home / "cousin.toml").write_text(
+            (self.home / "cousin.toml").read_text() + '\n[agent]\nrunner = "fake"\n')
+        cfg = telegram.load_bridge_config(self.home)
+        fired = []
+        with mock.patch("cousin_lib.delivery.deliver", return_value=delivery.FAILED), \
+                mock.patch("cousin_lib.chat_hooks.on_message", lambda *a, **kw: fired.append(kw)):
+            with self.assertRaises(chat_api.NotDelivered):
+                telegram._store_and_deliver(cfg, user="Sam", message="hi")
+        self.assertEqual(fired, [])
+        import sqlite3
+        db = sqlite3.connect(self.home / "data" / "chat.db")
+        try:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 0)
+        finally:
+            db.close()

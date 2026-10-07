@@ -123,7 +123,7 @@ cousin-memory remember TOPIC FACT [--level L] [--cite SRC] [--derived-from ID]..
                        [--scope TEXT] [--valid-until WHEN]
 cousin-memory activity "what I'm doing now"
 cousin-memory recall [KEYWORD] [--last N]
-cousin-memory why ID [--json]
+cousin-memory why ID [--json] [--depth N]
 ```
 
 `decide` appends to `data/decisions.jsonl` and also writes a raw entry
@@ -204,15 +204,18 @@ cousin-memory why 5e0b9d2a71c4
 ```
 
 It also names the mark that retired the entry, if one did. `--depth N`
-stops after N hops each way (a cut entry says `(and further)`); without
-it the walk goes to the end of the chain, at most 12 hops. An entry the
-walk has already passed on the same path is shown as a cycle, never
-walked again. Nothing is inherited along the chain: each entry keeps its
+stops after N hops each way (N is held to 1-12: 0 or less walks one hop,
+and the answer's `depth` says what was used); without it the walk goes
+to the end of the chain, at most 12 hops. An entry cut by either limit
+says `(and further)`. An id no raw entry has is shown `(not in raw
+memory)`. An entry already on the same path is shown as a cycle, never
+walked again; an entry two routes reach is shown under both. Nothing is inherited along the chain: each entry keeps its
 own truth level, so a conclusion built from a tool fact is still a
 conclusion. `--json` prints the same as one object: the top level's
 `derived_from` and `used_by` are the first hop, and each entry there
 carries its next hop as `built_from` / `built_on_by` (`more: true` where
-the depth cut it, `cycle: true` for a loop). The memory tool's `why`
+the depth cut it, `cycle: true` for a loop, `{"id", "missing": true}` for
+an id with no raw entry). The memory tool's `why`
 takes `depth` too, and on the console every claim card has a "why"
 button that opens the same chain.
 

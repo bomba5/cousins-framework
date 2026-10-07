@@ -748,7 +748,7 @@ Query `path`, `start`, `count`, and `layer=harness` to read from the harness aut
 
 ### `GET /api/memory/<slug>/why`
 
-`?id=<entry id>[&depth=N]`: the entry's provenance chain, as `cousin-memory why --json` gives it ([memory](../memory.md#what-an-entry-was-built-from)): `{"ok": true, "entry", "derived_from", "used_by", "retired_by", "valid_to", "depth"}`, each entry of the first hop carrying its next as `built_from` / `built_on_by`. No `depth` walks the whole chain (at most 12 hops). `400` no id or a non-integer depth, `404` an id no raw entry has.
+`?id=<entry id>[&depth=N]`: the entry's provenance chain, as `cousin-memory why --json` gives it ([memory](../memory.md#what-an-entry-was-built-from)): `{"ok": true, "entry", "derived_from", "used_by", "retired_by", "valid_to", "depth"}`, each entry of the first hop carrying its next as `built_from` / `built_on_by`, with `more: true` where a limit cut it, `cycle: true` for a loop and `{"id", "missing": true}` for an id with no raw entry. No `depth` walks the whole chain (at most 12 hops); a `depth` is held to 1-12, and the answer's `depth` is the one used. `400` no id or a non-integer depth, `404` an id no raw entry has.
 
 ### `GET /api/memory/<slug>/tensions`
 

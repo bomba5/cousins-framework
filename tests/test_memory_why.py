@@ -1,4 +1,5 @@
-"""One-hop derivation (memory.derived_from, memory.why) and proactive
+"""Derivation (memory.derived_from, recorded one hop) and its walk
+(memory.why: the whole chain, or `depth` hops), and proactive
 recall's read receipt (memory_search: what a recall returned, what it
 left out, and why)."""
 import contextlib
@@ -206,3 +207,21 @@ class TestReceipt(HomeCase):
         self.assertEqual([r["path"] for r in rec["excluded"]], ["b.md"])
         self.assertIn("below [recall] min_score", rec["excluded"][0]["reason"])
         self.assertEqual(rec["query"], "where is the kestrel")
+
+
+class TestTheToolPassesDepth(HomeCase):
+    """#247 review: the in-process memory tool forwards `depth`."""
+
+    def test_depth_reaches_why(self):
+        from types import SimpleNamespace
+        from cousin_lib.runner import tools
+        memory.remember(self.home, "a", "one")
+        (a,) = self.ids("a")
+        memory.remember(self.home, "b", "two", derived_from=[a])
+        (b,) = self.ids("b")
+        memory.remember(self.home, "c", "three", derived_from=[b])
+        (c,) = self.ids("c")
+        out = json.loads(tools._m_why(SimpleNamespace(home=self.home), {"id": c, "depth": 1,
+                                                                        "json": True}))
+        self.assertEqual(out["depth"], 1)
+        self.assertTrue(out["derived_from"][0]["more"])

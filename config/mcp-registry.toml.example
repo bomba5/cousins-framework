@@ -25,7 +25,7 @@ max_output = 16000    # characters of stdout returned per call; the rest is cut 
 
 [tools.memory]
 command = "cousin-memory"
-description = "Durable memory: search what you wrote, log a decision with its reasoning, remember a fact with its truth level (operator = the operator said it, needs cite), mark a topic obsolete when something superseded it (why required; it leaves the distilled views, raw keeps the history), recall what you wrote (the best matches for a keyword, or the newest entries), checkpoint your current activity."
+description = "Durable memory: search what you wrote, log a decision with its reasoning, remember a fact with its truth level (operator = the operator said it, needs cite), mark a topic obsolete when something superseded it (why required; it leaves the distilled views, raw keeps the history), recall what you wrote (the best matches for a keyword, or the newest entries), walk an entry's provenance (why: what it was built from and what was built on it), checkpoint your current activity."
 
 [tools.memory.properties]
 query = { type = "string", description = "search text (search)" }
@@ -45,7 +45,7 @@ derived_from = { type = "array", items = "string", optional = true, description 
 scope = { type = "string", optional = true, description = "what the fact holds for, e.g. 'board rev A' (remember)" }
 valid_until = { type = "string", optional = true, description = "when the fact stops holding: ISO date (through that day, UTC) or time; past it the fact leaves the views (remember)" }
 id = { type = "string", description = "an entry id, from `history` or a recall line (why)" }
-depth = { type = "integer", optional = true, description = "hops to walk each way; default the whole chain (why)" }
+depth = { type = "integer", optional = true, description = "hops to walk each way, 1 to 12; default the whole chain up to 12 (why)" }
 keyword = { type = "string", optional = true, description = "what to recall; empty lists the newest entries (recall)" }
 last = { type = "integer", description = "how many entries (recall)" }
 text = { type = "string", description = "what you are doing now (activity)" }

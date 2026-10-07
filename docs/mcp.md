@@ -244,7 +244,7 @@ to see exactly what the cousin sees:
 export COUSIN_HOME=$PWD/cousins/wren FRAMEWORK_ROOT=$PWD
 cousin-mcp --selftest
 #   -> registry: .../cousins/wren/mcp-registry.toml (5 tools, ceiling 12, timeout 120s, output cap 16000 chars)
-#        memory    cousin-memory                activity, decide, obsolete, recall, remember, search
+#        memory    cousin-memory                activity, decide, obsolete, recall, remember, search, why
 #        send      cousin-chat, cousin-reply    operator, peer (operators: ana)
 #        job       cousin-job                   done, fail, list, run, show, start
 #        meeting   cousin-meeting               minutes, pass, say, show

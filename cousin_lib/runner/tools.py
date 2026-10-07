@@ -104,7 +104,7 @@ def _m_why(ctx, a):
     from cousin_lib import memory
     eid = _str(a, "id").strip()
     try:
-        out = memory.why(ctx.home, eid)
+        out = memory.why(ctx.home, eid, depth=a.get("depth"))
     except KeyError:
         raise ValueError("no raw entry with id %s (`history` lists ids)" % eid)
     return json.dumps(out, default=str) if a.get("json") else memory.format_why(out)

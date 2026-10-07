@@ -94,19 +94,30 @@ cousin's job are refused (exit 3) and nothing is signalled, from the
 CLI and from the MCP `job` tool alike. The operator closes any job from
 the console, or with `cousin-job` in a shell with no `COUSIN_HOME`.
 
-A shell job's command closes its own row when it exits, so a row still
-`running` whose process is gone means that process died without closing
-it (killed, out of memory, the machine rebooted). Every read of the job
-list (`cousin-job list` and `show`, the `job` tool's `list` and `show`,
-the console's Jobs page) marks such a row `lost` at once, with
-`[lost: its process is gone]` on its summary. Only a row that recorded a
-pid can be checked: a `start` row for a subagent or a hook-tracked
-background shell has none, and is never marked lost.
+A job started with a command (`cousin-job start ... -- CMD`, the `job`
+tool's `run`, a worker loop) records its runner's pid, that process's
+start time and the boot it ran in, and the runner closes its own row
+when the command exits. So a row still `running` whose runner is gone,
+and whose process group has nothing left running, means it died without
+closing it (killed, out of memory, the machine rebooted). Such a row is
+marked `lost`, with `[lost: its process is gone]` on its summary, by
+`cousin-job list`, `show` and `tail -f`, by the `job` tool's `list` and
+`show`, and by the console: while the console runs, its event stream
+checks every 2 seconds, so a dead job turns `lost` within seconds. The
+stored start time is compared exactly, so a reused pid, a reboot or a
+clock step is never mistaken for the job. A row with no pid (a `start`
+with no command, a hook-tracked background shell, a media row) has
+nothing to check and is never marked lost.
+
+`lost` isn't final: if the runner was in fact alive and finishes later,
+it still closes the row `done` or `failed` with its exit code, and
+`cousin-job done|fail|cancel` overwrite it as for any row. A lost job
+doesn't land in its cousin's memory (only `done` and `failed` do).
 
 More housekeeping happens when the console lists jobs: anything still
-`running` after 24 hours is marked failed (a row with no pid to check),
-and only the newest 1000 finished rows are kept, together with their
-logs in `data/job-logs/`.
+`running` after 24 hours is marked failed, whether or not its process
+still runs (a long `ssh ... tail -F` included), and only the newest 1000
+finished rows are kept, together with their logs in `data/job-logs/`.
 
 ### Automatic tracking from Claude Code
 

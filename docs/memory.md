@@ -345,7 +345,7 @@ fill themselves in:
 - **L2 tool.** When a cousin's job finishes as done or failed, its
   title, exit code and summary land in that cousin's memory under
   `job:<title>`. Repeat runs of the same job fold into one line.
-  Cancelled jobs and jobs with no owning cousin are skipped.
+  Cancelled and lost jobs, and jobs with no owning cousin, are skipped.
 - **L4 hypothesis.** When the runner mines a turn's transcript, a
   sentence that hedges ("probably", "might", "I suspect", "I think",
   "likely", "maybe", "not sure", "seems") is kept as a hypothesis under

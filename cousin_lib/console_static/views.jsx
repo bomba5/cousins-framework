@@ -13,7 +13,7 @@ function JobsView() {
   const [jobs, setJobs] = React.useState([]);
   // Default to "last24h" so an idle dashboard shows recent activity
   // instead of an empty 'active' tab when nothing is running NOW.
-  // Order: active | last24h | done | failed | all.
+  // Order: active | last24h | done | failed | lost | all.
   const [filter, setFilter] = React.useState("last24h");
   const [spawnedBy, setSpawnedBy] = React.useState("all");  // all | <slug>
   const [kind, setKind] = React.useState("all");            // all | <kind>
@@ -1957,7 +1957,7 @@ function fleetEvents(jobs, fires, flips, now) {
   for (const j of jobs || []) {
     const at = Date.parse(j.finished_at || j.started_at || "");
     if (!Number.isFinite(at)) continue;
-    const tone = j.status === "failed" ? "red" : j.status === "running" ? "accent" : j.status === "done" ? "green" : "gray";
+    const tone = j.status === "failed" ? "red" : j.status === "running" ? "accent" : j.status === "done" ? "green" : j.status === "lost" ? "amber" : "gray";
     out.push({ key: "j" + j.id, ts: at, who: j.spawned_by, text: j.title, word: j.status === "running" ? "job started" : "job " + j.status, tone });
   }
   for (const [i, f] of (fires || []).entries()) {
@@ -2034,7 +2034,7 @@ function HostView({ onOpen }) {
   const health = fleetHealth(cousins, now);
   const ordered = fleetOrder(cousins);
   const jobsRunning = visibleJobs.filter(j => j.status === "running").length;
-  const jobsFailed = visibleJobs.filter(j => j.status === "failed").length;
+  const jobsFailed = visibleJobs.filter(j => j.status === "failed" || j.status === "lost").length;
   const events = fleetEvents(visibleJobs, fires, FLEET_FLIPS, now);
 
   return (

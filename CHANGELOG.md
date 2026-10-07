@@ -7,16 +7,19 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Added
 
-- **A job whose process died is marked `lost` at once.** A shell job
-  closes its own row when its command exits, so a row still `running`
-  with no live process means it was killed, ran out of memory or the
-  machine rebooted. Until now it stayed `running` for 24 hours. Every
-  read of the job list (`cousin-job list` and `show`, the `job` tool,
-  the console's Jobs page and stream) now marks it `lost`, with
-  `[lost: its process is gone]` on its summary. `lost` is a new job
-  status: the console shows it in amber with its own filter. A row with
-  no recorded pid (a subagent, a hook-tracked background shell) is
-  never marked lost.
+- **A job whose process died is marked `lost` at once.** A job started
+  with a command closes its own row when the command exits, so a row
+  still `running` with no live runner means it was killed, ran out of
+  memory or the machine rebooted. Until now it stayed `running` for 24
+  hours. `cousin-job list`, `show` and `tail -f`, the `job` tool's
+  `list` and `show`, and the console (within seconds, from its event
+  stream) now mark it `lost`, with `[lost: its process is gone]` on its
+  summary. The runner's pid is checked against its stored start time and
+  boot, so a reused pid or a clock step is never taken for the job, and a
+  runner that does finish later still closes the row. Worker loops now
+  record their runner's pid too. `lost` is a new job status: amber with
+  its own filter on the Jobs page. A row with no recorded pid (a `start`
+  with no command, a hook-tracked background shell) is never marked lost.
 
 ## 3.28.2 - 2026-10-07
 

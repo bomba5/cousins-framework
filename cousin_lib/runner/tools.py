@@ -286,7 +286,7 @@ def _j_fail(ctx, a):
 
 def _j_list(ctx, a):
     from cousin_lib import jobs
-    jobs.reap_lost()
+    jobs.reap_lost_quietly()
     rows = jobs.list_jobs(status=a.get("status") or None,
                           spawned_by=ctx.slug if a.get("mine") else None,
                           active_only=bool(a.get("active")))
@@ -308,7 +308,7 @@ def _j_list(ctx, a):
 def _j_show(ctx, a):
     from cousin_lib import jobs
     job_id = _int(a, "id", _str(a, "command") or "show")
-    jobs.reap_lost()
+    jobs.reap_lost_quietly()
     job = jobs.get_job(job_id)
     if not job:
         raise ValueError("job #%d not found" % job_id)

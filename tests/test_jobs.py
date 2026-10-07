@@ -491,22 +491,75 @@ class TestLostJobs(JobsCase):
         job_id = self._row_with(pid=self._dead_pid())
         self.assertEqual(jobs.reap_lost(), [job_id])
 
-    def test_a_live_group_keeps_its_job_running(self):
-        # Started after the row, as a job's runner always is.
+    def _sleeper(self):
         import subprocess
-        from cousin_lib import jobs
-        job_id = register_job(kind="shell", title="still running")
         proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
         self.addCleanup(proc.wait)
         self.addCleanup(proc.kill)
+        return proc
+
+    def test_a_live_group_keeps_its_job_running(self):
+        # Started after the row, as a job's runner always is.
+        from cousin_lib import jobs
+        job_id = register_job(kind="shell", title="still running")
+        proc = self._sleeper()
+        jobs.record_spawn(job_id, proc.pid)
+        self.assertEqual(jobs.reap_lost(), [])
+        self.assertEqual(get_job(job_id)["status"], "running")
+
+    def test_the_runner_identity_survives_a_clock_step(self):
+        # A wall-clock jump back makes started_at look newer than the
+        # process; the stored start ticks still say it is the same one.
+        from cousin_lib import jobs
+        job_id = register_job(kind="shell", title="clock stepped back")
+        proc = self._sleeper()
+        jobs.record_spawn(job_id, proc.pid)
         conn = jobs._db()
         try:
-            conn.execute("UPDATE jobs SET pid=?, pgid=? WHERE id=?", (proc.pid, proc.pid, job_id))
+            conn.execute("UPDATE jobs SET started_at=? WHERE id=?",
+                         ("2099-01-01T00:00:00+00:00", job_id))
             conn.commit()
         finally:
             conn.close()
         self.assertEqual(jobs.reap_lost(), [])
-        self.assertEqual(get_job(job_id)["status"], "running")
+
+    def test_a_reused_pid_with_other_start_ticks_is_not_the_job(self):
+        from cousin_lib import jobs
+        job_id = register_job(kind="shell", title="pid reused")
+        proc = self._sleeper()
+        jobs.record_spawn(job_id, proc.pid)
+        conn = jobs._db()
+        try:
+            conn.execute("UPDATE jobs SET start_ticks=start_ticks-1000, pgid=-1 WHERE id=?", (job_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertEqual(jobs.reap_lost(), [job_id])
+
+    def test_a_row_from_an_earlier_boot_is_lost(self):
+        from cousin_lib import jobs
+        job_id = register_job(kind="shell", title="before the reboot")
+        proc = self._sleeper()
+        jobs.record_spawn(job_id, proc.pid)
+        conn = jobs._db()
+        try:
+            conn.execute("UPDATE jobs SET boot_id='an-earlier-boot', pgid=-1 WHERE id=?", (job_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertEqual(jobs.reap_lost(), [job_id])
+
+    def test_a_runner_that_finishes_after_a_wrong_lost_still_closes_it(self):
+        from cousin_lib import jobs
+        job_id = self._row_with(pid=self._dead_pid())
+        jobs.reap_lost()
+        finish_job(job_id, status="done", exit_code=0)
+        self.assertEqual((get_job(job_id)["status"], get_job(job_id)["exit_code"]), ("done", 0))
+
+    def test_the_quiet_reap_never_raises(self):
+        from cousin_lib import jobs
+        with mock.patch.object(jobs, "reap_lost", side_effect=RuntimeError("locked")):
+            self.assertEqual(jobs.reap_lost_quietly(), [])
 
     def test_a_row_with_no_pid_is_never_lost(self):
         from cousin_lib import jobs

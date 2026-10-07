@@ -590,7 +590,7 @@ def _fire_worker_loops(config, state, now, report):
             spawned_by=config.slug, command=" ".join(cmd))
         log_path = jobs._default_log_path(job_id)
         jobs.set_log_path(job_id, str(log_path))
-        jobs._spawn_tracked(cmd, log_path, job_id)
+        jobs.record_spawn(job_id, jobs._spawn_tracked(cmd, log_path, job_id))
         # The RUN is the firing; the rc arrives in the job row when
         # the detached runner finishes.
         state["last_fires"][key] = now

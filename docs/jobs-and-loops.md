@@ -74,7 +74,7 @@ cousin-job tail 15 --lines 100
 
 Kinds are `subagent`, `shell`, `build` and `other`; media generation
 records its own `media` rows ([media](media.md)). Statuses are
-`running`, `done`, `failed` and `cancelled`. `start --json` prints
+`running`, `done`, `failed`, `cancelled` and `lost`. `start --json` prints
 `{"job_id": ..., "log_path": ...}` for scripts.
 
 A shell job's command runs in its own process group, and so does
@@ -94,10 +94,19 @@ cousin's job are refused (exit 3) and nothing is signalled, from the
 CLI and from the MCP `job` tool alike. The operator closes any job from
 the console, or with `cousin-job` in a shell with no `COUSIN_HOME`.
 
-Housekeeping happens when the console lists jobs: anything still
-`running` after 24 hours is marked failed (its process most likely died
-without closing the row), and only the newest 1000 finished rows are
-kept, together with their logs in `data/job-logs/`.
+A shell job's command closes its own row when it exits, so a row still
+`running` whose process is gone means that process died without closing
+it (killed, out of memory, the machine rebooted). Every read of the job
+list (`cousin-job list` and `show`, the `job` tool's `list` and `show`,
+the console's Jobs page) marks such a row `lost` at once, with
+`[lost: its process is gone]` on its summary. Only a row that recorded a
+pid can be checked: a `start` row for a subagent or a hook-tracked
+background shell has none, and is never marked lost.
+
+More housekeeping happens when the console lists jobs: anything still
+`running` after 24 hours is marked failed (a row with no pid to check),
+and only the newest 1000 finished rows are kept, together with their
+logs in `data/job-logs/`.
 
 ### Automatic tracking from Claude Code
 

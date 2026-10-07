@@ -143,7 +143,7 @@ def _default_sources(root):
         "cousins": lambda: _registry_rows(root),
         "loops": lambda: [],
         "daemon": loops.daemon_status,
-        "jobs": lambda: jobs.list_jobs(limit=200),
+        "jobs": lambda: (jobs.reap_lost(), jobs.list_jobs(limit=200))[1],
         "last_fires": lambda: loops._load_state().get("last_fires") or {},
         "requests": lambda: loops.list_requests(limit=200),
         "tracker": lambda: tracker.list_items(root=root),

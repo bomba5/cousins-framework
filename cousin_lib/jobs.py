@@ -200,7 +200,7 @@ def list_jobs(*, status=None, spawned_by=None, active_only=False,
         conn.close()
 
 
-STATUSES = ("running", "done", "failed", "cancelled")
+STATUSES = ("running", "done", "failed", "cancelled", "lost")
 _UPDATABLE = ("status", "result_summary", "exit_code", "title",
               "description")
 
@@ -469,6 +469,70 @@ def live_members(job):
     return group_members(job.get("pgid"), _started_epoch(job))
 
 
+def _pid_since(pid, since=None):
+    """True when `pid` is a live process that started at or after
+    `since` (epoch seconds), so a reused pid never counts."""
+    try:
+        with open("/proc/%d/stat" % int(pid)) as fh:
+            stat = fh.read()
+    except (OSError, ValueError, TypeError):
+        return False
+    if since is None:
+        return True
+    btime = _boot_time()
+    hz = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+    try:
+        start_ticks = int(stat[stat.rfind(")") + 2:].split()[19])
+    except (IndexError, ValueError):
+        return True
+    return btime is None or btime + start_ticks / hz >= since - 2
+
+
+def _process_gone(job):
+    """True only when the job names a process and nothing of it runs: its
+    group has no member started since the job did (a group-led job), or
+    its pid is gone (a pid-only row). A row with no pid has nothing to
+    check and is never called gone."""
+    if job.get("pgid"):
+        return not live_members(job)
+    if job.get("pid"):
+        return not _pid_since(job["pid"], _started_epoch(job))
+    return False
+
+
+LOST_NOTE = " [lost: its process is gone]"
+
+
+def reap_lost():
+    """Rows 'running' whose process is gone are marked 'lost' at once,
+    not 24 hours later (reap_stale): a job's runner closes its own row
+    before it exits, so a running row with no live process means the
+    runner died without closing it. Returns the ids marked. A host with
+    no /proc cannot tell, and marks nothing. Maintenance any reader may
+    run, like reap_stale."""
+    if not os.path.isdir("/proc/self"):
+        return []
+    conn = _db()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM jobs WHERE status='running' AND pid IS NOT NULL")]
+        marked = []
+        for job in rows:
+            if not _process_gone(job):
+                continue
+            cur = conn.execute(
+                "UPDATE jobs SET status='lost', finished_at=?,"
+                " result_summary=COALESCE(result_summary, '') || ?"
+                " WHERE id=? AND status='running'",
+                (_now(), LOST_NOTE, job["id"]))
+            if cur.rowcount:
+                marked.append(job["id"])
+        conn.commit()
+        return marked
+    finally:
+        conn.close()
+
+
 def reap_group(job, *, grace=3.0):
     """SIGTERM the job's live group members, SIGKILL whatever is left
     after `grace` seconds. Returns the pids that were alive."""
@@ -696,6 +760,7 @@ def _cmd_cancel(args):
 
 
 def _cmd_list(args):
+    reap_lost()
     spawned_by = CousinConfig.from_env().slug if args.mine else None
     jobs = list_jobs(status=args.status, spawned_by=spawned_by,
                      active_only=args.active)
@@ -718,6 +783,7 @@ def _cmd_list(args):
 
 
 def _cmd_show(args):
+    reap_lost()
     job = get_job(args.id)
     if not job:
         print("job #%d not found" % args.id, file=sys.stderr)

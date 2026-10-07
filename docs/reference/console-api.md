@@ -639,7 +639,7 @@ Body `{"text": "..."}`. A `chat` item on the operator's thread (`operator:<[oper
 
 ## Jobs
 
-Rows from `data/jobs.db`: `id`, `spawned_by`, `kind`, `title`, `description`, `status` (`running`, `done`, `failed`, `cancelled`), `started_at`, `finished_at`, `exit_code`, `result_summary`, `log_path`, `pid`, `command`. Jobs are created by `cousin-job`, not through the console.
+Rows from `data/jobs.db`: `id`, `spawned_by`, `kind`, `title`, `description`, `status` (`running`, `done`, `failed`, `cancelled`, `lost`: a running row whose recorded process is gone, marked on each read of this route, `GET /api/jobs/<id>` and the `jobs` stream), `started_at`, `finished_at`, `exit_code`, `result_summary`, `log_path`, `pid`, `command`. Jobs are created by `cousin-job`, not through the console.
 
 ### `GET /api/jobs`
 

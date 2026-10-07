@@ -638,8 +638,10 @@ when you scroll up, and "follow" takes you back. The browser keeps the last
 2 MB. A job without a log says so.
 
 A running job has "cancel" (it sends SIGTERM when the pid is known, then
-marks the job cancelled); a finished one has a delete button. Jobs still
-"running" after 24 hours are marked failed by the store's reaper. See
+marks the job cancelled); a finished one has a delete button. A running
+job whose process died without closing it shows as "lost" (amber, with
+its own filter) as soon as the page reads it; jobs still "running" after
+24 hours are marked failed by the store's reaper. See
 [jobs and loops](jobs-and-loops.md).
 
 ## Memory

@@ -30,6 +30,16 @@ def _maintenance(server):
               file=sys.stderr, flush=True)
 
 
+def _reap_lost():
+    """A running row whose process is gone turns 'lost' on every read
+    (cheap: one /proc look per running row), not every 5 minutes."""
+    try:
+        jobs.reap_lost()
+    except Exception as err:  # noqa: BLE001 - never a 500 on the poll
+        print("[console] lost-job check failed: %s" % err,
+              file=sys.stderr, flush=True)
+
+
 def _job_id(raw):
     try:
         return int(raw)
@@ -74,6 +84,7 @@ def register():
     @router.route("GET", "/api/jobs")
     def list_jobs(req):
         _maintenance(req.server)
+        _reap_lost()
         q = req.query
         rows = jobs.list_jobs(
             status=q.get("status") or None,
@@ -87,6 +98,7 @@ def register():
 
     @router.route("GET", "/api/jobs/{job_id}")
     def show(req, job_id):
+        _reap_lost()
         return 200, {"ok": True, "job": _job(job_id)}
 
     @router.route("GET", "/api/jobs/{job_id}/log")

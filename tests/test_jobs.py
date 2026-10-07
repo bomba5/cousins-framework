@@ -451,3 +451,98 @@ class TrackedJobsLog(JobsCase):
                 raise RuntimeError("HTTP Error 429: quota cap")
         text = pathlib.Path(get_job(job.job_id)["log_path"]).read_text()
         self.assertIn("FAILED: RuntimeError: HTTP Error 429: quota cap", text)
+
+
+class TestLostJobs(JobsCase):
+    """#244: a running row whose recorded process is gone turns 'lost' on
+    the next read, not 24 hours later."""
+
+    def _row_with(self, **fields):
+        from cousin_lib import jobs
+        job_id = register_job(kind="shell", title="dies unclosed")
+        conn = jobs._db()
+        try:
+            conn.execute("UPDATE jobs SET %s WHERE id=?"
+                         % ", ".join("%s=?" % k for k in fields),
+                         list(fields.values()) + [job_id])
+            conn.commit()
+        finally:
+            conn.close()
+        return job_id
+
+    def _dead_pid(self):
+        import subprocess
+        proc = subprocess.Popen(["true"])
+        proc.wait()
+        return proc.pid
+
+    def test_a_group_led_job_with_no_live_member_is_lost(self):
+        from cousin_lib import jobs
+        pid = self._dead_pid()
+        job_id = self._row_with(pid=pid, pgid=pid)
+        self.assertEqual(jobs.reap_lost(), [job_id])
+        job = get_job(job_id)
+        self.assertEqual(job["status"], "lost")
+        self.assertIn("lost: its process is gone", job["result_summary"])
+        self.assertIsNotNone(job["finished_at"])
+
+    def test_a_pid_only_row_whose_pid_is_gone_is_lost(self):
+        from cousin_lib import jobs
+        job_id = self._row_with(pid=self._dead_pid())
+        self.assertEqual(jobs.reap_lost(), [job_id])
+
+    def test_a_live_group_keeps_its_job_running(self):
+        # Started after the row, as a job's runner always is.
+        import subprocess
+        from cousin_lib import jobs
+        job_id = register_job(kind="shell", title="still running")
+        proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        conn = jobs._db()
+        try:
+            conn.execute("UPDATE jobs SET pid=?, pgid=? WHERE id=?", (proc.pid, proc.pid, job_id))
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertEqual(jobs.reap_lost(), [])
+        self.assertEqual(get_job(job_id)["status"], "running")
+
+    def test_a_row_with_no_pid_is_never_lost(self):
+        from cousin_lib import jobs
+        job_id = register_job(kind="subagent", title="no process to check")
+        self.assertEqual(jobs.reap_lost(), [])
+        self.assertEqual(get_job(job_id)["status"], "running")
+
+    def test_a_reused_pid_older_than_the_job_does_not_keep_it_running(self):
+        # pid 1 is alive but started long before the job: not its process.
+        from cousin_lib import jobs
+        job_id = self._row_with(pid=1)
+        self.assertEqual(jobs.reap_lost(), [job_id])
+
+    def test_a_finished_row_is_left_alone(self):
+        from cousin_lib import jobs
+        job_id = self._row_with(pid=self._dead_pid())
+        finish_job(job_id, status="done")
+        self.assertEqual(jobs.reap_lost(), [])
+        self.assertEqual(get_job(job_id)["status"], "done")
+
+    def test_no_proc_marks_nothing(self):
+        from cousin_lib import jobs
+        self._row_with(pid=self._dead_pid())
+        with mock.patch("cousin_lib.jobs.os.path.isdir", return_value=False):
+            self.assertEqual(jobs.reap_lost(), [])
+
+    def test_list_marks_it_lost_and_shows_the_status(self):
+        job_id = self._row_with(pid=self._dead_pid())
+        rc, out, _ = self._main(["list"])
+        self.assertEqual(rc, 0)
+        line = next(l for l in out.splitlines() if l.strip().startswith(str(job_id)))
+        self.assertIn("lost", line)
+
+    def test_lost_is_a_status_a_row_can_be_filtered_and_set_to(self):
+        from cousin_lib import jobs
+        self.assertIn("lost", jobs.STATUSES)
+        job_id = self._row_with(pid=self._dead_pid())
+        jobs.reap_lost()
+        self.assertEqual([j["id"] for j in list_jobs(status="lost")], [job_id])

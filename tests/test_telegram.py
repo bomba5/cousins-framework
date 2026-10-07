@@ -142,6 +142,31 @@ class TestInboundGate(_BridgeFixture):
                         "the rejected id must reach the log")
 
 
+class TestInboundNotDelivered(_BridgeFixture):
+    """#243: a message stored but not delivered is told to the sender on
+    the wire, and relay_inbound returns normally so the offset moves on
+    (a retry would store the row a second time)."""
+
+    def test_the_sender_is_told_and_nothing_raises(self):
+        from cousin_lib.server import chat_api
+        cfg = self._bridge()
+        replied, logged = [], []
+
+        def failing_send(**kw):
+            raise chat_api.NotDelivered("wren: stored as message 7, but not delivered", 7)
+
+        relay_inbound(
+            cfg,
+            update={"message": {"from": {"id": 42, "first_name": "Sam"},
+                                "chat": {"id": 4242}, "text": "hello"}},
+            chat_send=failing_send, tg_send=lambda **kw: replied.append(kw),
+            log=logged.append)
+        self.assertEqual(len(replied), 1)
+        self.assertEqual(replied[0]["chat_id"], 4242)
+        self.assertTrue(replied[0]["text"].startswith("Not delivered:"))
+        self.assertTrue(any("not delivered" in line for line in logged))
+
+
 class TestOutbound(_BridgeFixture):
     def test_cousin_reply_is_relayed_to_telegram(self):
         cfg = self._bridge()

@@ -372,3 +372,78 @@ class TestRefusedLane(HermeticCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestASendWhoseDeliveryFailedIsNotOk(HermeticCase):
+    """#243: a stored message whose inbox write failed never reaches the
+    runner, so the send must not answer ok: chat_api.send raises
+    NotDelivered after the row is stored and the hooks ran."""
+
+    def setUp(self):
+        super().setUp()
+        from tests.runner._home import temp_home
+        self.home = temp_home(self, runner="fake")
+
+    def _config(self):
+        from cousin_lib.config import CousinConfig
+        return CousinConfig.load(self.home)
+
+    def _rows(self):
+        from cousin_lib.server.storage import ChatStore
+        store = ChatStore(self.home / "data" / "chat.db")
+        try:
+            return store.history("priya", limit=10)["messages"]
+        finally:
+            store.close()
+
+    def test_a_failed_inbox_write_raises_with_the_stored_id(self):
+        import sqlite3
+        from cousin_lib.runner.inbox import Inbox
+        from cousin_lib.server import chat_api
+        config = self._config()
+        with mock.patch.object(Inbox, "put", side_effect=sqlite3.OperationalError("disk I/O")):
+            with self.assertRaises(chat_api.NotDelivered) as caught:
+                chat_api.send(config, {"user": "Priya", "message": "hi"},
+                              deliver=chat_api.make_deliver(config))
+        rows = self._rows()
+        self.assertEqual([r["message"] for r in rows], ["hi"])
+        self.assertEqual(caught.exception.message_id, rows[0]["id"])
+        self.assertIn("not delivered", str(caught.exception))
+        self.assertIn("send it again", str(caught.exception))
+
+    def test_a_queued_send_is_still_ok(self):
+        from cousin_lib.server import chat_api
+        config = self._config()
+        body = chat_api.send(config, {"user": "Priya", "message": "hi"},
+                             deliver=chat_api.make_deliver(config))
+        self.assertTrue(body["ok"])
+
+    def test_the_hooks_still_fire_before_the_failure_is_raised(self):
+        from cousin_lib.server import chat_api
+        config = self._config()
+        fired = []
+        with mock.patch("cousin_lib.chat_hooks.on_message",
+                        lambda *a, **kw: fired.append(kw["message_id"])):
+            with self.assertRaises(chat_api.NotDelivered):
+                chat_api.send(config, {"user": "Priya", "message": "hi"},
+                              deliver=lambda **kw: delivery.FAILED)
+        self.assertEqual(len(fired), 1)
+
+    def test_a_peer_send_through_deliver_local_raises_too(self):
+        import sqlite3
+        from cousin_lib import chat
+        from cousin_lib.runner.inbox import Inbox
+        from cousin_lib.server import chat_api
+        with mock.patch.object(Inbox, "put", side_effect=sqlite3.OperationalError("locked")):
+            with self.assertRaises(chat_api.NotDelivered):
+                chat.deliver_local(self._config(), {"user": "Kestrel", "message": "hi"})
+
+    def test_the_console_route_answers_503_with_stored_true(self):
+        from cousin_lib.console import proxy
+        from cousin_lib.server import chat_api
+        status, body = proxy._local(chat_api.send, self._config(),
+                                    {"user": "Priya", "message": "hi"},
+                                    deliver=lambda **kw: delivery.FAILED)
+        self.assertEqual(status, 503)
+        self.assertEqual((body["ok"], body["stored"]), (False, True))
+        self.assertIsInstance(body["id"], int)

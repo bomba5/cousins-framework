@@ -84,6 +84,8 @@ What happens on an ordinary (non-diverted) send on this machine, in order:
 4. If `user` is you (`[operator] name`), the message is checked for corrections ("stop", "don't", "instead", ...) and any hit goes to `data/corrections.jsonl`. Failures here never fail the send.
 5. Chat hooks from `<home>/chat-hooks.json` run (see below).
 
+If the inbox didn't take the message in step 3 (its write failed, or the cousin has no runner kind), the row stays stored but the cousin will never see it, so the send isn't ok: after steps 4 and 5 the in-process call raises `NotDelivered`, and the console answers `503 {"ok": false, "error": "<slug>: stored as message <id>, but not delivered: ...; send it again", "id": <id>, "stored": true}`. `cousin-chat send` exits 1 with that line, the runner's `send` tool fails with it, and the Telegram bridge answers the sender "Not delivered: ...".
+
 On a node the row is stored and the answer goes back at once. The node's brain runs the [turn](../glossary.md#turn) on a background thread, and its reply shows up in the history. A node has no login codes, no corrections and no chat hooks.
 
 ## Reply

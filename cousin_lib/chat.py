@@ -406,6 +406,7 @@ def chat_main(argv=None):
             print("%-12s url=%s (external)" % (p.slug, p.url))
         return 0
 
+    from cousin_lib.server.chat_api import NotDelivered
     try:
         result = send_message(
             fw,
@@ -421,7 +422,7 @@ def chat_main(argv=None):
     except (MissingConfigError, NoContextError, ValueError) as e:
         print("cousin-chat: %s" % e, file=sys.stderr)
         return 2
-    except (DeliveryRefused, urllib.error.URLError) as e:
+    except (DeliveryRefused, NotDelivered, urllib.error.URLError) as e:
         print("cousin-chat: %s" % e, file=sys.stderr)
         return 1
     print(json.dumps({"ok": True, "to": args.slug, "id": result.get("id")}, sort_keys=True))

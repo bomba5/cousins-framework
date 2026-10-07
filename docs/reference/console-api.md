@@ -555,7 +555,7 @@ Query: `cousin` (required), `q`, `user`, `archived`. Forwards to `/api/search`. 
 
 ### `POST /api/chat/send`
 
-Body `{"cousin": "wren", "user": "ana", "message": "hi", "image": "data:image/png;base64,...", "reply_to": {...}}`. `cousin` and `user` required. Forwards `user`, `message`, and `image` / `reply_to` when present to `/api/send` with a 15 second timeout. Answers `{"ok": true, "id", "timestamp"}`.
+Body `{"cousin": "wren", "user": "ana", "message": "hi", "image": "data:image/png;base64,...", "reply_to": {...}}`. `cousin` and `user` required. Forwards `user`, `message`, and `image` / `reply_to` when present to `/api/send` with a 15 second timeout. Answers `{"ok": true, "id", "timestamp"}`. A message stored but not taken by the cousin's inbox is `503 {"ok": false, "error", "id", "stored": true}` ([chat API](chat-api.md#send)).
 
 ### `POST /api/chat/archive`
 

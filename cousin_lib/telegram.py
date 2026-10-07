@@ -34,6 +34,7 @@ from pathlib import Path
 
 from cousin_lib import chat_hooks, delivery
 from cousin_lib.config import CousinConfig, FrameworkConfig
+from cousin_lib.server import chat_api
 from cousin_lib.server.inbound import after_inbound_stored, divert_login_code
 from cousin_lib.server.storage import (ChatStore, normalize_chat_user,
                                        save_data_uri)
@@ -237,10 +238,8 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
                              message_id=message_id)
         return delivery.deliver(cfg.home, item, wait=False)
 
-    # Fire-and-forget by design: the outcome (delivered/queued/failed)
-    # is not read here.
-    deliver(user=user, message=message, message_id=row["id"],
-           attachments=(str(path),) if path else ())
+    outcome = deliver(user=user, message=message, message_id=row["id"],
+                      attachments=(str(path),) if path else ())
     # After delivery, same order chat_api.send has: the marker's mtime is
     # the gap baseline for the NEXT message, and the correction capture
     # rides along on the same call.
@@ -248,6 +247,10 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
     chat_hooks.on_message(cfg.home, user=user, message=message,
                           message_id=row["id"], slug=cfg.slug,
                           deliver=deliver)
+    if outcome == delivery.FAILED:
+        # Stored, but the runner will never see it: relay_inbound tells
+        # the sender instead of leaving them waiting on a silent cousin.
+        raise chat_api.not_delivered(config, row["id"])
 
 
 def _default_log(line):
@@ -280,6 +283,26 @@ def relay_inbound(cfg, *, update, chat_send=None, tg_send=None,
         return  # silent on the wire, logged above
     chat_send = chat_send or (lambda **kw: _default_chat_send(cfg, **kw))
     user = _thread_name(cfg, sender["id"])
+    chat_id = (message.get("chat") or {}).get("id", sender["id"])
+    try:
+        _relay_one(cfg, message, chat_send=chat_send, user=user,
+                   tg_fetch=tg_fetch, log=log)
+    except chat_api.NotDelivered as err:
+        # Stored but not delivered: say so on the wire, and let the
+        # offset move on (a retry would store the row again).
+        log("message from %r not delivered: %s" % (sender.get("id"), err))
+        tg_send = tg_send or (lambda **kw: _tg_call(
+            cfg, "sendMessage", {"chat_id": kw["chat_id"], "text": kw["text"]}))
+        try:
+            tg_send(chat_id=chat_id, text="Not delivered: %s" % err)
+        except Exception as notice_err:
+            log("could not tell %r: %s" % (sender.get("id"), _describe(notice_err)))
+
+
+def _relay_one(cfg, message, *, chat_send, user, tg_fetch, log):
+    """The text or the largest photo of one authorized message into
+    `chat_send`; anything else is logged and skipped."""
+    sender = message.get("from") or {}
     photo = message.get("photo")
     if photo:
         # Telegram lists the sizes smallest first; relay the largest.

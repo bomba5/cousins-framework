@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.28.2 - 2026-10-07
+
+### Fixed
+
+- **A message the cousin will never see no longer answers ok.** When a
+  send stored its row but the cousin's inbox did not take it (the inbox
+  write failed, or the cousin has no runner kind), the sender still got
+  `ok: true` and the message sat unread. Now the console answers `503`
+  with `stored: true` and the stored id, `cousin-chat send` exits 1, the
+  runner's `send` tool fails with the reason, and the Telegram bridge
+  tells the sender "Not delivered: ...".
+
 ## 3.28.1 - 2026-10-07
 
 ### Fixed

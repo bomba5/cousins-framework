@@ -3,6 +3,36 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.11 - 2026-10-08
+
+### Fixed
+
+- **A resumed sdk session no longer keeps an old system prompt or tool
+  list.** The CLI's prompt snapshot records the system prompt and the
+  tools on a session's first request and sends that record on every
+  resume. A session started before an edit kept the old text and
+  schemas across restarts: a cousin could not set `scope`,
+  `valid_until` or `depth` though the registry had them and the
+  handler took them, and a new law line or operator rule did not reach
+  it until its next rollover, though 3.21.0 called rules effective at
+  the next start. `data/runner-session.json` now records a hash of
+  what the session started with (`snapshot`: the composed system
+  prompt with the version held fixed, the registry's tools and the
+  cousin's own MCP servers). When the first init proves a resume and
+  what the runner serves now differs, or the file has no record, the
+  runner asks for a rollover: a handoff, then a fresh session that
+  records the new snapshot. A lost resume starts fresh as before. The
+  first turn after such a resume still runs with the old snapshot; the
+  rollover follows it. A release's version number alone moves no
+  snapshot; a release that changes the contract text or the shipped
+  registry (after `--apply-homes`) rolls sdk sessions over once.
+- **The upgrade to this version rolls every sdk session over once.** No
+  session file on file has a record yet, so each sdk cousin (side
+  sessions included) hands off and boots fresh after its first turn:
+  one handoff and one boot per sdk cousin and per side session. A switch from `tmux` to `sdk`
+  rolls over once too: the tmux session's file has no record, and its
+  recorded tools were the tmux kind's.
+
 ## 3.37.10 - 2026-10-08
 
 ### Fixed

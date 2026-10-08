@@ -396,6 +396,8 @@ def _live():
 # `--to sdk|tmux` moves a runner cousin
 # between the two Claude kinds. The session id in data/runner-session.json is
 # the continuity: the source stops at idle keeping it, the target resumes it.
+# A switch to sdk then rolls over once after the notice turn: the session's
+# recorded tools are the tmux kind's (sdk.SdkRunner._roll_if_tools_changed).
 
 SWITCH_RECORD = "data/kind-switch.json"
 SWITCH_KINDS = ("sdk", "tmux")

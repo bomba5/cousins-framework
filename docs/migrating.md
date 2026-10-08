@@ -329,6 +329,10 @@ cousin-migrate apply sam --to sdk --yes
 #   switched
 ```
 
+After the switch's notice turn the sdk runner rolls the session over once:
+the tmux session recorded the tmux kind's tool list, so a handoff and a
+fresh session give it the sdk tools.
+
 `plan` checks, and writes nothing: `kind` (the cousin is on the runner
 lane, in the other kind, and `--to` names one of `sdk` or `tmux`),
 `account` (a working account; see below for the `tmux` kind's own rule),

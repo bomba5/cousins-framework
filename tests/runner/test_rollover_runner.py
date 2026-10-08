@@ -399,5 +399,72 @@ class TestPressureTrigger(RolloverCase):
         self.assertEqual([e["reason"] for e in events], ["context pressure 150000 tokens"])
 
 
+class TestSnapshot(RolloverCase):
+    """The CLI's snapshot records the system prompt and the tools on a
+    session's first request and sends that record on every resume: a
+    resume over a changed prompt or tool list rolls over, so the next
+    session records the new one."""
+
+    REASON = "the system prompt or the tools changed since this session started"
+
+    def saved(self, r, **fields):
+        (self.home / "data" / "runner-session.json").write_text(json.dumps(
+            dict({"session_id": "s-1", "lane": "unknown", "generation": 0, "updated": 0},
+                 **fields)))
+
+    def on_file(self):
+        return json.loads((self.home / "data" / "runner-session.json").read_text())
+
+    def rollover_reasons(self, r):
+        return [e["payload"]["reason"] for e in r.events()
+                if e["kind"] == "rollover" and e["payload"].get("phase") == "start"]
+
+    def test_a_resume_with_the_snapshot_it_recorded_is_not_rolled_over(self):
+        r = self.build(); self.saved(r, snapshot=r._snapshot_fingerprint()); r.start(); self.work(r)
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        self.assertEqual(asked_resume(self.clients[0].options), "s-1")
+        self.assertEqual(len(self.clients), 1)
+        self.assertEqual(self.rollover_reasons(r), [])
+
+    def test_a_resume_whose_tools_changed_rolls_over_once(self):
+        r = self.build(); self.saved(r, snapshot="0123456789abcdef"); r.start(); self.work(r)
+        self.assertTrue(_wait(lambda: len(self.clients) == 2))
+        self.assertTrue(_wait(lambda: r.saved_session() == "s-2"))
+        self.assertEqual(self.rollover_reasons(r), [self.REASON])
+        self.assertEqual(self.on_file()["snapshot"], r._snapshot_fingerprint())
+        self.work(r, "after the rollover")
+        self.assertEqual(len(self.clients), 2)
+
+    def test_an_edit_to_the_law_since_the_session_started_rolls_it_over(self):
+        # the prompt is frozen with the tools: a new rule or law line would
+        # otherwise never reach a resumed session
+        r = self.build(); self.saved(r, snapshot=r._snapshot_fingerprint())
+        (self.home.parent.parent / "config" / "law.md").write_text("1. The law.\n2. A new one.\n")
+        r.start(); self.work(r)
+        self.assertTrue(_wait(lambda: len(self.clients) == 2))
+        self.assertEqual(self.rollover_reasons(r), [self.REASON])
+
+    def test_a_release_alone_does_not_move_the_snapshot(self):
+        r = self.build()
+        with mock.patch("cousin_lib.version.version", return_value="3.0.0"):
+            before = r._snapshot_fingerprint()
+        with mock.patch("cousin_lib.version.version", return_value="9.9.9"):
+            after = r._snapshot_fingerprint()
+        self.assertIsNotNone(before)
+        self.assertEqual(before, after)
+
+    def test_a_resume_from_a_file_without_a_record_rolls_over(self):
+        r = self.build(); self.saved(r); r.start(); self.work(r)
+        self.assertTrue(_wait(lambda: len(self.clients) == 2))
+        self.assertEqual(self.rollover_reasons(r), [self.REASON])
+
+    def test_a_save_for_the_same_session_keeps_the_snapshot_it_recorded(self):
+        r = self.build(); self.saved(r, snapshot="0123456789abcdef")
+        r._save_session("s-1")     # a lane move: the same session, saved again
+        self.assertEqual(self.on_file()["snapshot"], "0123456789abcdef")
+        r._save_session("s-2")     # a new session records what it is given
+        self.assertEqual(self.on_file()["snapshot"], r._snapshot_fingerprint())
+        self.assertIsNotNone(self.on_file()["snapshot"])
+
 if __name__ == "__main__":
     unittest.main()

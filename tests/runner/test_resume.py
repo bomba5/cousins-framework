@@ -170,10 +170,12 @@ class TestResume(HermeticCase):
         # the file says key, the CLI's init says login: the lane on file is a
         # record, rewritten to what the init said; the account's KIND picks the
         # resume path (a login resumes through the CLI's flag), never the file
-        (self.home / "data" / "runner-session.json").write_text(
-            json.dumps({"session_id": "s-live", "lane": "key", "generation": 0, "updated": 0}))
         host = accounts.Account(accounts.HOST, "claude-login", None, None, implicit=True)
-        r = self.runner(account=host); r.start(); self.one_turn(r)
+        r = self.runner(account=host)
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-live", "lane": "key", "generation": 0, "updated": 0,
+                        "snapshot": r._snapshot_fingerprint()}))
+        r.start(); self.one_turn(r)
         self.assertIsNone(self.options[0].resume)                   # the kind, not the file's "key"
         self.assertEqual(self.options[0].extra_args["resume"], "s-live")
         self.assertTrue(_wait(lambda: self.session_file()["lane"] == "login"))
@@ -343,9 +345,10 @@ class TestRestartNote(HermeticCase):
         # an established session (an earlier turn recorded its id): the case
         # a restart interrupts. A session cut in its very first turn is on
         # file from its init, so it resumes the same way.
-        (self.home / "data" / "runner-session.json").write_text(
-            json.dumps({"session_id": "s-live", "lane": "login"}))
         r1 = self.runner([init_msg(session="s-live"), "HANG", result(session="s-live")])
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-live", "lane": "login",
+                        "snapshot": r1._snapshot_fingerprint()}))
         r1.start()
         r1.enqueue(Item("operator:priya", "chat", "start the long job", sender="Priya"))
         self.assertTrue(_wait(lambda: r1.state() == "running"))
@@ -370,9 +373,10 @@ class TestRestartNote(HermeticCase):
         stop) writes run/held before it signals. The resumed session must be
         told a requested stop cut its turn, never "not the operator"."""
         from cousin_lib import supervisor
-        (self.home / "data" / "runner-session.json").write_text(
-            json.dumps({"session_id": "s-live", "lane": "login"}))
         r1 = self.runner([init_msg(session="s-live"), "HANG", result(session="s-live")])
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-live", "lane": "login",
+                        "snapshot": r1._snapshot_fingerprint()}))
         r1.start()
         r1.enqueue(Item("operator:priya", "chat", "start the long job", sender="Priya"))
         self.assertTrue(_wait(lambda: r1.state() == "running"))
@@ -398,9 +402,10 @@ class TestRestartNote(HermeticCase):
         told a requested restart cut its turn and to continue it, never
         that a requested stop did."""
         from cousin_lib import supervisor
-        (self.home / "data" / "runner-session.json").write_text(
-            json.dumps({"session_id": "s-live", "lane": "login"}))
         r1 = self.runner([init_msg(session="s-live"), "HANG", result(session="s-live")])
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-live", "lane": "login",
+                        "snapshot": r1._snapshot_fingerprint()}))
         r1.start()
         r1.enqueue(Item("operator:priya", "chat", "start the long job", sender="Priya"))
         self.assertTrue(_wait(lambda: r1.state() == "running"))
@@ -460,8 +465,6 @@ class TestToolLedgerOnRestart(TestRestartNote):
 
     def test_a_resumed_session_is_told_what_the_cut_turn_ran(self):
         from claude_agent_sdk import AssistantMessage, ToolResultBlock, ToolUseBlock, UserMessage
-        (self.home / "data" / "runner-session.json").write_text(
-            json.dumps({"session_id": "s-live", "lane": "login"}))
         pushed = AssistantMessage(content=[ToolUseBlock(
             id="tu-push", name="Bash", input={"command": "git push origin feat/x"})],
             model="claude-test")
@@ -472,6 +475,9 @@ class TestToolLedgerOnRestart(TestRestartNote):
                          input={"to": "kestrel", "text": "branch is up"})], model="claude-test")
         r1 = self.runner([init_msg(session="s-live"), pushed, done, sending, "HANG",
                           result(session="s-live")])
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-live", "lane": "login",
+                        "snapshot": r1._snapshot_fingerprint()}))
         r1.start()
         r1.enqueue(Item("operator:priya", "chat", "push and tell kestrel", sender="Priya"))
         self.assertTrue(_wait(lambda: self.ledger().exists()

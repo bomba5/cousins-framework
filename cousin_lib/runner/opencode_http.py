@@ -56,6 +56,7 @@ PIDFILE = "opencode.pid"        # in the account's data dir: the server this run
 MARKER_ENV = "COUSIN_OPENCODE_START"
 BOOT_ID = "/proc/sys/kernel/random/boot_id"
 MARK_PASSES = 5                 # kill_marked repeats until a pass kills nothing, at most this
+MARK_SETTLE_S = 0.05            # ... and an empty pass is confirmed by one more after this
 PR_SET_PDEATHSIG = 1            # linux/prctl.h
 # prctl resolved in the parent, at import: the forked child only calls it
 # (no dlopen after fork in a threaded process)
@@ -175,17 +176,19 @@ def kill_marked(marker, *, exclude=()):
     pass runs), at most MARK_PASSES; the pids, each once. A pid this
     sweep already signalled that is still listed (not yet scheduled to
     exit, or in an uninterruptible sleep) is dying, not new: it is not
-    killed or counted again. It misses what dropped the marker (env -i,
-    exec -c), what made its environment unreadable (PR_SET_DUMPABLE 0),
-    what another manager started for it (tmux, systemd-run, at), and a
-    child mid-exec at the instant of a pass that kills nothing (its
-    environment reads empty until the kernel sets it up, microseconds):
-    a Known gap."""
+    killed or counted again. A pass that kills nothing is confirmed by
+    one more after MARK_SETTLE_S: a child mid-exec has an empty
+    environment for the moment before the kernel sets it up, and a single
+    pass at that instant would miss it. It misses what dropped the
+    marker (env -i, exec -c), what made its environment unreadable
+    (PR_SET_DUMPABLE 0), and what another manager started for it (tmux,
+    systemd-run, at): a Known gap."""
     if not marker:
         return []
     entry = ("%s=%s" % (MARKER_ENV, marker)).encode()
     killed = []
-    for _ in range(MARK_PASSES):
+    passes, confirming = 0, False
+    while passes < MARK_PASSES:
         this_pass = []
         for pid in _marked_pids(entry):
             if pid in exclude or pid in killed:
@@ -196,8 +199,13 @@ def kill_marked(marker, *, exclude=()):
             except (ProcessLookupError, PermissionError):
                 pass
         killed += this_pass
-        if not this_pass:
+        if this_pass:
+            passes, confirming = passes + 1, False
+        elif confirming:
             break
+        else:
+            confirming = True
+            time.sleep(MARK_SETTLE_S)
     return killed
 
 

@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.3 - 2026-10-08
+
+### Fixed
+
+- **The opencode sweep no longer misses a child caught mid-exec.** A
+  process's environment reads empty for a moment while the kernel
+  sets up the program it exec'd, so the marker sweep could not see a
+  child the server was starting at that instant, and one empty pass
+  ended the sweep for good (the leftover's pidfile is already gone by
+  then). A pass that kills nothing is now confirmed by one more, 50 ms
+  later; two empty passes end it.
+
 ## 3.37.2 - 2026-10-08
 
 ### Fixed

@@ -17,7 +17,9 @@ Python 3.11 or newer. The core has no third-party dependencies; two
 extras are optional. `sdk` (the Claude Agent SDK) is what an `sdk`
 [cousin](glossary.md#cousin) runs on, and that is the default
 [runner](glossary.md#runner) kind, so a working install needs it. `mcp` (the MCP SDK) is needed only by `cousin-mcp`. The suite runs
-without either (CI installs plain `-e .`). The console's frontend is JSX compiled in the
+without either, and CI runs it both ways: plain `-e .` on 3.11-3.13, and
+`.[sdk,mcp]` on 3.13 (`test (sdk lane)`), where the sdk-lane and
+MCP-serving tests run instead of skipping. The console's frontend is JSX compiled in the
 browser (React and Babel from a CDN), so there's no build step either:
 edit a `.jsx` file and reload.
 
@@ -123,6 +125,15 @@ file with `suite.py time --write` when the split drifts out of balance
 named `test (3.x)` is the one branch protection requires: it reads the
 three shards' records and passes only if all three passed and, together,
 ran every discovered module exactly once.
+
+Without its extras the suite skips every test that needs the Agent SDK
+or the MCP SDK, and the `sdk` lane is the one most cousins run on. So
+the same suite runs once more with them, on Python 3.13 only: three
+shards after `pip install -e ".[sdk,mcp]"`, checked by `test (sdk
+lane)` the way `test (3.x)` checks its own. The checks branch protection
+requires on `main` are `test (3.11)`, `test (3.12)`, `test (3.13)`,
+`test (sdk lane)` and `image`; a check that is not on that list does not
+block a merge, however red, so a new required job is added there too.
 
 The gate's generic checks run inside the suite (see below), so CI gates
 every commit. Your denylist of real names is never in CI, since it can't

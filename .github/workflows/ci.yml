@@ -58,6 +58,56 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The same suite with the optional dependencies installed: without the
+  # Agent SDK and the MCP SDK every sdk-lane and MCP-serving test skips
+  # itself whole, so the lane the fleet runs on gated no merge. One
+  # Python, three shards, checked like the others by `test (sdk lane)`.
+  shard-sdk:
+    name: test (sdk lane) shard ${{ matrix.shard }}/3
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install with the sdk and mcp extras
+        run: pip install -e ".[sdk,mcp]"
+      - name: Run the shard
+        env:
+          COUSIN_REQUIRE_TAGS: "1"
+        run: >-
+          python .github/scripts/suite.py run --shard ${{ matrix.shard }} --of 3
+          --result shard-${{ matrix.shard }}.json
+      - name: Keep what the shard ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-sdk-${{ matrix.shard }}
+          path: shard-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  test-sdk:
+    name: test (sdk lane)
+    needs: shard-sdk
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: shard-sdk-*
+          path: shards
+          merge-multiple: true
+      - name: All three shards passed and ran every module once
+        run: python3 .github/scripts/suite.py verify --of 3 shards
+
   test:
     name: test (${{ matrix.python-version }})
     needs: shard

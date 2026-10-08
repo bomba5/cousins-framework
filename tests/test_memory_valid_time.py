@@ -209,3 +209,179 @@ class TestCli(HermeticCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDeclaredScopeAndEnd(HermeticCase):
+    """#246: a fact declares, when it is written, what it holds for
+    (`scope`) and until when (`valid_until`, stored as `valid_to`). Past
+    its end it leaves the views like a retired claim; recall labels it."""
+
+    NOW = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
+
+    def test_a_date_holds_through_that_day(self):
+        self.assertEqual(memory.parse_valid_until("2026-10-31", now=self.NOW),
+                         "2026-11-01T00:00:00+00:00")
+
+    def test_a_time_with_or_without_a_zone(self):
+        self.assertEqual(memory.parse_valid_until("2026-10-31T18:00Z", now=self.NOW),
+                         "2026-10-31T18:00:00+00:00")
+        self.assertEqual(memory.parse_valid_until("2026-10-31T18:00", now=self.NOW),
+                         "2026-10-31T18:00:00+00:00")
+        self.assertEqual(memory.parse_valid_until("2026-10-31T20:00+02:00", now=self.NOW),
+                         "2026-10-31T18:00:00+00:00")
+
+    def test_past_or_garbage_is_refused(self):
+        for bad in ("2026-10-01", "yesterday", "", "31/10/2026"):
+            with self.assertRaises(ValueError, msg=bad):
+                memory.parse_valid_until(bad, now=self.NOW)
+
+    def test_the_labels(self):
+        later = {"valid_to": "2026-11-01T00:00:00+00:00", "scope": "board rev A"}
+        self.assertEqual(memory.qualifiers(later, now=self.NOW), "scope: board rev A; through 2026-10-31")
+        self.assertEqual(memory.qualifiers({"valid_to": "2026-10-31T18:00:00+00:00"}, now=self.NOW),
+                         "until 2026-10-31 18:00 UTC")
+        past = self.NOW + timedelta(days=60)
+        self.assertEqual(memory.qualifiers(later, now=past), "scope: board rev A; expired after 2026-10-31")
+        self.assertEqual(memory.qualifiers({}, now=self.NOW), "")
+
+    def test_scope_is_one_line_and_bounded(self):
+        self.assertEqual(memory.check_scope("  board\n rev A "), "board rev A")
+        self.assertIsNone(memory.check_scope("   "))
+        with self.assertRaises(ValueError):
+            memory.check_scope("x" * (memory.SCOPE_CHARS + 1))
+
+    def test_remember_stores_both_and_says_so(self):
+        home = _home(self)
+        end = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
+        line = memory.remember(home, "spi base", "SPI1 is at 0x40013000.",
+                               scope="board rev A", valid_until=end)
+        self.assertIn("scope: board rev A", line)
+        self.assertIn("through %s" % end, line)
+        [row] = memory.validity(home)
+        self.assertEqual(row["scope"], "board rev A")
+        self.assertTrue(row["valid_to"].endswith("+00:00"))
+        self.assertIsNone(row["retired_by"])
+        self.assertEqual([r["id"] for r in memory.live_entries(home)], [row["id"]])
+
+    def test_a_bad_valid_until_writes_nothing(self):
+        home = _home(self)
+        with self.assertRaises(ValueError):
+            memory.remember(home, "spi base", "x", valid_until="2001-01-01")
+        self.assertEqual(memory.validity(home), [])
+
+    def _expired_entry(self, home):
+        past = datetime.now(timezone.utc) - timedelta(days=1)
+        entry = {"timestamp": (past - timedelta(days=2)).isoformat(), "topic": "office wifi",
+                 "content": "The guest wifi password is on the fridge this week.",
+                 "truth_level": "L2_TOOL", "source": "remember",
+                 "valid_to": past.isoformat(timespec="seconds"), "scope": "the main office"}
+        _write(home, past.date().isoformat(), [entry])
+        return memory.entry_id(entry)
+
+    def test_past_its_end_it_leaves_the_live_set_and_the_views(self):
+        home = _home(self)
+        eid = self._expired_entry(home)
+        self.assertEqual(memory.live_entries(home), [])
+        self.assertIn(eid, memory.hidden_ids(memory._all_raw(home)))
+        distill.distill(home)
+        text = "".join(p.read_text() for p in (home / "memory" / "distilled").glob("*.md"))
+        self.assertNotIn("guest wifi", text)
+
+    def test_an_entry_with_an_end_is_never_read_from_a_digest(self):
+        home = _home(self)
+        eid = self._expired_entry(home)
+        self.assertIn(eid, memory.digest_unsafe_ids(memory._all_raw(home)))
+
+    def test_a_live_entry_with_an_end_shows_it_in_the_view(self):
+        home = _home(self)
+        end = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
+        memory.remember(home, "spi base", "SPI1 is at 0x40013000.", scope="board rev A",
+                        valid_until=end, level="tool", cite="datasheet p.12")
+        distill.distill(home)
+        text = "".join(p.read_text() for p in (home / "memory" / "distilled").glob("*.md"))
+        line = next(l for l in text.splitlines() if "0x40013000" in l)
+        self.assertIn("scope: board rev A", line)
+        self.assertIn("through %s" % end, line)
+
+    def test_recall_names_an_expired_hit_as_expired(self):
+        from cousin_lib import memory_search
+        home = _home(self)
+        self._expired_entry(home)
+        [path] = list((home / "memory" / "raw").glob("*.jsonl"))
+        hit = {"collection": "raw", "path": "%s#1" % path}
+        name = memory_search._hit_name(hit)
+        self.assertTrue(name.startswith("office wifi ["), name)
+        self.assertIn("scope: the main office", name)
+        self.assertIn("expired ", name)
+        item = memory_search.recall_item(home, hit)
+        self.assertTrue(item["expired"])
+        self.assertEqual(item["scope"], "the main office")
+
+    def test_the_cli_takes_scope_and_valid_until(self):
+        home = _home(self)
+        end = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"COUSIN_HOME": str(home)}), \
+                contextlib.redirect_stdout(out):
+            rc = memory.memory_main(["remember", "spi base", "SPI1 is at 0x40013000.",
+                                     "--scope", "board rev A", "--valid-until", end])
+        self.assertEqual(rc, 0)
+        self.assertIn("scope: board rev A", out.getvalue())
+        [row] = memory.validity(home)
+        self.assertEqual(row["scope"], "board rev A")
+
+
+class TestALiveFactWithAnEndIsLiveEverywhere(HermeticCase):
+    """A declared end still ahead keeps the claim live for the checks
+    that used to read any `valid_to` as retired."""
+
+    def test_is_live(self):
+        future = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        past = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        self.assertTrue(memory.is_live({"valid_to": future}))
+        self.assertFalse(memory.is_live({"valid_to": past}))
+        self.assertFalse(memory.is_live({"valid_to": future, "retired_by": "abc"}))
+        self.assertTrue(memory.is_live({}))
+
+    def test_dreaming_counts_it_live(self):
+        from cousin_lib import dream_memory
+        home = _home(self)
+        end = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
+        memory.remember(home, "spi base", "SPI1 is at 0x40013000.", valid_until=end)
+        self.assertEqual(len(dream_memory._live_topic(home, "spi base")), 1)
+
+
+class TestAMarkBeforeTheDeclaredEndRetiresIt(HermeticCase):
+    """#246 review: a claim with a future end that a mark retires is not
+    live, not in tensions, and its valid_to is the mark's time."""
+
+    def test_the_mark_wins_when_it_comes_first(self):
+        home = _home(self)
+        end = (datetime.now(timezone.utc) + timedelta(days=60)).date().isoformat()
+        memory.remember(home, "lease", "The lease runs to the end of the year.", valid_until=end)
+        memory.remember(home, "lease", "The lease was cancelled.")
+        first = [r for r in memory.validity(home) if r["content"].startswith("The lease runs")][0]
+        mark = memory.mark_obsolete(home, "lease", "cancelled", entry=first["id"])
+        row = [r for r in memory.validity(home) if r["id"] == first["id"]][0]
+        self.assertEqual(row["valid_to"], mark["timestamp"])
+        self.assertFalse(memory.is_live(row))
+        self.assertNotIn(first["id"], [r["id"] for r in memory.live_entries(home)])
+        self.assertEqual(memory.tensions(home), [])
+
+    def test_history_says_live_through_and_scope(self):
+        home = _home(self)
+        end = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
+        memory.remember(home, "spi base", "SPI1 is at 0x40013000.", scope="board rev A",
+                        valid_until=end)
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"COUSIN_HOME": str(home)}), contextlib.redirect_stdout(out):
+            memory.memory_main(["history", "spi base"])
+        self.assertIn("live, through %s; scope: board rev A" % end, out.getvalue())
+
+    def test_recall_prints_the_labels(self):
+        home = _home(self)
+        end = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
+        memory.remember(home, "spi base", "SPI1 is at 0x40013000.", scope="board rev A",
+                        valid_until=end)
+        text = memory.format_recall(memory.list_raw(home))
+        self.assertIn("scope: board rev A; through %s" % end, text)

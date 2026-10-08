@@ -709,7 +709,7 @@ a cousin's memory yourself, the same library calls the `cousin-memory`,
 | action | what it does |
 |---|---|
 | search | the cousin's own search: keyword always, meaning when `config/embedding.toml` is set up. Each hit says which found it; a raw hit shows its entry, a file hit opens in place. Your searches are not recorded as the cousin's recall. |
-| write | remember a fact or log a decision, at a truth level. The console fills the cite with your user name and the time, plus an optional note of where it came from. |
+| write | remember a fact or log a decision, at a truth level. The console fills the cite with your user name and the time, plus an optional note of where it came from. A fact can also take a scope (what it holds for) and a valid-until date; its claim card then shows them, and "expired" once the date passes ([memory](memory.md#what-a-fact-holds-for-and-until-when)). |
 | tensions | topics whose live claims disagree; "retire this claim" writes an entry-level obsolete mark with your reason. |
 | review gate | the entries the gate holds; mark each keep or drop and apply. A drop has no undo and asks twice. More than two verdicts run as the cousin's long operation. |
 | history | a topic's claims, oldest first, with their valid time; a live claim can be retired here too. |

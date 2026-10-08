@@ -881,10 +881,22 @@ function ClaimRetire({ topic, id, onRetire }) {
   );
 }
 
+// A declared end as the CLI says it: a midnight-UTC end (what a date
+// gives) is "through" the day before, any other end is its own time.
+function claimEnd(validTo) {
+  const d = new Date(validTo);
+  if (isNaN(d)) return String(validTo || "");
+  if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0) {
+    return "through " + new Date(d.getTime() - 1000).toISOString().slice(0, 10);
+  }
+  return "until " + d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+}
+
 // `operator`: the viewer is the operator account; an operator-level claim
 // is theirs alone to retire (the server refuses anyone else).
 function ClaimRow({ c, topic, onRetire, showTopic, operator }) {
-  const live = !c.valid_to;
+  // A declared end still ahead is live until then; a mark's end is past.
+  const live = !c.valid_to || (!c.retired_by && new Date(c.valid_to) > new Date());
   const theirs = normLevel(c.truth_level) === "L0_OPERATOR" && !operator;
   return (
     <div className={"mx-entry lvl-" + LEVEL_SHORT(normLevel(c.truth_level))} data-claim={c.id}
@@ -900,7 +912,11 @@ function ClaimRow({ c, topic, onRetire, showTopic, operator }) {
       <div className="mx-meta">
         {c.source && <span>source · <b>{c.source}</b></span>}
         {c.cite && <span>cite · <b>{c.cite}</b></span>}
-        <span>{live ? <b>live</b> : <>valid to <b>{fmtStamp(c.valid_to)}</b>{c.retired_by ? ` (mark ${c.retired_by})` : ""}</>}</span>
+        {c.scope && <span data-claim-scope>scope · <b>{c.scope}</b></span>}
+        <span>{live
+          ? (c.valid_to ? <><b>live</b> {claimEnd(c.valid_to)}</> : <b>live</b>)
+          : c.retired_by ? <>valid to <b>{fmtStamp(c.valid_to)}</b>{` (mark ${c.retired_by})`}</>
+          : <>expired ({claimEnd(c.valid_to).replace(/^through /, "after ").replace(/^until /, "")})</>}</span>
         <span style={{ flex: 1 }} />
         {live && onRetire && !theirs && <ClaimRetire topic={topic || c.topic} id={c.id} onRetire={onRetire} />}
         {live && onRetire && theirs && <span className="muted" data-operator-only>the operator's to retire</span>}
@@ -1055,7 +1071,7 @@ function MemorySearch({ slug, onHistory }) {
 function MemoryWrite({ slug, flash, onDone }) {
   const [writer, , writerErr] = useMemoryJson(`/api/memory/${slug}/writer`, 0);
   const [kind, setKind] = React.useState("remember");
-  const [form, setForm] = React.useState({ topic: "", fact: "", decision: "", reasoning: "", level: "conclusion", note: "" });
+  const [form, setForm] = React.useState({ topic: "", fact: "", decision: "", reasoning: "", level: "conclusion", note: "", scope: "", valid_until: "" });
   const [busy, setBusy] = React.useState(false);
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
   const levels = (writer && writer.levels) || ["conclusion"];
@@ -1067,14 +1083,16 @@ function MemoryWrite({ slug, flash, onDone }) {
     if (!ready || busy) return;
     setBusy(true);
     const body = kind === "remember"
-      ? { topic: form.topic, fact: form.fact, level: form.level, note: form.note }
+      ? { topic: form.topic, fact: form.fact, level: form.level, note: form.note,
+          ...(form.scope.trim() ? { scope: form.scope } : {}),
+          ...(form.valid_until.trim() ? { valid_until: form.valid_until } : {}) }
       : { topic: form.topic, decision: form.decision, reasoning: form.reasoning, level: form.level, note: form.note };
     const url = kind === "remember" ? `/api/memory/${slug}/remember` : `/api/memory/${slug}/decide`;
     const { r, d } = await safeSend("POST", url, body);
     setBusy(false);
     if (!r.ok || !d.ok) { flash({ ok: false, msg: `not written: ${d.error || r.status}` }); return; }
     flash({ ok: true, msg: d.line || "written" });
-    setForm(f => ({ ...f, fact: "", decision: "", reasoning: "", note: "" }));
+    setForm(f => ({ ...f, fact: "", decision: "", reasoning: "", note: "", scope: "", valid_until: "" }));
     onDone && onDone();
   };
   const who = writer ? (writer.user ? `console user ${writer.user}` : "console (no login)") : "...";
@@ -1094,8 +1112,18 @@ function MemoryWrite({ slug, flash, onDone }) {
           <div className="field"><label>topic</label>
             <input className="txt" value={form.topic} onChange={set("topic")} placeholder="one topic per fact, as the cousin files them" /></div>
           {kind === "remember" ? (
-            <div className="field"><label>fact</label>
-              <textarea className="txt" value={form.fact} onChange={set("fact")} /></div>
+            <>
+              <div className="field"><label>fact</label>
+                <textarea className="txt" value={form.fact} onChange={set("fact")} /></div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <div className="field" style={{ flex: "2 1 220px" }}><label>scope (optional)</label>
+                  <input className="txt" value={form.scope} onChange={set("scope")} maxLength={200} data-write-scope
+                         placeholder="what it holds for: board rev A, the main office" /></div>
+                <div className="field" style={{ flex: "1 1 160px" }}><label>valid until (optional)</label>
+                  <input className="txt" type="date" value={form.valid_until} onChange={set("valid_until")} data-write-valid-until />
+                  <span className="hint">through that day; then it leaves the views and recall says expired</span></div>
+              </div>
+            </>
           ) : (
             <>
               <div className="field"><label>decision</label>

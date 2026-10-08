@@ -1073,9 +1073,12 @@ def _hit_name(hit):
     """What a recall line calls a hit: a raw entry by its topic (its
     file stem is only a date), a file by its first heading."""
     if hit.get("collection") == "raw":
-        topic = str((raw_entry(hit["path"]) or {}).get("topic") or "").strip()
+        entry = raw_entry(hit["path"]) or {}
+        topic = str(entry.get("topic") or "").strip()
         if topic:
-            return topic
+            from cousin_lib.memory import qualifiers
+            held = qualifiers(entry)
+            return "%s [%s]" % (topic, held) if held else topic
     return _hit_title(Path(hit["path"]))
 
 
@@ -1177,6 +1180,12 @@ def recall_item(home, hit, root=None):
         item["similarity"] = round(float(hit["similarity"]), 4)
     if collection == "raw":
         entry = raw_entry(hit["path"]) or {}
+        if entry.get("scope"):
+            item["scope"] = entry["scope"]
+        if entry.get("valid_to"):
+            from cousin_lib.memory import expired
+            item["valid_to"] = entry["valid_to"]
+            item["expired"] = expired(entry)
         if entry.get("truth_level"):
             from cousin_lib.memory import normalize_level
             item["level"] = normalize_level(entry.get("truth_level"))

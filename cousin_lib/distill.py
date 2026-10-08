@@ -155,6 +155,9 @@ def _line(newest, count, superseded):
     content = " ".join(str(newest.get("content", "")).split())
     content = content[:LINE_CONTENT_CHARS]
     tags = ["%d entries" % count if count != 1 else "1 entry"]
+    held = memory.qualifiers(newest)
+    if held:
+        tags.insert(0, held)
     if superseded:
         tags.append("superseded %d earlier" % superseded)
     when = _when(newest)

@@ -3,6 +3,23 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.31.0 - 2026-10-07
+
+### Added
+
+- **A fact can say what it holds for and until when.** `remember` takes
+  `--scope` ("board rev A") and `--valid-until` (a `YYYY-MM-DD` date,
+  through that day, or a time), as do the memory tool (`scope`,
+  `valid_until`) and the console's memory write form. Past its end (or
+  an obsolete mark, whichever comes first) the fact leaves `tensions`,
+  and the distilled views and the boot packet from their next rebuild,
+  as a retired claim does, with nothing written: raw keeps it.
+  Proactive recall, `cousin-memory recall` and `history` label it
+  `expired`; a live one shows its scope and end in its distilled line,
+  on its claim card and in a dreaming pass's slice. An existing cousin
+  gets the tool's two new arguments once its own `mcp-registry.toml` is
+  updated.
+
 ## 3.30.0 - 2026-10-07
 
 ### Added

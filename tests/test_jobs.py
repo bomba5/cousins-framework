@@ -298,7 +298,7 @@ class TestBackgroundCommand(JobsCase):
             return sorted(o for a in p._actions for o in a.option_strings)
         self.assertEqual(options(jobs._start_options),
                          ["--artifact", "--artifact-commit", "--desc", "--home-log",
-                          "--json", "--log"])
+                          "--json", "--log", "--notify"])
         # the separated shape counts an option given before `--` the same way
         self.assertTrue(jobs._title_after_separator(
             ["start", "shell", "--home-log", "logs/x.log", "--", "t"]))
@@ -672,3 +672,73 @@ class TestAZombieRunsNothing(JobsCase):
         else:
             self.fail("the child never became a zombie")
         self.assertEqual(jobs.reap_lost(), [job_id])
+
+
+class TestCloseNotice(JobsCase):
+    """#282: a job started with notify puts one row in its owner's inbox
+    when it ends, so the cousin waiting on it does not poll."""
+
+    def setUp(self):
+        super().setUp()
+        from cousin_lib import delivery
+        self.sent = []
+        for name, fake in (("deliver", lambda home, item, wait=True: self.sent.append(
+                                (pathlib.Path(home).name, item)) or "ok"),
+                           ("accepted", lambda result, home: True),
+                           ("backend_for", lambda home: object())):
+            p = mock.patch.object(delivery, name, side_effect=fake)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_a_notify_job_tells_its_owner_once_when_it_ends(self):
+        job_id = register_job(kind="shell", title="build the image", notify=True,
+                              log_path="/tmp/build.log")
+        finish_job(job_id, status="failed", summary="disk full", exit_code=2)
+        finish_job(job_id, status="failed", summary="again")      # a closed row: no second notice
+        self.assertEqual(len(self.sent), 1)
+        slug, item = self.sent[0]
+        self.assertEqual(slug, "wren")
+        self.assertEqual((item.source, item.thread_id), ("job", "system"))
+        self.assertIn("job #%d failed (exit 2): build the image - disk full" % job_id, item.body)
+        self.assertIn("log: /tmp/build.log", item.body)
+
+    def test_a_lost_job_closed_later_says_it_was_marked_lost(self):
+        from cousin_lib import jobs
+        job_id = register_job(kind="shell", title="slow", notify=True)
+        conn = jobs._db()
+        conn.execute("UPDATE jobs SET status='lost' WHERE id=?", (job_id,))
+        conn.commit(); conn.close()
+        finish_job(job_id, status="done", exit_code=0)
+        self.assertIn("it was marked lost", self.sent[-1][1].body)
+
+    def test_the_title_first_shape_keeps_notify(self):
+        rc, out, _ = self._main(["start", "shell", "flagged", "--notify", "--json", "--", "true"])
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(get_job(json.loads(out)["job_id"])["notify"], 1)
+
+    def test_a_job_without_notify_tells_nobody(self):
+        job_id = register_job(kind="shell", title="quiet")
+        finish_job(job_id, status="done")
+        self.assertEqual(self.sent, [])
+
+    def test_a_lost_notify_job_tells_its_owner(self):
+        import subprocess
+        from cousin_lib import jobs
+        job_id = register_job(kind="shell", title="dies unclosed", notify=True)
+        proc = subprocess.Popen(["true"]); proc.wait()
+        conn = jobs._db()
+        conn.execute("UPDATE jobs SET pid=? WHERE id=?", (proc.pid, job_id))
+        conn.commit(); conn.close()
+        self.assertEqual(jobs.reap_lost(), [job_id])
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("job #%d lost" % job_id, self.sent[0][1].body)
+
+    def test_an_owner_with_no_home_is_skipped(self):
+        job_id = register_job(kind="shell", title="orphan", spawned_by="nobody", notify=True)
+        finish_job(job_id, status="done")
+        self.assertEqual(self.sent, [])
+
+    def test_the_cli_flag_sets_notify(self):
+        rc, out, _ = self._main(["start", "shell", "--json", "--notify", "--", "flagged"])
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(get_job(json.loads(out)["job_id"])["notify"], 1)

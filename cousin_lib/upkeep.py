@@ -13,7 +13,8 @@ Each row gets a kind: `heartbeat` (the loops daemon's context beat),
 `boot`, `flip`, `propose`, ...). A turn with no row that the SDK started
 when a background task finished is `task`. Four classes:
 - upkeep: every row is `heartbeat`, `boot`, `flip` or `propose`;
-- self: the turn answered a `schedule`, a prompt the cousin set itself;
+- self: the turn answered a `schedule`, a prompt the cousin set itself,
+  or a `job` close notice it asked for (`cousin-job start --notify`);
   the tool cannot tell a self-set heartbeat from a reminder, so it is
   shown apart, neither upkeep nor work: upkeep is a floor, upkeep + self
   a ceiling;
@@ -36,7 +37,7 @@ import time
 from pathlib import Path
 
 UPKEEP_KINDS = ("heartbeat", "boot", "flip", "propose")
-SELF_KINDS = ("schedule",)
+SELF_KINDS = ("schedule", "job")   # a job's close notice: a wake-up the cousin asked for
 # an interrupt is the operator stopping a turn: their act, not upkeep
 WORK_KINDS = ("chat", "meeting", "reaction", "hook", "loop", "task", "interrupt")
 HEARTBEAT_PREFIX = "Context heartbeat."
@@ -68,6 +69,29 @@ def _kinds(home):
         return {}
     finally:
         conn.close()
+
+
+def generation_idle(home, since):
+    """True when every inbox row since `since` (the generation's start)
+    is upkeep: heartbeats, the boot, a flip, memory proposals. Nothing
+    asked the cousin for work and it set itself nothing, so its daily
+    flip would buy only a handoff and a boot (#280). False when the inbox
+    is missing or unreadable: flipping is the safe default."""
+    path = Path(home) / "data" / "inbox.db"
+    if not path.exists():
+        return False
+    try:
+        conn = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+    except sqlite3.Error:
+        return False
+    try:
+        rows = conn.execute("SELECT source, substr(body, 1, 40) FROM inbox"
+                            " WHERE created_at >= ?", (float(since),)).fetchall()
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+    return all(classify(row_kind(source, body)) == "upkeep" for source, body in rows)
 
 
 _CACHE = {}          # (path, mtime, size) -> the file's costed turns
@@ -176,16 +200,51 @@ def measure(home, *, days=7, now=None):
     cost = lambda c: out["classes"].get(c, {}).get("cost_usd", 0.0)
     out["upkeep_share"] = cost("upkeep") / spent if spent else None
     out["upkeep_or_self_share"] = (cost("upkeep") + cost("self")) / spent if spent else None
+    # the headline (#288): what keeps the cousin going, its own schedules
+    # and job notices included; the framework's share alone hid the polling
+    out["headline_share"] = out["upkeep_or_self_share"]
     return out
+
+
+ALARM_KEY = "upkeep_alarm_percent"
+ALARM_DAYS = 7
+ALARM_MIN_USD = 1.0      # a few cents of heartbeats is no alarm
+
+
+def alarm_percent(home):
+    """[agent] upkeep_alarm_percent from cousin.toml, or 0 (off)."""
+    import tomllib
+    try:
+        agent = tomllib.loads((Path(home) / "cousin.toml").read_text()).get("agent") or {}
+        value = float(agent.get(ALARM_KEY) or 0)
+    except (OSError, ValueError, TypeError, tomllib.TOMLDecodeError):
+        return 0.0
+    return value if 0 < value <= 100 else 0.0
+
+
+def alarm(home, *, now=None):
+    """(ok, error) for a cousin with an alarm set, None without one: over
+    the last ALARM_DAYS, upkeep plus self against the alarm, once the
+    spend is worth one (ALARM_MIN_USD)."""
+    limit = alarm_percent(home)
+    if not limit:
+        return None
+    m = measure(home, days=ALARM_DAYS, now=now)
+    share = m.get("headline_share")
+    if share is None or m["cost_usd"] < ALARM_MIN_USD or share * 100 <= limit:
+        return True, None
+    return False, ("upkeep and its own schedules took %.0f%% of $%.2f over %d days"
+                   " (alarm at %.0f%%)" % (share * 100, m["cost_usd"], ALARM_DAYS, limit))
 
 
 def format_measure(slug, m):
     if not m["turns"]:
         return "%s: no costed turns in the last %d days" % (slug, m["days"])
     pct = lambda v: "%.0f%%" % (v * 100) if v is not None else "n/a"
-    lines = ["%s: %d turns, $%.2f in the last %d days; upkeep %s (with its own schedules %s)"
-             % (slug, m["turns"], m["cost_usd"], m["days"], pct(m["upkeep_share"]),
-                pct(m["upkeep_or_self_share"]))]
+    lines = ["%s: %d turns, $%.2f in the last %d days; upkeep %s (the framework's %s, the"
+             " rest its own schedules and job notices)"
+             % (slug, m["turns"], m["cost_usd"], m["days"], pct(m["headline_share"]),
+                pct(m["upkeep_share"]))]
     for name, b in sorted(m["kinds"].items(), key=lambda kv: -kv[1]["cost_usd"]):
         lines.append("  %-10s %-7s %4d turns  $%8.2f  %12d tokens (cache reads included)"
                      % (name, classify(name), b["turns"], b["cost_usd"], b["tokens"]))

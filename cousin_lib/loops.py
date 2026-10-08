@@ -729,6 +729,24 @@ def _walk_timed_flips(state, deliver, do_flip, now, report):
         con.close()
 
 
+def _snapshot_moved(home, root):
+    """True when the session on file recorded a prompt snapshot that is
+    not what a start would serve now (a new rule, a law line, a registry
+    change): an idle generation is flipped anyway, or the edit never
+    reaches it (#33, #280). A session with no record (another kind, an
+    old file) is not moved."""
+    try:
+        recorded = json.loads((Path(home) / "data" / "runner-session.json").read_text()).get(
+            "snapshot")
+    except (OSError, ValueError, AttributeError):
+        return False
+    if not recorded:
+        return False
+    from cousin_lib.runner import snapshot
+    now = snapshot.fingerprint(home, root)
+    return now is not None and now != recorded
+
+
 def _fire_daily_flips(state, do_flip, is_alive, now, report):
     """flip_at drivers: late-once per day, and AT MOST ONE flip per
     tick - the tick cadence is the stagger that keeps boot packets
@@ -741,8 +759,13 @@ def _fire_daily_flips(state, do_flip, is_alive, now, report):
     daemon was down at it). A session that started at or after it
     (a cousin spawned or started since), or none at all, is younger
     than the flip point: its day is marked done, not flipped seconds
-    after its first turn (boot.generation_started)."""
-    from cousin_lib import boot
+    after its first turn (boot.generation_started). An idle generation
+    (upkeep.generation_idle: nothing but upkeep rows since it started)
+    keeps its session too: the flip would cost a handoff and a boot and
+    carry nothing (#280), unless its recorded prompt snapshot moved, so a
+    new rule still reaches it. It is reported in `idle_flips` and printed
+    by the daemon, and flips at the first daily point after it works."""
+    from cousin_lib import boot, upkeep
     if report["flips"]:
         return  # a timed flip already used this tick's slot
     when = datetime.fromtimestamp(now)
@@ -764,6 +787,11 @@ def _fire_daily_flips(state, do_flip, is_alive, now, report):
             if (started is None or started >= target
                     or not is_alive(config.slug)):
                 state["last_flips"][config.slug] = str(when.date())
+                continue
+            if (upkeep.generation_idle(config.home, started)
+                    and not _snapshot_moved(config.home, framework.root)):
+                state["last_flips"][config.slug] = str(when.date())
+                report.setdefault("idle_flips", []).append(config.slug)
                 continue
             result = do_flip(config.slug)
             state["last_flips"][config.slug] = str(when.date())
@@ -1056,6 +1084,37 @@ def _keep_distilled(slug, home, report):
     _health(report, "distill:" + slug, True)
 
 
+UPKEEP_CHECK_SECONDS = 3600
+
+
+def _check_upkeep(slug, home, state, now, report):
+    """A cousin with [agent] upkeep_alarm_percent set: hourly, its last 7
+    days' upkeep plus own schedules against the alarm, as the health row
+    `upkeep:<slug>` (#288). Off (0) checks nothing and keeps no row."""
+    last = state.setdefault("last_upkeep", {}).get(slug, 0)
+    if now - last < UPKEEP_CHECK_SECONDS:
+        return
+    state["last_upkeep"][slug] = now
+    try:
+        from cousin_lib import upkeep
+        result = upkeep.alarm(home, now=now)
+    except Exception as err:  # noqa: BLE001 - never costs the tick
+        report["errors"].append("upkeep check failed for %s: %s" % (slug, err))
+        return
+    if result is not None:
+        _health(report, "upkeep:" + slug, result[0], result[1])
+        return
+    # the alarm is off: a row it left failing says ok once, or it would
+    # read failing for the week health keeps a row
+    try:
+        from cousin_lib import health
+        row = health.read(FrameworkConfig.from_env().root).get("upkeep:" + slug)
+    except Exception:  # noqa: BLE001 - never costs the tick
+        return
+    if row and row.get("state") == "failing":
+        _health(report, "upkeep:" + slug, True, None)
+
+
 def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
          index_refresh=False, dreams=False):
     """One scheduler tick, per docs/reference/loops.md: per-cousin
@@ -1074,7 +1133,8 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     now = now or time.time()
     state = _load_state()
     report = {"fired": [], "errors": [], "requests": 0, "flips": [],
-              "ready": [], "scheduled": 0, "distilled": [], "health": []}
+              "idle_flips": [], "ready": [], "scheduled": 0, "distilled": [],
+              "health": []}
     # Expire first: the first tick after downtime must not fire a timed
     # flip or a manual fire that outlived its TTL (it never fires late).
     expire_stale_requests(now=now)
@@ -1089,6 +1149,7 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
                 continue
             home = FrameworkConfig.from_env().root / "cousins" / slug
             _keep_distilled(slug, home, report)
+            _check_upkeep(slug, home, state, now, report)
             if not is_alive(slug):
                 continue
             loops, errors = load_cousin_loops(home)
@@ -1441,6 +1502,9 @@ def loops_main(argv=None):
             for slug, out in report.get("dreamed", []):
                 print("cousin-loops: dreaming %s: %s" % (slug, json.dumps(out)),
                       file=sys.stderr)
+            for slug in report.get("idle_flips", []):
+                print("cousin-loops: daily flip skipped for %s: idle since its"
+                      " generation started" % slug, file=sys.stderr)
             for error in report["errors"]:
                 print("cousin-loops: %s" % error, file=sys.stderr)
             count += 1

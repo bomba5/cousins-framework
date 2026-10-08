@@ -16,6 +16,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
+from cousin_lib.crashpoint import crashpoint
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
 from cousin_lib.sqlite_util import add_column, wal
@@ -54,6 +55,12 @@ def _db():
     # never taken for the job's own, whatever the wall clock did
     add_column(conn, "jobs", "start_ticks", "INTEGER")
     add_column(conn, "jobs", "boot_id", "TEXT")
+    # 1: the owner asked to be told when the row closes (notify_owner)
+    add_column(conn, "jobs", "notify", "INTEGER NOT NULL DEFAULT 0")
+    # 1: cousin-job forks this row's command itself, so a row of its with no
+    # pid past SPAWN_GRACE_S was never forked; a hook-tracked background
+    # shell has a command and never a pid, and is not one (#286)
+    add_column(conn, "jobs", "launched", "INTEGER NOT NULL DEFAULT 0")
     conn.commit()
     return conn
 
@@ -63,17 +70,18 @@ def _now():
 
 
 def register_job(*, kind, title, description="", spawned_by=None,
-                 log_path=None, command=None):
-    """Insert a running job row and return its id."""
+                 log_path=None, command=None, notify=False, launched=False):
+    """Insert a running job row and return its id. `notify`: the owner
+    gets one inbox row when the job closes (notify_owner)."""
     slug = spawned_by or CousinConfig.from_env().slug
     conn = _db()
     try:
         cur = conn.execute(
             "INSERT INTO jobs (spawned_by, kind, title, description,"
-            " started_at, log_path, command)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            " started_at, log_path, command, notify, launched)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (slug, kind, title[:200], description[:500], _now(),
-             log_path, command),
+             log_path, command, 1 if notify else 0, 1 if launched else 0),
         )
         conn.commit()
         return cur.lastrowid
@@ -104,6 +112,7 @@ def finish_job(job_id, *, status="done", summary="", exit_code=None):
         conn.close()
     if before is not None and before["status"] in ("running", "lost") and row:
         record_job_result(dict(row))
+        notify_owner(dict(row), was_lost=before["status"] == "lost")
 
 
 # What a finished job leaves in its cousin's raw memory. The topic
@@ -145,6 +154,43 @@ def record_job_result(job):
             home, "L2_TOOL", job_topic(title), content, "job",
             job_id=job.get("id"), status=job["status"],
             exit_code=job.get("exit_code"), kind=job.get("kind"))
+    except Exception:  # noqa: BLE001 - the close already happened
+        return False
+
+
+def notify_owner(job, *, was_lost=False):
+    """One inbox row to the owning cousin for a job that asked for it
+    (`notify`) and ended: what it was, how it ended, where its log is.
+    The cousin waiting on it needs no polling (#282). A job whose
+    spawned_by names no cousin home is skipped. Never raises: the job is
+    closed either way, and a failed delivery is the poll it replaced."""
+    try:
+        if not job.get("notify"):
+            return False
+        owner = str(job.get("spawned_by") or "")
+        if not owner or "/" in owner or owner.startswith("."):
+            return False
+        home = FrameworkConfig.from_env().root / "cousins" / owner
+        if not (home / "cousin.toml").is_file():
+            return False
+        from cousin_lib import delivery
+        title = " ".join(str(job.get("title") or "").split())
+        head = "[cousin-job] job #%s %s" % (job.get("id"), job.get("status"))
+        if job.get("exit_code") is not None:
+            head += " (exit %s)" % job["exit_code"]
+        if was_lost:
+            # the second notice for this job: the first said lost
+            head += " (it was marked lost; this is how it really ended)"
+        body = "%s: %s" % (head, title or "(untitled)")
+        summary = " ".join(str(job.get("result_summary") or "").split())
+        if summary:
+            body += " - %s" % summary[:JOB_SUMMARY_CHARS]
+        if job.get("log_path"):
+            body += "\nlog: %s" % job["log_path"]
+        item = delivery.Item(thread_id=delivery.thread_id("system"), source="job",
+                             body=body, sender="cousin-job")
+        wait = not isinstance(delivery.backend_for(home), delivery.InboxBackend)
+        return delivery.accepted(delivery.deliver(home, item, wait=wait), home)
     except Exception:  # noqa: BLE001 - the close already happened
         return False
 
@@ -576,6 +622,14 @@ def _process_gone(job, groups):
 
 
 LOST_NOTE = " [lost: its process is gone]"
+# A row cousin-job forks itself (`launched`) records its pid right after
+# the fork; one that still has none this long after it started was never
+# forked (its starter died in between), so nothing will ever close it
+# (#286, job.registered). Well
+# past a live starter's worst case: each of its writes may wait out a 5 s
+# busy timeout before the pid lands.
+SPAWN_GRACE_S = 60
+UNSPAWNED_NOTE = " [lost: its command was never started]"
 
 
 def reap_lost():
@@ -590,12 +644,29 @@ def reap_lost():
         return []
     conn = _db()
     try:
+        unspawned = [dict(r) for r in conn.execute(
+            "SELECT * FROM jobs WHERE status='running' AND pid IS NULL"
+            " AND launched=1")]
         rows = [dict(r) for r in conn.execute(
             "SELECT * FROM jobs WHERE status='running' AND pid IS NOT NULL")]
-        if not rows:
-            return []
-        groups = _groups()
-        marked = []
+        marked, lost = [], []
+        now = datetime.now(timezone.utc)
+        for job in unspawned:
+            try:
+                age = (now - datetime.fromisoformat(job["started_at"])).total_seconds()
+            except (TypeError, ValueError):
+                continue
+            if age < SPAWN_GRACE_S:
+                continue
+            cur = conn.execute(
+                "UPDATE jobs SET status='lost', finished_at=?,"
+                " result_summary=COALESCE(result_summary, '') || ?"
+                " WHERE id=? AND status='running' AND pid IS NULL",
+                (_now(), UNSPAWNED_NOTE, job["id"]))
+            if cur.rowcount:
+                marked.append(job["id"])
+                lost.append(dict(job, result_summary=UNSPAWNED_NOTE.strip()))
+        groups = _groups() if rows else None
         for job in rows:
             if not _process_gone(job, groups):
                 continue
@@ -606,10 +677,14 @@ def reap_lost():
                 (_now(), LOST_NOTE, job["id"]))
             if cur.rowcount:
                 marked.append(job["id"])
+                lost.append(job)
         conn.commit()
-        return marked
     finally:
         conn.close()
+    for job in lost:
+        notify_owner(dict(job, status="lost",
+                          result_summary=job.get("result_summary") or LOST_NOTE.strip()))
+    return marked
 
 
 def reap_lost_quietly():
@@ -688,10 +763,12 @@ def _spawn_tracked(cmd, log_path, job_id, *, artifacts=(), commit=None, owner=No
         # The rc lands in the store directly - if this write is what
         # fails, the row stays 'running' and `list --active` shows it,
         # which is the loud version of that failure.
+        crashpoint("job.exited")
         status = "done" if rc == 0 else "failed"
         summary = ""
         if rc == 0 and artifacts:
             missing = _record_artifacts(job_id, artifacts, commit, owner)
+            crashpoint("job.artifacts_recorded")
             if missing:
                 # exit 0 without the output it named is not a build to show
                 status = "failed"
@@ -785,7 +862,9 @@ def _cmd_start(args):
         kind=args.kind, title=args.title, description=args.desc or "",
         spawned_by=slug, log_path=args.log,
         command=" ".join(cmd) if cmd else None,
+        notify=bool(getattr(args, "notify", False)), launched=bool(cmd),
     )
+    crashpoint("job.registered")
     log_path = args.log
     if cmd:
         # Absolute in the row, so the console finds a relative --log
@@ -975,6 +1054,12 @@ def _start_options(p, *, help_text=False):
         p.add_argument("--home-log")
     p.add_argument("--json", action="store_true")
     if help_text:
+        p.add_argument("--notify", action="store_true",
+                       help="when the job ends, put one row in your inbox with its status,"
+                            " exit code and log, so you need not poll it")
+    else:
+        p.add_argument("--notify", action="store_true")
+    if help_text:
         p.add_argument("--artifact", action="append", metavar="PATH",
                        help="a file the command builds (repeat for more), relative to"
                             " the working directory, where the command runs: on exit 0 it is recorded as a shared"
@@ -1029,6 +1114,7 @@ def _reparse_start_remainder(args):
             args.json = args.json or known.json
             args.artifact = (args.artifact or []) + (known.artifact or []) or None
             args.artifact_commit = args.artifact_commit or known.artifact_commit
+            args.notify = getattr(args, "notify", False) or known.notify
             cl = rest
         except SystemExit:
             pass

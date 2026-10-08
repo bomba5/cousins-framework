@@ -895,7 +895,7 @@ function claimEnd(validTo) {
 // A claim's provenance, both ways (GET /api/memory/<slug>/why): what it was
 // built from and what was built on it, the whole chain, nothing inherited.
 function WhyNode({ n, kids }) {
-  if (n.missing) return <li className="muted" data-why-node={n.id}>{n.id} · not in raw memory</li>;
+  if (n.missing) return <li className="muted" data-why-node={n.id}>{n.id} · {/^(job|artifact):/.test(n.id) ? "not found" : "not in raw memory"}</li>;
   if (n.cycle) return <li className="muted" data-why-node={n.id}>{n.id} · already on this chain (a cycle)</li>;
   const next = n[kids] || [];
   return (

@@ -916,7 +916,6 @@ class Node:
         self.retrier.start()
 
     def stop(self):
-        self.retrier.stop()
         self.checkin.stop()
         self.poller.stop()
         self.httpd.shutdown()
@@ -938,6 +937,9 @@ class Node:
             left = [t for t in self._turns if t.is_alive()]
         if left:
             self.log("cousin_node: stopped with %d reply turn(s) still running" % len(left))
+        # last: a turn's tell-home that met a transient answer is queued on a
+        # retrier still running, and what is still unsent is logged as dropped
+        self.retrier.stop()
 
 
 def build_node(environ=None, *, log=None):

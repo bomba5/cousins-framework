@@ -1816,7 +1816,7 @@ const RP_KIND_LINES = {
   config_change: p => ["rp-dim", "config changed · " + (p.files || []).join(", ")],
   hook: p => [p.error ? "rp-warn" : "rp-dim", "hook " + (p.event || "") + (p.error ? " · " + rpCut(p.error, 140) : "")],
   cap: p => ["rp-warn", "cost cap · $" + Number(p.spent || 0).toFixed(2) + " of $" + Number(p.limit || 0).toFixed(2) + " today"
-                        + (p.allowed === "person" ? " · only a person's chat runs" : "")],
+                        + (p.refused ? " · turn refused" : p.allowed === "person" ? " · only a person's chat runs" : "")],
   duplicate_delivery: p => ["rp-dim", "duplicate delivery ignored"],
   foreign_turn: p => ["rp-dim", "a turn typed in the pane"],
   other: p => ["rp-dim", "SDK message · " + (p.type || "?")],

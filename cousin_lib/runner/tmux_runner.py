@@ -861,7 +861,9 @@ class TmuxRunner:
         """Claims a previous runner left: scan the transcript
         from each claim's own offset; a taken row whose turn ended closes by
         that end; a taken row whose turn never ended closes `delivered`,
-        cut by restart, when the pane is new; an untaken row is requeued."""
+        cut by restart, when the pane is new; an untaken row is requeued.
+        The scan stops at the cursor: a line a live pane writes past it is
+        _pump's, and read twice it would start the row's turn twice."""
         # every orphaned claim back to the queue first (what _serve does for
         # the other kinds); the recorded ones are then settled below
         self.inbox.requeue_stale(older_than_s=0.0)
@@ -874,6 +876,7 @@ class TmuxRunner:
             if not row or row["state"] == "done":
                 continue
             entries, _ = transcript.read_from(self._path, int(c.get("offset") or 0))
+            entries = [e for e in entries if e.end <= self._cursor]
             nonces = set(c.get("nonces") or ())
             start = next((i for i, e in enumerate(entries)
                           if transcript.turn_nonce(e, nonces)), None)
@@ -926,10 +929,13 @@ class TmuxRunner:
         """On a live pane, an untaken row is requeued only when the tail
         is at a turn end, the box is empty (a stranded paste was just
         cleared) and no queued input shows; otherwise it stays claimed under
-        its nonces until its turn takes it or _check_consumed gives up."""
+        its nonces until its turn takes it or _check_consumed gives up.
+        The transcript grown past the cursor keeps it claimed too: the CLI
+        may have just taken it (its queue shows empty then), and _pump reads
+        that turn start next; requeued, it would be typed a second time."""
         pending = self._pending_typed()
         if not pending or self._live is not None or self.pane.queued() \
-                or self.pane.box_text() != "":
+                or self.pane.box_text() != "" or self._size() != self._cursor:
             return
         for c in pending:
             self.inbox.requeue(c["row"]["id"])

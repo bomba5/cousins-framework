@@ -636,7 +636,7 @@ const evs = [
   E(10, "harness", {kind: "sdk", ok: false, level: "warning", message: "cli 2.1.0, locked 2.1.286"}),
   E(11, "system", {subtype: "perimeter", kind: "opencode", level: "warning", line: "no perimeter on this lane"}),
   E(12, "system", {subtype: "mcp", status: "failed"}),
-  E(13, "system", {subtype: "policy_plugin", errors: ["bad pattern"]}),
+  E(13, "system", {subtype: "policy_plugin", errors: [{source: "rm -rf (", error: "unterminated group"}]}),
 ];
 const blocked = rpModel(evs).strip.auth;
 const m = rpModel(evs.concat([E(9, "auth", {account: "host", restored: true})]));
@@ -656,7 +656,7 @@ process.stdout.write(JSON.stringify({
             ["line", "rp-warn", "harness · cli 2.1.0, locked 2.1.286"],
             ["line", "rp-warn", "perimeter · no perimeter on this lane"],
             ["line", "rp-err", "mcp · failed"],
-            ["line", "rp-err", "policy plugin · bad pattern"],
+            ["line", "rp-err", "policy plugin · rm -rf (: unterminated group"],
             ["line", "rp-ok", "login restored · host"],
         ])
         self.assertTrue(got["blocked"])
@@ -668,7 +668,10 @@ process.stdout.write(JSON.stringify({
     def test_a_gate_is_a_line_and_its_send_back_folds_into_it(self):
         """A `gate` event reads as a line naming the threads, the
         send-back message after it is that line's detail and not a new
-        turn divider, and a bare system notification is no row."""
+        turn divider, also when the turn's last text or thinking lands
+        between the two; a bare system notification is no row. With a
+        reply and a send gate in one stop the send-back is one combined
+        text, so it goes on the second line."""
         got = self.run_node("""
 const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
 const m = rpModel([
@@ -679,16 +682,64 @@ const m = rpModel([
   E(6, "system", {subtype: "notification"}),
   E(7, "gate", {gate: "repeat", tool: "Bash", count: 4, action: "nudge"}),
   E(8, "text", {text: "ok"}),
-  E(9, "user", {text: "folded"}),
+  E(9, "user", {text: "[runner] You have called Bash"}),
+  E(10, "gate", {gate: "reply", threads: ["operator:op"], written_call: true}),
+  E(11, "thinking", {text: "hm"}), E(12, "text", {text: "done"}),
+  E(13, "user", {text: "Stop hook feedback: reply"}),
+  E(14, "gate", {gate: "repeat", tool: "Bash", count: 5, action: "end"}),
+  E(15, "result", {}),
+  E(16, "user", {text: "folded"}),
 ]);
 process.stdout.write(JSON.stringify(m.rows.map(r => [r.t + (r.mid ? ":mid" : ""), r.text || r.user || null, r.detail || null])));""")
         self.assertEqual(got, [
             ["turn", "a", None],
             ["line", "reply gate · sent back once, no reply to operator:op", None],
             ["line", "send gate · sent back once, no send to peer:p", "Stop hook feedback: answer"],
-            ["line", "repeat gate · Bash called 4 times in a row · nudge", None],
+            ["line", "repeat gate · Bash called 4 times in a row · nudge", "[runner] You have called Bash"],
             ["text", None, None],
+            ["line", "reply gate · sent back once, no reply to operator:op · reply written as text", "Stop hook feedback: reply"],
+            ["thinking", None, None],
+            ["text", None, None],
+            ["line", "repeat gate · Bash called 5 times in a row · turn ended", None],
+            ["footer", None, None],
             ["turn:mid", "folded", None],
+        ])
+
+    def test_the_other_kinds_the_lanes_send_read_as_lines(self):
+        """The system subtypes and framework kinds seen in real streams
+        each read as a line; a bare CLI notice is no row; an unknown
+        subtype with a payload still shows raw rather than vanishing."""
+        got = self.run_node("""
+const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
+const S = (seq, payload) => E(seq, "system", payload);
+const m = rpModel([
+  S(1, {subtype: "compact_boundary"}),
+  S(2, {subtype: "reconnected", why: "no echo for 30.0s"}),
+  S(3, {subtype: "restart_note", why: "the last runner died with a row claimed"}),
+  S(4, {subtype: "retry", attempt: 2, message: "headers timed out"}),
+  S(5, {subtype: "stall", site: "control", seconds: 34.7, ongoing: true}),
+  S(6, {subtype: "permission_denied"}),
+  S(7, {subtype: "status"}), S(8, {subtype: "informational"}),
+  S(9, {subtype: "code_change_published"}), S(10, {subtype: "commands_changed"}),
+  E(11, "memory_update", {entries: 8}),
+  E(12, "config_change", {files: ["cousin.toml"]}),
+  E(13, "hook", {event: "PreToolUse", error: "recorder over its budget"}),
+  E(14, "permission", {event: "PermissionRequest", tool_name: "mcp__cousin__send"}),
+  S(15, {subtype: "something_new", detail: 1}),
+]);
+process.stdout.write(JSON.stringify(m.rows.map(r => r.t === "line" ? [r.cls, r.text] : [r.t])));""")
+        self.assertEqual(got, [
+            ["rp-roll", "context compacted"],
+            ["rp-warn", "reconnected · no echo for 30.0s"],
+            ["rp-roll", "restart · the last runner died with a row claimed"],
+            ["rp-warn", "retry 2 · headers timed out"],
+            ["rp-warn", "stall · control 35 s, ongoing"],
+            ["rp-warn", "permission denied"],
+            ["rp-dim", "memory updated · 8 entries"],
+            ["rp-dim", "config changed · cousin.toml"],
+            ["rp-warn", "hook PreToolUse · recorder over its budget"],
+            ["rp-warn", "permission asked · mcp__cousin__send"],
+            ["meta"],
         ])
 
     TASKS = """

@@ -1777,13 +1777,38 @@ function rpCompact(prev, add) {
 const RP_BOOT_KINDS = { runner: 1, policy: 1, mcp_config: 1, session: 1 };
 const RP_SKIP_SYSTEM = { vcs_state_changed: 1, background_tasks_changed: 1 };
 
+const RP_GATE_KEEPS = { gate: 1, text: 1, thinking: 1, usage: 1 };
+
+// The other system subtypes a lane or the CLI sends, as a line (cls,
+// text), or null for none. A subtype with no payload of its own and no
+// entry here says nothing worth a row (the CLI's status, informational,
+// code_change_published, commands_changed notices).
+const RP_SYSTEM_LINES = {
+  compact_boundary: p => ["rp-roll", "context compacted" + (p.trigger ? " · " + p.trigger : "")],
+  reconnected: p => ["rp-warn", "reconnected" + (p.why ? " · " + rpCut(p.why, 140) : "")],
+  restart_note: p => ["rp-roll", "restart" + (p.why ? " · " + rpCut(p.why, 140) : "")],
+  retry: p => ["rp-warn", "retry " + (p.attempt || 1) + (p.message ? " · " + rpCut(p.message, 140) : "")],
+  stall: p => ["rp-warn", "stall · " + (p.site || "?") + (p.seconds != null ? " " + Math.round(p.seconds) + " s" : "") + (p.ongoing ? ", ongoing" : "")],
+  permission_denied: p => ["rp-warn", "permission denied" + (p.tool_name ? " · " + p.tool_name : "")],
+};
+const RP_SYSTEM_BOOT = { session: 1 };
+// The framework's own kinds that are not turn content, as a line.
+const RP_KIND_LINES = {
+  memory_update: p => ["rp-dim", "memory updated · " + (p.entries || 0) + " entr" + (p.entries === 1 ? "y" : "ies")],
+  config_change: p => ["rp-dim", "config changed · " + (p.files || []).join(", ")],
+  hook: p => [p.error ? "rp-warn" : "rp-dim", "hook " + (p.event || "") + (p.error ? " · " + rpCut(p.error, 140) : "")],
+  permission: p => ["rp-warn", "permission asked · " + (p.tool_name || "a tool")],
+};
+
 // A gate that sent a turn back (hooks.gate_events; the opencode lane's
 // repeat nudge): what it says in the pane.
 function rpGateLine(p) {
   const threads = (p.threads || []).join(", ");
-  if (p.gate === "reply") return { cls: "rp-warn", text: "reply gate · sent back once, no reply to " + (threads || "the thread") };
+  if (p.gate === "reply") return { cls: "rp-warn", text: "reply gate · sent back once, no reply to " + (threads || "the thread")
+                                                    + (p.written_call ? " · reply written as text" : "") };
   if (p.gate === "send") return { cls: "rp-warn", text: "send gate · sent back once, no send to " + (threads || "the peer") };
-  if (p.gate === "repeat") return { cls: "rp-warn", text: "repeat gate · " + (p.tool || "a tool") + " called " + (p.count || "?") + " times in a row" + (p.action ? " · " + p.action : "") };
+  if (p.gate === "repeat") return { cls: "rp-warn", text: "repeat gate · " + (p.tool || "a tool") + " called " + (p.count || "?") + " times in a row"
+                                                     + (p.action === "end" ? " · turn ended" : p.action ? " · " + p.action : "") };
   return { cls: "rp-warn", text: "gate · " + String(p.gate || "?") + (threads ? " · " + threads : "") };
 }
 const RP_TASK_SUBTYPES = { task_started: 1, task_progress: 1, task_updated: 1, task_notification: 1 };
@@ -1862,8 +1887,11 @@ function rpModel(events) {
     }
     const thought = thinkSince;
     thinkSince = null;
+    // A gate's send-back can trail the turn's last words (text, thinking)
+    // before it arrives: the gate stays open through those, and closes at
+    // anything else.
     const lastGate = gateRow;
-    if (k !== "gate" && !(k === "system" && p.subtype === "notification")) gateRow = null;
+    if (!RP_GATE_KEEPS[k] && !(k === "system" && p.subtype === "notification")) gateRow = null;
     if (k === "state") {
       strip.state = p.to || null;
       if (p.to === "running") strip.activity = { kind: "working", since: ts };
@@ -1879,10 +1907,13 @@ function rpModel(events) {
       // the opencode lane's boot report: in the boot group when it holds
       else if ((p.subtype === "mcp" && p.status === "connected")
                || (p.subtype === "policy_plugin" && !(p.errors || []).length)) rpBoot(rows, key, ev);
+      // no producer sends a failed one today (the runner raises instead):
+      // a guard, so a lane that does is a line, not raw JSON
       else if (p.subtype === "mcp")
         rows.push({ t: "line", key, ev, cls: "rp-err", text: "mcp · " + String(p.status || "not connected") + (p.error ? " · " + rpCut(p.error, 120) : "") });
       else if (p.subtype === "policy_plugin")
-        rows.push({ t: "line", key, ev, cls: "rp-err", text: "policy plugin · " + rpCut((p.errors || []).join("; "), 160) });
+        rows.push({ t: "line", key, ev, cls: "rp-err", text: "policy plugin · " + rpCut((p.errors || []).map(e =>
+          e && typeof e === "object" ? (e.source != null ? e.source + ": " : "") + String(e.error || "") : String(e)).join("; "), 160) });
       else if (p.subtype === "perimeter")
         rows.push({ t: "line", key, ev, cls: p.level === "warning" ? "rp-warn" : "rp-dim", text: "perimeter · " + rpCut(p.line || "", 160), detail: p.line || null });
       // a CLI turn of its own between turns (a task notification)
@@ -1903,7 +1934,12 @@ function rpModel(events) {
       else if (p.subtype === "notification") {
         if (p.message) rows.push({ t: "line", key, ev, cls: "rp-dim", text: "notification · " + rpCut(String(p.message), 160) });
       }
-      else if (!RP_SKIP_SYSTEM[p.subtype]) rows.push({ t: "meta", key, ev });
+      else if (RP_SYSTEM_BOOT[p.subtype]) rpBoot(rows, key, ev);
+      else if (RP_SYSTEM_LINES[p.subtype]) {
+        const [cls, text] = RP_SYSTEM_LINES[p.subtype](p);
+        rows.push({ t: "line", key, ev, cls, text });
+      }
+      else if (!RP_SKIP_SYSTEM[p.subtype] && Object.keys(p).some(f => f !== "subtype")) rows.push({ t: "meta", key, ev });
       return;
     }
     if (k === "runner") {
@@ -1921,6 +1957,11 @@ function rpModel(events) {
       return;
     }
     if (RP_BOOT_KINDS[k] || k === "harness") { rpBoot(rows, key, ev); return; }
+    if (RP_KIND_LINES[k]) {
+      const [cls, text] = RP_KIND_LINES[k](p);
+      rows.push({ t: "line", key, ev, cls, text });
+      return;
+    }
     switch (k) {
       case "rate_limit": strip.rate[p.type || "limit"] = p; return;
       case "session_init":

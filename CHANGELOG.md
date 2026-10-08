@@ -14,8 +14,13 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   The opencode lane's repeat nudge, the runner's SDK and CLI version
   check, and the opencode lane's boot report (MCP, policy plugin,
   perimeter) go into the boot group when they hold and show as a line
-  when they don't. A bare `notification` system event is no longer a
-  row. None of them shows as raw JSON any more.
+  when they don't. A gate line says when a reply was written as text,
+  and a repeat gate that ended the turn says so. The rest of what the
+  lanes send reads as a line too: a compacted context, a reconnect, a
+  restart note, a retry, a stall, a denied or asked permission, a hook
+  error, a memory update and a config change; the CLI's bare notices
+  (status, informational, notification) are no row. Checked against
+  every stream on a real install: no raw-JSON row is left.
 
 ## 3.35.0 - 2026-10-07
 

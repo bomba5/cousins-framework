@@ -1776,6 +1776,70 @@ function rpCompact(prev, add) {
 
 const RP_BOOT_KINDS = { runner: 1, policy: 1, mcp_config: 1, session: 1 };
 const RP_SKIP_SYSTEM = { vcs_state_changed: 1, background_tasks_changed: 1 };
+
+const RP_GATE_KEEPS = { gate: 1, text: 1, thinking: 1, usage: 1 };
+
+// The other system subtypes a lane or the CLI sends, as a line (cls,
+// text), or null for none. A subtype with no payload of its own and no
+// entry here says nothing worth a row (the CLI's status, informational,
+// code_change_published, commands_changed notices).
+const RP_SYSTEM_LINES = {
+  compact_boundary: p => ["rp-roll", "context compacted" + (p.trigger ? " · " + p.trigger : "")],
+  reconnected: p => ["rp-warn", "reconnected" + (p.why ? " · " + rpCut(p.why, 140) : "")],
+  restart_note: p => ["rp-roll", "restart" + (p.why ? " · " + rpCut(p.why, 140) : "")],
+  retry: p => ["rp-warn", "retry " + (p.attempt || 1) + (p.message ? " · " + rpCut(p.message, 140) : "")],
+  stall: p => ["rp-warn", "stall · " + (p.site || "?") + (p.seconds != null ? " " + Math.round(p.seconds) + " s" : "") + (p.ongoing ? ", ongoing" : "")],
+  permission_denied: p => ["rp-warn", "permission denied" + (p.tool_name ? " · " + p.tool_name : "")],
+  resume_failed: p => ["rp-warn", "resume failed" + (p.error ? " · " + rpCut(p.error, 140) : "")],
+  connect_failed: p => ["rp-err", "connect failed" + (p.error ? " · " + rpCut(p.error, 140) : "")],
+  side_restarted: p => ["rp-warn", "side session restarted · " + (p.session || "?") + (p.attempt ? ", attempt " + p.attempt : "")],
+  interrupt_dropped: p => ["rp-dim", "interrupt dropped · its turn had ended"],
+  drained: p => ["rp-dim", "drained · " + (Array.isArray(p.messages) ? p.messages.length : (p.messages || 0)) + " messages"],
+  resync_skipped: p => ["rp-dim", "resync skipped" + (p.why ? " · " + p.why : "")],
+  opencode_leftover: p => ["rp-roll", "leftover opencode killed · " + (p.pids || []).length + " process" + ((p.pids || []).length === 1 ? "" : "es")],
+  pressure_off: p => ["rp-dim", "context pressure off" + (p.why ? " · " + rpCut(p.why, 140) : "")],
+  event_gap: p => ["rp-dim", "event stream gap" + (p.settled ? " · settled" : "")],
+  adopt_refused: p => ["rp-warn", "pane not adopted" + (p.reason || p.detail || p.why ? " · " + rpCut(p.reason || p.detail || p.why, 140) : "")],
+  hooks_silent: p => ["rp-warn", "hooks silent" + (p.detail ? " · " + rpCut(p.detail, 140) : "")],
+  notice_not_typed: p => ["rp-warn", "notice not typed" + (p.waited_s != null ? " after " + p.waited_s + " s" : "")],
+  pane_failing: p => ["rp-err", "pane failing" + (p.reason ? " · " + rpCut(p.reason, 140) : "")],
+  pane_lost: p => ["rp-err", "pane lost" + (p.requeued ? " · " + p.requeued + " requeued" : "")],
+  pane_reopened: p => ["rp-roll", "pane reopened" + (p.source ? " · " + p.source : "")],
+  pane_unreachable: p => ["rp-err", "pane unreachable" + (p.detail ? " · " + rpCut(p.detail, 140) : "")],
+  session_changed: p => ["rp-dim", "new session · " + rpCut(p.new_session_id || "", 60)],
+  // a removed config key found at start (runner/main.py): a boot line
+  config: p => ["rp-warn", "config · " + (p.key && p.key !== p.where ? (p.where || "") + " " + p.key : (p.key || p.where || "?"))
+                           + " is no longer read (2.0.0); cousin-migrate tidy removes it"],
+  typing_blocked: p => ["rp-warn", "typing blocked · " + (p.what || "?") + (p.screen ? " (" + p.screen + ")" : "")],
+};
+const RP_SYSTEM_BOOT = { session: 1 };
+// lines a start writes, kept under its boot group (rpBootGroup)
+const RP_SYSTEM_BOOT_LINES = { config: 1 };
+// The framework's own kinds that are not turn content, as a line.
+const RP_KIND_LINES = {
+  memory_update: p => ["rp-dim", "memory updated · " + (p.entries || 0) + " entr" + (p.entries === 1 ? "y" : "ies")],
+  config_change: p => ["rp-dim", "config changed · " + (p.files || []).join(", ")],
+  hook: p => [p.error ? "rp-warn" : "rp-dim", "hook " + (p.event || "") + (p.error ? " · " + rpCut(p.error, 140) : "")],
+  cap: p => ["rp-warn", "cost cap · $" + Number(p.spent || 0).toFixed(2) + " of $" + Number(p.limit || 0).toFixed(2) + " today"
+                        + (p.refused ? " · turn refused" : p.allowed === "person" ? " · only a person's chat runs" : "")],
+  duplicate_delivery: p => ["rp-dim", "duplicate delivery ignored"],
+  foreign_turn: p => ["rp-dim", "a turn typed in the pane"],
+  other: p => ["rp-dim", "SDK message · " + (p.type || "?")],
+  permission: p => ["rp-warn", p.tool_name ? "permission asked · " + p.tool_name
+                                            : "notification · " + rpCut(p.message || p.event || "", 140)],
+};
+
+// A gate that sent a turn back (hooks.gate_events; the opencode lane's
+// repeat nudge): what it says in the pane.
+function rpGateLine(p) {
+  const threads = (p.threads || []).join(", ");
+  if (p.gate === "reply") return { cls: "rp-warn", text: "reply gate · sent back once, no reply to " + (threads || "the thread")
+                                                    + (p.written_call ? " · reply written as text" : "") };
+  if (p.gate === "send") return { cls: "rp-warn", text: "send gate · sent back once, no send to " + (threads || "the peer") };
+  if (p.gate === "repeat") return { cls: "rp-warn", text: "repeat gate · " + (p.tool || "a tool") + " called " + (p.count || "?") + " times in a row"
+                                                     + (p.action === "end" ? " · turn ended" : p.action ? " · " + p.action : "") };
+  return { cls: "rp-warn", text: "gate · " + String(p.gate || "?") + (threads ? " · " + threads : "") };
+}
 const RP_TASK_SUBTYPES = { task_started: 1, task_progress: 1, task_updated: 1, task_notification: 1 };
 // the SDK's TERMINAL_TASK_STATUSES: task_notification says "stopped",
 // task_updated the raw "killed"
@@ -1837,6 +1901,8 @@ function rpModel(events) {
   // message's recall waits here for its own divider
   let recalls = [];
   let turn = null, meta = {}, thinkSince = null;
+  // the gate row whose send-back message (a user event) comes next
+  let gateRow = null;
   const newMeta = () => { meta = {}; return meta; };
   (events || []).forEach((ev, i) => {
     const p = ev.payload || {};
@@ -1850,6 +1916,11 @@ function rpModel(events) {
     }
     const thought = thinkSince;
     thinkSince = null;
+    // A gate's send-back can trail the turn's last words (text, thinking)
+    // before it arrives: the gate stays open through those, and closes at
+    // anything else.
+    const lastGate = gateRow;
+    if (!RP_GATE_KEEPS[k] && !(k === "system" && p.subtype === "notification")) gateRow = null;
     if (k === "state") {
       strip.state = p.to || null;
       if (p.to === "running") strip.activity = { kind: "working", since: ts };
@@ -1862,6 +1933,18 @@ function rpModel(events) {
       // the SDK reports one around many ordinary tool calls
       if (RP_TASK_SUBTYPES[p.subtype]) strip.bgUntracked = Math.max(0, strip.bgUntracked + rpTaskEvent(strip.tasks, p, ts));
       else if (p.subtype === "fresh" || p.subtype === "init" || p.subtype === "resumed") rpBoot(rows, key, ev);
+      // the opencode lane's boot report: in the boot group when it holds
+      else if ((p.subtype === "mcp" && p.status === "connected")
+               || (p.subtype === "policy_plugin" && !(p.errors || []).length)) rpBoot(rows, key, ev);
+      // no producer sends a failed one today (the runner raises instead):
+      // a guard, so a lane that does is a line, not raw JSON
+      else if (p.subtype === "mcp")
+        rows.push({ t: "line", boot: true, key, ev, cls: "rp-err", text: "mcp · " + String(p.status || "not connected") + (p.error ? " · " + rpCut(p.error, 120) : "") });
+      else if (p.subtype === "policy_plugin")
+        rows.push({ t: "line", boot: true, key, ev, cls: "rp-err", text: "policy plugin · " + rpCut((p.errors || []).map(e =>
+          e && typeof e === "object" ? (e.source != null ? e.source + ": " : "") + String(e.error || "") : String(e)).join("; "), 160) });
+      else if (p.subtype === "perimeter")
+        rows.push({ t: "line", boot: true, key, ev, cls: p.level === "warning" ? "rp-warn" : "rp-dim", text: "perimeter · " + rpCut(p.line || "", 160), detail: p.line || null });
       // a CLI turn of its own between turns (a task notification)
       else if (p.subtype === "background_turn" && p.phase === "start") {
         turn = { t: "turn", key, ev, thread: "background", bodies: [], user: null, recall: null, meta: newMeta() };
@@ -1876,7 +1959,20 @@ function rpModel(events) {
         rows.push({ t: "line", key, ev, cls: auth ? "rp-err" : "rp-warn",
                     text: "API retry " + (p.attempt || 1) + ": " + [p.error_status, p.error].filter(x => x != null && x !== "").join(" ") });
       }
-      else if (!RP_SKIP_SYSTEM[p.subtype]) rows.push({ t: "meta", key, ev });
+      // the CLI's own notice around a hook's feedback: says nothing alone
+      else if (p.subtype === "notification") {
+        if (p.message) rows.push({ t: "line", key, ev, cls: "rp-dim", text: "notification · " + rpCut(String(p.message), 160) });
+      }
+      // the opencode lane names its session at boot and again when it
+      // opens a new one mid-stream: the boot group's only at boot
+      else if (RP_SYSTEM_BOOT[p.subtype] && rpBootGroup(rows)) rpBoot(rows, key, ev);
+      else if (RP_SYSTEM_BOOT[p.subtype])
+        rows.push({ t: "line", key, ev, cls: "rp-dim", text: "new session · " + rpCut(p.session_id || "", 60) });
+      else if (RP_SYSTEM_LINES[p.subtype]) {
+        const [cls, text] = RP_SYSTEM_LINES[p.subtype](p);
+        rows.push({ t: "line", key, ev, cls, text, ...(RP_SYSTEM_BOOT_LINES[p.subtype] ? { boot: true } : {}) });
+      }
+      else if (!RP_SKIP_SYSTEM[p.subtype] && Object.keys(p).some(f => f !== "subtype")) rows.push({ t: "meta", key, ev });
       return;
     }
     if (k === "runner") {
@@ -1886,7 +1982,27 @@ function rpModel(events) {
         if (t.ended == null) { t.ended = ts; t.status = "lost"; t.summary = "the runner restarted"; }
       });
     }
-    if (RP_BOOT_KINDS[k]) { rpBoot(rows, key, ev); return; }
+    // the runner's SDK and CLI version check: part of the boot when it
+    // holds, a line of its own when it does not
+    if (k === "harness" && !p.ok) {
+      rows.push({ t: "line", boot: true, key, ev, cls: p.level === "error" ? "rp-err" : "rp-warn",
+                  text: "harness · " + String(p.message || (p.problems || []).join("; ") || "version check failed") });
+      return;
+    }
+    // a policy decision on one call (hooks.on_policy) is turn content;
+    // only the policy the runner started on (`describe`) is boot
+    if (k === "policy" && !("describe" in p)) {
+      rows.push({ t: "line", key, ev, cls: p.decision === "deny" ? "rp-err" : "rp-warn",
+                  text: "policy · " + (p.decision || "?") + " " + (p.tool || "a tool")
+                        + (p.agent_id ? " (subagent)" : "") + (p.reason ? " · " + rpCut(p.reason, 140) : "") });
+      return;
+    }
+    if (RP_BOOT_KINDS[k] || k === "harness") { rpBoot(rows, key, ev); return; }
+    if (RP_KIND_LINES[k]) {
+      const [cls, text] = RP_KIND_LINES[k](p);
+      rows.push({ t: "line", key, ev, cls, text });
+      return;
+    }
     switch (k) {
       case "rate_limit": strip.rate[p.type || "limit"] = p; return;
       case "session_init":
@@ -1897,7 +2013,15 @@ function rpModel(events) {
         recalls = [];
         rows.push(turn);
         return;
+      case "gate": {
+        const line = rpGateLine(p);
+        gateRow = { t: "line", key, ev, cls: line.cls, text: line.text, detail: null };
+        rows.push(gateRow);
+        return;
+      }
       case "user":
+        // a gate's send-back is the gate's text, not a message: onto its row
+        if (lastGate) { lastGate.detail = (lastGate.detail ? lastGate.detail + "\n" : "") + String(p.text || ""); return; }
         if (turn && turn.user == null) { turn.user = String(p.text || ""); return; }
         // a message folded into the running turn: its own divider
         rows.push({ t: "turn", mid: true, key, ev, thread: null, bodies: [], user: String(p.text || ""), recall: recalls.shift() || null });
@@ -1974,9 +2098,20 @@ function rpModel(events) {
   return { strip, rows };
 }
 
+// The boot group a boot event joins: the last row, or the group just
+// above the boot-phase lines under it (a perimeter warning, a failed
+// check), so one start is one group however its warnings interleave.
+function rpBootGroup(rows) {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].t === "boot") return rows[i];
+    if (!rows[i].boot) return null;
+  }
+  return null;
+}
+
 function rpBoot(rows, key, ev) {
-  const last = rows[rows.length - 1];
-  if (last && last.t === "boot") last.events.push(ev);
+  const group = rpBootGroup(rows);
+  if (group) group.events.push(ev);
   else rows.push({ t: "boot", key, events: [ev] });
 }
 
@@ -2406,7 +2541,7 @@ function RpRow({ row, now, activeTool, slug }) {
     case "error":
       return <div className="rp-line rp-err">error: {String(p.error || "")}</div>;
     case "line":
-      return <div className={"rp-line " + row.cls}>{row.text}</div>;
+      return <div className={"rp-line " + row.cls} title={row.detail || undefined}>{row.text}</div>;
     case "footer": {
       const parts = rpFooterParts(row.meta);
       const bad = row.meta.result && (row.meta.result.is_error || row.meta.result.interrupted);

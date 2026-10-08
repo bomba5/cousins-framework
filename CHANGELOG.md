@@ -3,6 +3,27 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.35.1 - 2026-10-08
+
+### Fixed
+
+- **The reasoning pane reads every event the runners send.** A reply or
+  send gate that sends a turn back is now a line naming the threads
+  (`reply gate · sent back once, no reply to ...`), and the send-back
+  message after it is that line's tooltip instead of a new turn divider.
+  The opencode lane's repeat nudge, the runner's SDK and CLI version
+  check, and the opencode lane's boot report (MCP, policy plugin,
+  perimeter) go into the boot group when they hold and show as a line
+  when they don't. A gate line says when a reply was written as text,
+  and a repeat gate that ended the turn says so. The rest of what the
+  lanes send reads as a line too: a compacted context, a reconnect, a
+  restart note, a retry, a stall, a denied or asked permission, a hook
+  error, a memory update, a config change, a failed resume or connect,
+  a cost cap, and the tmux lane's pane events; the CLI's bare notices
+  (status, informational, notification) are no row. Every subtype and
+  kind the runners emit has a reading, and a test reads that list from
+  the runners' sources, so a new one cannot land as raw JSON unnoticed.
+
 ## 3.35.0 - 2026-10-07
 
 ### Added

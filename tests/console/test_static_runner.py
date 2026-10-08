@@ -625,13 +625,18 @@ process.stdout.write(JSON.stringify(m.rows.map(r => [r.t + (r.mid ? ":mid" : "")
         got = self.run_node("""
 const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
 const evs = [
-  E(1, "runner", {kind: "sdk"}), E(2, "system", {subtype: "resumed", session_id: "s"}),
+  E(1, "runner", {kind: "sdk"}), E(2, "harness", {kind: "sdk", ok: true, level: "info"}), E(2, "system", {subtype: "resumed", session_id: "s"}),
+  E(2, "system", {subtype: "mcp", status: "connected"}), E(2, "system", {subtype: "policy_plugin", errors: []}),
   E(3, "system", {subtype: "api_retry", error_status: 401, error: "authentication_failed", attempt: 1}),
   E(4, "auth", {account: "host", kind: "claude-login", reason: "login_required", detail: "OAuth session expired", action: "run claude auth login"}),
   E(5, "rollover", {phase: "start", reason: "max_age", session_id: "s"}),
   E(6, "review_gate", {turn: 3, held: 5, kept: 4, dropped: 1, pending: 0, error: null}),
   E(7, "tool_call", {tool: "reply", command: "", is_error: true, ms: 4}),
   E(8, "tool_call", {tool: "memory", command: "search", is_error: false, ms: 4}),
+  E(10, "harness", {kind: "sdk", ok: false, level: "warning", message: "cli 2.1.0, locked 2.1.286"}),
+  E(11, "system", {subtype: "perimeter", kind: "opencode", level: "warning", line: "no perimeter on this lane"}),
+  E(12, "system", {subtype: "mcp", status: "failed"}),
+  E(13, "system", {subtype: "policy_plugin", errors: [{source: "rm -rf (", error: "unterminated group"}]}),
 ];
 const blocked = rpModel(evs).strip.auth;
 const m = rpModel(evs.concat([E(9, "auth", {account: "host", restored: true})]));
@@ -642,12 +647,16 @@ process.stdout.write(JSON.stringify({
   mismatch: rpAuthLine({mismatch: true, expected: "none", got: "ANTHROPIC_API_KEY"}),
 }));""")
         self.assertEqual(got["rows"], [
-            ["boot", 2],
+            ["boot", 5],
             ["line", "rp-err", "API retry 1: 401 authentication_failed"],
             ["line", "rp-err", "login required · OAuth session expired · run claude auth login"],
             ["line", "rp-roll", "session rollover · start · max age"],
             ["line", "rp-dim", "memory review · 4 kept, 1 dropped"],
             ["line", "rp-err", "tool reply failed"],
+            ["line", "rp-warn", "harness · cli 2.1.0, locked 2.1.286"],
+            ["line", "rp-warn", "perimeter · no perimeter on this lane"],
+            ["line", "rp-err", "mcp · failed"],
+            ["line", "rp-err", "policy plugin · rm -rf (: unterminated group"],
             ["line", "rp-ok", "login restored · host"],
         ])
         self.assertTrue(got["blocked"])
@@ -655,6 +664,145 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(got["retry"], "rp-warn")
         self.assertEqual(got["mismatch"], {"cls": "rp-err", "blocking": True,
                                            "text": "credentials mismatch · expected none, got ANTHROPIC_API_KEY"})
+
+    def test_a_gate_is_a_line_and_its_send_back_folds_into_it(self):
+        """A `gate` event reads as a line naming the threads, the
+        send-back message after it is that line's detail and not a new
+        turn divider, also when the turn's last text or thinking lands
+        between the two; a bare system notification is no row. With a
+        reply and a send gate in one stop the send-back is one combined
+        text, so it goes on the second line."""
+        got = self.run_node("""
+const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
+const m = rpModel([
+  E(1, "turn_start", {bodies: ["a"]}), E(2, "user", {text: "a"}),
+  E(3, "gate", {gate: "reply", threads: ["operator:op"]}),
+  E(4, "gate", {gate: "send", threads: ["peer:p"]}),
+  E(5, "user", {text: "Stop hook feedback: answer"}),
+  E(6, "system", {subtype: "notification"}),
+  E(7, "gate", {gate: "repeat", tool: "Bash", count: 4, action: "nudge"}),
+  E(8, "text", {text: "ok"}),
+  E(9, "user", {text: "[runner] You have called Bash"}),
+  E(10, "gate", {gate: "reply", threads: ["operator:op"], written_call: true}),
+  E(11, "thinking", {text: "hm"}), E(12, "text", {text: "done"}),
+  E(13, "user", {text: "Stop hook feedback: reply"}),
+  E(14, "gate", {gate: "repeat", tool: "Bash", count: 5, action: "end"}),
+  E(15, "result", {}),
+  E(16, "user", {text: "folded"}),
+]);
+process.stdout.write(JSON.stringify(m.rows.map(r => [r.t + (r.mid ? ":mid" : ""), r.text || r.user || null, r.detail || null])));""")
+        self.assertEqual(got, [
+            ["turn", "a", None],
+            ["line", "reply gate · sent back once, no reply to operator:op", None],
+            ["line", "send gate · sent back once, no send to peer:p", "Stop hook feedback: answer"],
+            ["line", "repeat gate · Bash called 4 times in a row · nudge", "[runner] You have called Bash"],
+            ["text", None, None],
+            ["line", "reply gate · sent back once, no reply to operator:op · reply written as text", "Stop hook feedback: reply"],
+            ["thinking", None, None],
+            ["text", None, None],
+            ["line", "repeat gate · Bash called 5 times in a row · turn ended", None],
+            ["footer", None, None],
+            ["turn:mid", "folded", None],
+        ])
+
+    def test_the_other_kinds_the_lanes_send_read_as_lines(self):
+        """The system subtypes and framework kinds seen in real streams
+        each read as a line; a bare CLI notice is no row; an unknown
+        subtype with a payload still shows raw rather than vanishing."""
+        got = self.run_node("""
+const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
+const S = (seq, payload) => E(seq, "system", payload);
+const m = rpModel([
+  S(1, {subtype: "compact_boundary"}),
+  S(2, {subtype: "reconnected", why: "no echo for 30.0s"}),
+  S(3, {subtype: "restart_note", why: "the last runner died with a row claimed"}),
+  S(4, {subtype: "retry", attempt: 2, message: "headers timed out"}),
+  S(5, {subtype: "stall", site: "control", seconds: 34.7, ongoing: true}),
+  S(6, {subtype: "permission_denied"}),
+  S(7, {subtype: "status"}), S(8, {subtype: "informational"}),
+  S(9, {subtype: "code_change_published"}), S(10, {subtype: "commands_changed"}),
+  E(11, "memory_update", {entries: 8}),
+  E(12, "config_change", {files: ["cousin.toml"]}),
+  E(13, "hook", {event: "PreToolUse", error: "recorder over its budget"}),
+  E(14, "permission", {event: "PermissionRequest", tool_name: "mcp__cousin__send"}),
+  E(15, "permission", {event: "Notification", message: "Claude is waiting for your input"}),
+  E(16, "policy", {tool: "Bash", decision: "deny", reason: "rm -rf is denied", agent_id: "a1"}),
+  E(17, "policy", {tool: "Write", decision: "ask", reason: "outside the home"}),
+  S(18, {subtype: "something_new", detail: 1}),
+  E(19, "runner", {kind: "sdk"}), E(20, "policy", {describe: "policy.toml: 2 rules"}),
+  S(21, {subtype: "session", session_id: "ses_a"}),
+  S(22, {subtype: "retry", attempt: 1}), S(23, {subtype: "session", session_id: "ses_b"}),
+]);
+process.stdout.write(JSON.stringify(m.rows.map(r => r.t === "line" ? [r.cls, r.text] : [r.t])));""")
+        self.assertEqual(got, [
+            ["rp-roll", "context compacted"],
+            ["rp-warn", "reconnected · no echo for 30.0s"],
+            ["rp-roll", "restart · the last runner died with a row claimed"],
+            ["rp-warn", "retry 2 · headers timed out"],
+            ["rp-warn", "stall · control 35 s, ongoing"],
+            ["rp-warn", "permission denied"],
+            ["rp-dim", "memory updated · 8 entries"],
+            ["rp-dim", "config changed · cousin.toml"],
+            ["rp-warn", "hook PreToolUse · recorder over its budget"],
+            ["rp-warn", "permission asked · mcp__cousin__send"],
+            ["rp-warn", "notification · Claude is waiting for your input"],
+            ["rp-err", "policy · deny Bash (subagent) · rm -rf is denied"],
+            ["rp-warn", "policy · ask Write · outside the home"],
+            ["meta"],
+            ["boot"],
+            ["rp-warn", "retry 1"],
+            ["rp-dim", "new session · ses_b"],
+        ])
+
+    def test_one_start_is_one_boot_group_around_its_warnings(self):
+        """The opencode lane's real boot order puts the perimeter warning
+        between the harness check and the rest of the boot report: still
+        one boot group, the warning a line under it, the boot session in
+        the group. A failed harness check splits nothing either."""
+        got = self.run_node("""
+const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
+const S = (seq, payload) => E(seq, "system", payload);
+const shape = m => m.rows.map(r => r.t === "boot" ? ["boot", r.events.map(e => e.kind + (e.payload.subtype ? ":" + e.payload.subtype : ""))] : [r.t, r.text || null]);
+const oc = rpModel([
+  E(1, "runner", {kind: "opencode"}), E(2, "harness", {kind: "opencode", ok: true}),
+  S(3, {subtype: "perimeter", kind: "opencode", level: "warning", line: "no perimeter on this lane"}),
+  E(4, "policy", {describe: "x"}), S(5, {subtype: "mcp", status: "connected"}),
+  S(6, {subtype: "policy_plugin", errors: []}), S(7, {subtype: "session", session_id: "ses_a"}),
+  S(8, {subtype: "resumed", session_id: "ses_a"}),
+  E(9, "turn_start", {bodies: ["a"]}),
+]);
+const sdk = rpModel([
+  E(1, "runner", {kind: "sdk"}), E(2, "harness", {kind: "sdk", ok: false, level: "warning", message: "cli drift"}),
+  S(2, {subtype: "config", where: "cousin.toml", key: "runtime.tmux_session", line: 4}),
+  E(3, "policy", {describe: "x"}), S(4, {subtype: "resumed", session_id: "s"}),
+]);
+process.stdout.write(JSON.stringify([shape(oc), shape(sdk)]));""")
+        self.assertEqual(got, [
+            [["boot", ["runner", "harness", "policy", "system:mcp", "system:policy_plugin",
+                       "system:session", "system:resumed"]],
+             ["line", "perimeter · no perimeter on this lane"],
+             ["turn", None]],
+            [["boot", ["runner", "policy", "system:resumed"]],
+             ["line", "harness · cli drift"],
+             ["line", "config · cousin.toml runtime.tmux_session is no longer read (2.0.0); cousin-migrate tidy removes it"]],
+        ])
+
+    def test_every_subtype_and_kind_a_runner_emits_has_a_reading(self):
+        """Each system subtype and stream kind the runners' sources emit
+        is named in the pane, so none of them is a raw-JSON row: the
+        list is read from the sources, so a new one fails here first."""
+        import re
+        runner = pathlib.Path(__file__).resolve().parents[2] / "cousin_lib"
+        src = "".join(p.read_text() for p in runner.rglob("*.py"))
+        # literal subtypes and the kwarg form; the variable forms are
+        # sdk.py's connect event (connect_failed, resume_failed) and the
+        # SDK's own subtypes passed through, which the pane names by hand
+        subtypes = set(re.findall(r'"subtype": "([a-z_]+)"', src)) \
+            | set(re.findall(r'subtype="([a-z_]+)"', src)) | {"connect_failed"}
+        kinds = set(re.findall(r'stream\.append\("([a-z_]+)"', src))
+        missing = sorted(n for n in subtypes | kinds
+                         if not re.search(r'(\b%s:|"%s"|case "%s")' % (n, n, n), self.chat))
+        self.assertEqual(missing, [])
 
     TASKS = """
 const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});

@@ -1038,3 +1038,15 @@ class TestUpkeepAlarm(LoopsCase):
             self._tick(now=10_060.0)                       # within the hour: no second check
             self._tick(now=10_000.0 + loops.UPKEEP_CHECK_SECONDS)
         self.assertEqual(len(calls), 2)
+
+    def test_an_alarm_switched_off_clears_its_failing_row(self):
+        from unittest import mock as _mock
+        from cousin_lib import health, loops, upkeep
+        home = self._cousin("wren", extra="[agent]\nupkeep_alarm_percent = 50\n")
+        with _mock.patch.object(upkeep, "alarm", return_value=(False, "over")):
+            report = self._tick(now=20_000.0)
+        health.record(loops.FrameworkConfig.from_env().root, report["health"])
+        (home / "cousin.toml").write_text((home / "cousin.toml").read_text().replace(
+            "upkeep_alarm_percent = 50", "upkeep_alarm_percent = 0"))
+        report = self._tick(now=20_000.0 + loops.UPKEEP_CHECK_SECONDS)
+        self.assertIn(("upkeep:wren", True, None), [tuple(h) for h in report["health"]])

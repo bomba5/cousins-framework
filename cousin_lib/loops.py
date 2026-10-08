@@ -1103,6 +1103,16 @@ def _check_upkeep(slug, home, state, now, report):
         return
     if result is not None:
         _health(report, "upkeep:" + slug, result[0], result[1])
+        return
+    # the alarm is off: a row it left failing says ok once, or it would
+    # read failing for the week health keeps a row
+    try:
+        from cousin_lib import health
+        row = health.read(FrameworkConfig.from_env().root).get("upkeep:" + slug)
+    except Exception:  # noqa: BLE001 - never costs the tick
+        return
+    if row and row.get("state") == "failing":
+        _health(report, "upkeep:" + slug, True, None)
 
 
 def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,

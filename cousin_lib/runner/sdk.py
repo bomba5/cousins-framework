@@ -767,11 +767,9 @@ class SdkRunner:
 
     def _snapshot_fingerprint(self):
         """snapshot.fingerprint of what this runner serves: its registry
-        and the MCP servers it loaded at start."""
+        and its .mcp.json."""
         from cousin_lib.runner import snapshot
-        return snapshot.fingerprint(
-            self.home, self.root, registry=self.tool_context.registry,
-            servers=self._user_mcp.servers if self._user_mcp is not None else None)
+        return snapshot.fingerprint(self.home, self.root, registry=self.tool_context.registry)
 
     def _session_generation(self):
         """The generation the session file records: the home's current one.

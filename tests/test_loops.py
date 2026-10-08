@@ -527,6 +527,21 @@ class TestFlipDrivers(LoopsCase):
         self.assertEqual(self.flips, [])
         self.assertEqual(report["idle_flips"], ["wren"])
 
+    def test_the_fingerprint_does_not_depend_on_the_callers_environment(self):
+        # a .mcp.json server whose ${VAR} one process lacks: the runner and
+        # the daemon still hash the same thing
+        import json as _json
+        import os as _os
+        from unittest import mock as _mock
+        from cousin_lib.runner import snapshot
+        home = self._flip_cousin("wren")
+        (home / ".mcp.json").write_text(_json.dumps({"mcpServers": {"x": {
+            "command": "srv", "env": {"TOKEN": "${ONLY_IN_THE_RUNNER}"}}}}))
+        with _mock.patch.dict(_os.environ, {"ONLY_IN_THE_RUNNER": "1"}):
+            runner_side = snapshot.fingerprint(home, home.parent.parent)
+        _os.environ.pop("ONLY_IN_THE_RUNNER", None)
+        self.assertEqual(snapshot.fingerprint(home, home.parent.parent), runner_side)
+
     def test_a_generation_that_worked_is_flipped(self):
         home = self._flip_cousin("wren")
         self._seed_inbox(home, "loop", "Context heartbeat. nothing new", self._at(1))

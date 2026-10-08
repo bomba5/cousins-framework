@@ -4,7 +4,8 @@ A generation ends on context pressure, or at the operator's daily
 cadence (`max_age`: the loops daemon's `flip_at` today, later the
 supervisor's clock). Either way it is ONE inbox row with
 source `flip`: priority 0, claimed only at a turn boundary, never folded
-into a live turn, durable (a runner that dies mid-rollover finishes it
+into a live turn, durable (a runner that dies mid-rollover finishes it,
+the journal below keeping a written handoff from being asked twice
 at its next start), and coalesced (one pending per home). The handoff
 is one awaited, structured tool call (tools.handoff); past the deadline
 the runner writes an emergency handoff from the session store's tail,
@@ -153,6 +154,44 @@ def write_emergency_handoff(home, *, name, reason, tail):
         tail[-2000:] if tail else "(no transcript)",
     ]) + "\n")
     return path
+
+
+# The rollover's own record across a kill (#286): written when the handoff
+# is done, removed when the row closes. A runner that dies in between
+# finds it at its next start, for the same flip row, and goes on from
+# there: no second handoff on a session that already handed off, no fresh
+# session and boot of its own before the rollover makes the real one.
+JOURNAL = ("data", "rollover.json")
+
+
+def journal_path(home):
+    return Path(home).joinpath(*JOURNAL)
+
+
+def read_journal(home):
+    """The journal's dict, or None (missing, unreadable, not an object)."""
+    try:
+        data = json.loads(journal_path(home).read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_journal(home, row_id, old_session, generation, handoff):
+    path = journal_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"row": row_id, "phase": "handed_off",
+                               "old_session": old_session, "generation": generation,
+                               "handoff": handoff, "ts": time.time()}))
+    tmp.replace(path)
+
+
+def clear_journal(home):
+    try:
+        journal_path(home).unlink()
+    except FileNotFoundError:
+        pass
 
 
 def archive_generation(home, generation):

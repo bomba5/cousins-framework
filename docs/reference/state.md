@@ -89,6 +89,7 @@ built from it.
 | `data/run/tmux-context-origin.json`, `run/tmux-session.json`, `run/turn.json` | runtime | the tmux kind, the runner | the pane's session and the live turn; a restart rebuilds them |
 | `data/run/tmux-giving-up.json` | transactional | `tmux_runner` | a start that keeps failing gives up; a start honours it for an hour |
 | `run/held` | transactional | a stop | holds the cousin down across a [supervisor](../glossary.md#supervisor) restart until its next start |
+| `data/rollover.json` | transactional | `runner/rollover` (the sdk kind) | a rollover whose handoff is written and whose row is still open: a restart finishes that rollover instead of handing off again; removed when the row closes |
 | `data/runner-restart.json` | transactional | `restart_note` | a stop cut a live turn: the next resume says so first, then it is cleared |
 | `data/login-required.json` | transactional | `runner/auth` | the account needs a login; cleared when it has one |
 | `data/cost-cap.json` | transactional | `runner/cost_cap` | the daily cost cap's notice, said once a day |

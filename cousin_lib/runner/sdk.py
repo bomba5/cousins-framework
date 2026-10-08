@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cousin_lib import accounts, boot, handover, review_gate, session, usage
+from cousin_lib.crashpoint import crashpoint
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
 from cousin_lib.runner import (auth, config_watch, cost_cap, envelope, extract, hooks,
                                memory_watch, restart_note, rollover, tool_ledger, tools, wake)
@@ -1055,6 +1056,19 @@ class SdkRunner:
             self._request_rollover("the system prompt or the tools changed since this"
                                    " session started")
 
+    def _rollover_pending(self):
+        """A rollover journal whose flip row is still open: the restart
+        finishes that rollover (rollover.JOURNAL). A journal whose row
+        closed, or is gone, is stale and removed."""
+        journal = rollover.read_journal(self.home)
+        if not journal:
+            return False
+        row = self.inbox.get(journal.get("row")) if journal.get("row") else None
+        if row and row["state"] != "done":
+            return True
+        rollover.clear_journal(self.home)
+        return False
+
     def _request_rollover(self, why):
         """Ask without waiting (pressure, PreCompact): the loop claims it next."""
         inbox_id, coalesced = rollover.put_once(self.inbox, self.home, why)
@@ -1432,6 +1446,12 @@ class SdkRunner:
                 if self._login_blocked:
                     # a login to do before anything runs: the fresh start waits for it
                     self._fresh_pending = bool(saved) or has_state
+                elif await asyncio.to_thread(self._rollover_pending):
+                    # the last runner died inside a rollover after its new
+                    # session existed: the flip row, next, makes the session
+                    # and the digest, so this start makes neither
+                    self.stream.append("system", {"subtype": "fresh", "digest": False,
+                                                  "why": "a rollover is pending"})
                 else:
                     await self._start_fresh(with_digest=bool(saved) or has_state)
             with self._doorbell() as listener:
@@ -2794,8 +2814,20 @@ class SdkRunner:
                 return False
             self.machine.to("rolling_over", reason.splitlines()[0][:120])
         self.stream.append("rollover", {"phase": "start", "reason": reason, "session_id": old_sid})
+        journal = await asyncio.to_thread(rollover.read_journal, self.home)
+        if not (journal and journal.get("row") == row["id"]):
+            journal = None
         try:
-            handoff = await self._ask_handoff(reason)
+            if journal:
+                # this row's handoff was written before a restart (the
+                # journal): the old session handed off already, so it gets
+                # no second handoff turn
+                handoff = "kept"
+                old_sid = journal.get("old_session") or old_sid
+                self.stream.append("rollover", {"phase": "resumed", "reason": reason,
+                                                "handoff": journal.get("handoff")})
+            else:
+                handoff = await self._ask_handoff(reason)
             if handoff == "stopped":
                 self.inbox.requeue(row["id"])          # the next start finishes this rollover
                 self.stream.append("rollover", {"phase": "requeued", "reason": reason})
@@ -2828,6 +2860,10 @@ class SdkRunner:
             # the handoff turn's init may have named another session (a lost
             # resume): that one is the session being ended and restored
             old_sid = self._resume_id or old_sid
+            if not journal:
+                await asyncio.to_thread(rollover.write_journal, self.home, row["id"],
+                                        old_sid, generation, handoff)
+            crashpoint("rollover.handed_off")
             await asyncio.to_thread(session.run_phase, self.home, "end")
             await asyncio.to_thread(rollover.archive_generation, self.home, generation)
             await self._disconnect()
@@ -2841,6 +2877,7 @@ class SdkRunner:
             if not await self._connect(resume=None, why="rollover", fatal=False):
                 raise RunnerError("could not start the new session")
             disconnected = False
+            crashpoint("rollover.connected")
         except Exception as exc:  # noqa: BLE001 - a failed rollover must not wedge the runner
             message = "%s: %s" % (type(exc).__name__, exc)
             self.hysteresis.rolled_over()      # no re-request every turn over the threshold
@@ -2863,6 +2900,10 @@ class SdkRunner:
                       "old_session": old_sid, "new_session": None}
             self.inbox.done(row["id"], FAILED, json.dumps(detail))
             self._close_duplicates(row, FAILED, detail)
+            try:
+                rollover.clear_journal(self.home)   # the old session stays the session
+            except OSError:
+                pass
             self.stream.append("rollover", dict(detail, phase="failed"))
             self._recover()
             return False
@@ -2898,6 +2939,10 @@ class SdkRunner:
             if self.machine.state == "rolling_over":
                 self.machine.to("idle", "rolled over")
         self.inbox.done(row["id"], DELIVERED, json.dumps(detail))
+        try:
+            rollover.clear_journal(self.home)
+        except OSError:
+            pass
         self._close_duplicates(row, DELIVERED, detail)
         self.stream.append("rollover", dict(detail, phase="done"))
         if digest_id is not None:

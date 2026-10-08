@@ -23,6 +23,8 @@ POINTS = {
     "job.registered": "cousin-job start: the row is registered, the command not yet forked",
     "job.exited": "a job's runner: the command exited, its row not yet closed",
     "job.artifacts_recorded": "a job's runner: the artifacts are recorded, the row not yet closed",
+    "rollover.handed_off": "a rollover: the handoff is written, the old session not yet ended",
+    "rollover.connected": "a rollover: the new session exists, the generation not yet moved",
 }
 
 

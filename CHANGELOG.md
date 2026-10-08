@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.42.1 - 2026-10-08
+
+### Fixed
+
+- **A runner killed mid-rollover finishes that rollover once** (#286,
+  point 4). Killed after the handoff, the restart resumed the old
+  session and asked it for a second handoff, overwriting the first.
+  Killed after the new session existed, the restart started a fresh
+  session with its own boot, then ran the rollover again with an
+  emergency handoff and a second boot. `data/rollover.json` now records
+  a written handoff until the flip row closes: the restart skips the
+  handoff (`"handoff": "kept"`) and, when the old session was already
+  ended, makes no boot of its own. Shown by real processes killed at
+  `rollover.handed_off` and `rollover.connected`
+  (`tests/runner/test_crash_rollover.py`).
+
 ## 3.42.0 - 2026-10-08
 
 ### Added

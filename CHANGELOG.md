@@ -14,7 +14,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   or decide the CLI had not taken the message, put it back in the
   queue and type it again. The recovery scan now stops where the
   normal read begins, and a message stays claimed while the transcript
-  shows the CLI has written past it.
+  has grown past what the runner has read.
 
 ## 3.37.5 - 2026-10-08
 

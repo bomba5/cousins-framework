@@ -176,7 +176,10 @@ class TestSenderName(HermeticCase):
         toto = CousinConfig.load(self.root / "cousins" / "wren")
         send_message(self.fw, toto, "sam", "ciao", display_name="Totò")
         send_message(self.fw, toto, "sam", "again")
-        self.assertEqual(self._rows(), [("Totò", "ciao"), ("Totò", "again")])
+        import unicodedata
+        send_message(self.fw, toto, "sam", "nfd", display_name=unicodedata.normalize("NFD", "Totò"))
+        rows = [(unicodedata.normalize("NFC", u), m) for u, m in self._rows()]
+        self.assertEqual(rows, [("Totò", "ciao"), ("Totò", "again"), ("Totò", "nfd")])
         for name in ("Nicolò", "Anà"):
             with self.subTest(name=name):
                 with self.assertRaises(SenderRefused):

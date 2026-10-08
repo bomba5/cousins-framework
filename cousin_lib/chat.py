@@ -26,6 +26,7 @@ import json
 import socket
 import sys
 import tomllib
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -83,11 +84,13 @@ def check_sender_name(sender, target, display_name, *, external=False):
     from cousin_lib.server.storage import is_operator, normalize_chat_user
     shown = display_name or sender.name or sender.slug
     if display_name:
-        own = {normalize_chat_user(sender.slug),
-               normalize_chat_user(sender.name or sender.slug)}
+        # NFC both sides: a terminal may send "Totò" decomposed (o + combining
+        # grave) while cousin.toml holds it composed
+        nfc = lambda n: normalize_chat_user(unicodedata.normalize("NFC", n))
+        own = {nfc(sender.slug), nfc(sender.name or sender.slug)}
         # the cousin's own name or slug is its own, whatever its letters
         # (Totò); the plain-name pattern is for a free-form name only
-        mine = isinstance(display_name, str) and normalize_chat_user(display_name) in own
+        mine = isinstance(display_name, str) and nfc(display_name) in own
         if not isinstance(display_name, str) \
                 or (not mine and not _DISPLAY.match(display_name)) \
                 or (not external and not mine):

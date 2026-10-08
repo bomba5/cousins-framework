@@ -186,7 +186,7 @@ other state and for an unknown id); `list --verify` always exits 0.
 `rm ID` drops a row (the file stays): your own as a cousin, any outside
 one.
 
-The console's Jobs page lists the artifacts below the jobs. "check
+The console's Jobs page lists the artifacts in its own tab, beside the jobs (with their count). "check
 files" compares each file's size and mtime with the recorded ones
 without hashing (`unchanged`, `touched` when only the mtime moved,
 `changed`, `missing`), "hash" checks one file's checksum, and "remove"

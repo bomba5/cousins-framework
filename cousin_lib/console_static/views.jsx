@@ -10,6 +10,34 @@ function CousinTag({ slug }) {
 // Sub-agent runs and long-running shell jobs. Live last-N-lines per running
 // job, click to expand to the full log. Backed by /api/jobs (jobs.db).
 function JobsView() {
+  // jobs | artifacts: the artifacts list is a tab of its own, not a panel
+  // under every job row where nobody scrolled to it
+  const [tab, setTab] = React.useState("jobs");
+  const [artifactCount, setArtifactCount] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    apiGet("/api/artifacts").then(d => {
+      if (!cancelled) setArtifactCount(d && d.artifacts ? d.artifacts.length : 0);
+    });
+    return () => { cancelled = true; };
+  }, [tab]);
+  const tabs = (
+    <div className="pane-tabs" role="tablist" data-jobs-tabs style={{ marginBottom: 12 }}>
+      {[["jobs", "jobs"], ["artifacts", "artifacts" + (artifactCount ? ` (${artifactCount})` : "")]]
+        .map(([key, label]) => (
+          <button key={key} className={"btn " + (tab === key ? "active" : "ghost")} role="tab"
+                  aria-selected={tab === key} data-jobs-tab={key}
+                  onClick={() => setTab(key)}>{label}</button>
+        ))}
+    </div>
+  );
+  if (tab === "artifacts") {
+    return <div className="wrap-pad">{tabs}<ArtifactsPanel /></div>;
+  }
+  return <JobsList tabs={tabs} />;
+}
+
+function JobsList({ tabs }) {
   const [jobs, setJobs] = React.useState([]);
   // Default to "last24h" so an idle dashboard shows recent activity
   // instead of an empty 'active' tab when nothing is running NOW.
@@ -128,6 +156,7 @@ function JobsView() {
 
   return (
     <div className="wrap-pad">
+      {tabs}
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 14, fontFamily: "var(--mono)", fontSize: 12, color: "var(--fg-2)" }}
              title="counts reflect the current filters, not all history">
@@ -235,7 +264,6 @@ function JobsView() {
           </div>
         </div>
       )}
-      <ArtifactsPanel />
     </div>
   );
 }
@@ -280,7 +308,11 @@ function ArtifactsPanel() {
         {rows.length > 0 && <button className="btn ghost" onClick={() => load(true)}
           title="size and mtime of each file, no hashing">check files</button>}
       </div>
-      {rows.length === 0 ? <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>none recorded</div> : (
+      {rows.length === 0 ? <div className="muted" style={{ fontSize: 12, marginTop: 6 }} data-artifacts-empty>
+        none recorded yet. A job records what it builds when it is started with
+        artifacts (the job tool's run, or cousin-job start --artifact); a media render
+        records its file; cousin-artifact add records one by hand.
+      </div> : (
         <div className="table-scroll">
           <table className="data">
             <thead><tr><th className="num">#</th><th>by</th><th>where</th><th>sha256</th><th className="num">size</th><th>job</th><th>commit</th><th>now</th><th>note</th><th></th></tr></thead>

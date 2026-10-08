@@ -45,7 +45,7 @@ class JobsLogFollows(unittest.TestCase):
         rule = re.search(r"\.joblog \{[^}]*\}", css).group(0)
         self.assertIn("min-height: 0", rule)
         self.assertIn("overflow: auto", rule)
-        view = _component(_read("views.jsx"), "JobsView")
+        view = _component(_read("views.jsx"), "JobsList")
         self.assertIn("minHeight: 0", view)
 
     def test_a_job_without_a_log_says_how_to_attach_one(self):
@@ -56,3 +56,27 @@ class JobsLogFollows(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JobsArtifactsTab(unittest.TestCase):
+    """The artifacts list is a tab of the Jobs view, not a panel at the
+    bottom of the job list where nobody scrolled to it."""
+
+    def setUp(self):
+        self.view = _component(_read("views.jsx"), "JobsView")
+        self.jobs = _component(_read("views.jsx"), "JobsList")
+
+    def test_the_jobs_view_has_a_jobs_tab_and_an_artifacts_tab(self):
+        self.assertIn("data-jobs-tabs", self.view)
+        self.assertIn('["jobs", "jobs"]', self.view)
+        self.assertIn('"artifacts"', self.view)
+        self.assertIn("<ArtifactsPanel />", self.view)
+
+    def test_the_job_list_no_longer_carries_the_panel(self):
+        self.assertNotIn("<ArtifactsPanel />", self.jobs)
+
+    def test_an_empty_list_says_how_rows_get_there(self):
+        panel = _component(_read("views.jsx"), "ArtifactsPanel")
+        self.assertIn("data-artifacts-empty", panel)
+        self.assertIn("cousin-job start --artifact", panel)
+

@@ -1148,10 +1148,10 @@ class TestRecovery(Case):
         time.sleep(0.3)
         self.assertEqual(len(self.panes[0].typed), 1, "never typed twice")
 
-    def test_an_adopted_row_still_queued_in_the_cli_keeps_its_nonce(self):
-        """A row typed and queued by the CLI behind a turn when the
-        runner restarted is put back with its nonce, never retyped: its turn
-        start takes it, once."""
+    def adopt_a_row_queued_in_the_cli(self, wrap=None):
+        """A row typed and queued by the CLI behind a turn, then the runner
+        restarted: (r2, rec, pane). `wrap` names a start-up step of r2
+        the CLI takes the row just before (a loaded host stretches them)."""
         class Queuing(FakePane):
             holding = False
 
@@ -1176,22 +1176,64 @@ class TestRecovery(Case):
         r = self.runner(pane=one_pane)
         r.start()
         rec = r.enqueue(Item("operator:wren", "chat", "queued in the CLI", sender="Wren"))
-        self.assertTrue(_wait(lambda: shared and shared[0].typed))
+        # queued once the fake's turn thread runs, a moment after the typing
+        self.assertTrue(_wait(lambda: shared and shared[0].holding))
         r.stop(timeout=3)                              # unheld: the pane lives on
         self.hook_record(r, shared[0])
         r2 = self.runner(pane=one_pane)
+        if wrap is not None:
+            real = getattr(r2, wrap)
+
+            def step(*a):
+                self.cli_takes(r2, shared[0])
+                return real(*a)
+            setattr(r2, wrap, step)
+        # the machine starts idle: the worker's first transcript read, not
+        # the state, says the start-up (recovery, the release) is over
+        looping, pump = threading.Event(), r2._pump
+
+        def first_pump():
+            looping.set()
+            return pump()
+        r2._pump = first_pump
         r2.start()
-        self.assertTrue(_wait(lambda: r2.state() == "idle" and r2._path is not None))
+        self.assertTrue(looping.wait(WAIT_S))
+        return r2, rec, shared[0]
+
+    def cli_takes(self, r, pane):
+        """The CLI starts the queued row's turn, and ends it."""
+        self.write(r, {"type": "user", "promptSource": "queued", "promptId": "pq",
+                       "message": {"role": "user", "content": pane.typed[0][0]}})
+        pane.holding = False
+        self.write(r, {"type": "system", "subtype": "turn_duration", "durationMs": 1})
+
+    def assert_taken_once(self, r2, rec, pane):
+        self.assertTrue(_wait(lambda: self.outcome(r2, rec)[1] == "delivered"), self.kinds(r2))
         time.sleep(0.3)
-        first = shared[0].typed[0][0]
-        self.write(r2, {"type": "user", "promptSource": "queued", "promptId": "pq",
-                        "message": {"role": "user", "content": first}})
-        shared[0].holding = False
-        self.write(r2, {"type": "system", "subtype": "turn_duration", "durationMs": 1})
-        self.assertTrue(_wait(lambda: self.outcome(r2, rec)[1] == "delivered"))
-        time.sleep(0.3)
-        self.assertEqual(len(shared[0].typed), 1, "never typed twice")
+        self.assertEqual(len(pane.typed), 1, "never typed twice")
         self.assertNotIn("foreign_turn", self.kinds(r2))
+        self.assertNotIn("duplicate_delivery", self.kinds(r2))
+
+    def test_an_adopted_row_still_queued_in_the_cli_keeps_its_nonce(self):
+        """A row typed and queued by the CLI behind a turn when the
+        runner restarted is put back with its nonce, never retyped: its turn
+        start takes it, once."""
+        r2, rec, pane = self.adopt_a_row_queued_in_the_cli()
+        self.assertIsNone(r2._claims[rec.inbox_id]["taken"], "back under its nonce, untaken")
+        self.cli_takes(r2, pane)
+        self.assert_taken_once(r2, rec, pane)
+
+    def test_a_queued_row_the_cli_takes_while_the_runner_recovers_is_taken_once(self):
+        """The turn start lands after the cursor is read, before the claims
+        are scanned: the scan stops at the cursor, so only _pump starts it."""
+        r2, rec, pane = self.adopt_a_row_queued_in_the_cli(wrap="_recover")
+        self.assert_taken_once(r2, rec, pane)
+
+    def test_a_queued_row_the_cli_takes_before_the_release_is_never_requeued(self):
+        """The turn start lands after the claims are scanned, with the
+        CLI's queue already empty: the grown transcript keeps the row claimed."""
+        r2, rec, pane = self.adopt_a_row_queued_in_the_cli(wrap="_release_adopted_untaken")
+        self.assert_taken_once(r2, rec, pane)
 
     def test_a_stranded_paste_in_an_adopted_pane_is_cleared_never_entered(self):
         class Stranded(FakePane):

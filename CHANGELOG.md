@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.6 - 2026-10-08
+
+### Fixed
+
+- **A tmux cousin's restart no longer delivers a message twice.** A
+  runner that starts up while the CLI is mid-way through taking a
+  message it adopted from the runner before could handle that turn's
+  start twice (once in its recovery scan, once in its normal read),
+  or decide the CLI had not taken the message, put it back in the
+  queue and type it again. The recovery scan now stops where the
+  normal read begins, and a message stays claimed while the transcript
+  has grown past what the runner has read.
+
 ## 3.37.5 - 2026-10-08
 
 ### Fixed

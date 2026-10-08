@@ -3,6 +3,29 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.41.1 - 2026-10-08
+
+### Fixed
+
+- **A job whose starter died before the fork no longer stays running
+  forever** (#286). Its row had a command and no pid, which the
+  lost-job check skips, so it stayed `running` until the 24-hour reap.
+  A row with a command and no pid 10 seconds after it started is now
+  marked `lost` (`[lost: its command was never started]`), and a
+  `notify` job tells its owner.
+
+### Added
+
+- **Crash points** (#286): `crashpoint("name")` SIGKILLs the process
+  when `COUSIN_CRASH_AT` names the point (`name:n` for the nth hit),
+  read once at import. Tests run a real `cousin-job` killed after the
+  row is registered, after the command exited and after its artifacts
+  are recorded, and check the stores: no row stays `running`, the lost
+  notice comes once, a lost job's artifacts still name it.
+- **`test (tmpfs)` in CI**: the suite's three shards with every
+  temporary file on `/dev/shm`, so a race that needs a fast disk shows
+  by design.
+
 ## 3.41.0 - 2026-10-08
 
 ### Added

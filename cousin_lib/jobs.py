@@ -16,6 +16,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
+from cousin_lib.crashpoint import crashpoint
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
 from cousin_lib.sqlite_util import add_column, wal
@@ -617,6 +618,11 @@ def _process_gone(job, groups):
 
 
 LOST_NOTE = " [lost: its process is gone]"
+# A shell row's pid is recorded right after the fork; one that still has
+# none this long after it started was never forked (its starter died in
+# between), so nothing will ever close it (#286, job.registered).
+SPAWN_GRACE_S = 10
+UNSPAWNED_NOTE = " [lost: its command was never started]"
 
 
 def reap_lost():
@@ -631,12 +637,29 @@ def reap_lost():
         return []
     conn = _db()
     try:
+        unspawned = [dict(r) for r in conn.execute(
+            "SELECT * FROM jobs WHERE status='running' AND pid IS NULL"
+            " AND command IS NOT NULL")]
         rows = [dict(r) for r in conn.execute(
             "SELECT * FROM jobs WHERE status='running' AND pid IS NOT NULL")]
-        if not rows:
-            return []
-        groups = _groups()
         marked, lost = [], []
+        now = datetime.now(timezone.utc)
+        for job in unspawned:
+            try:
+                age = (now - datetime.fromisoformat(job["started_at"])).total_seconds()
+            except (TypeError, ValueError):
+                continue
+            if age < SPAWN_GRACE_S:
+                continue
+            cur = conn.execute(
+                "UPDATE jobs SET status='lost', finished_at=?,"
+                " result_summary=COALESCE(result_summary, '') || ?"
+                " WHERE id=? AND status='running' AND pid IS NULL",
+                (_now(), UNSPAWNED_NOTE, job["id"]))
+            if cur.rowcount:
+                marked.append(job["id"])
+                lost.append(dict(job, result_summary=UNSPAWNED_NOTE.strip()))
+        groups = _groups() if rows else None
         for job in rows:
             if not _process_gone(job, groups):
                 continue
@@ -652,7 +675,8 @@ def reap_lost():
     finally:
         conn.close()
     for job in lost:
-        notify_owner(dict(job, status="lost", result_summary=LOST_NOTE.strip()))
+        notify_owner(dict(job, status="lost",
+                          result_summary=job.get("result_summary") or LOST_NOTE.strip()))
     return marked
 
 
@@ -732,10 +756,12 @@ def _spawn_tracked(cmd, log_path, job_id, *, artifacts=(), commit=None, owner=No
         # The rc lands in the store directly - if this write is what
         # fails, the row stays 'running' and `list --active` shows it,
         # which is the loud version of that failure.
+        crashpoint("job.exited")
         status = "done" if rc == 0 else "failed"
         summary = ""
         if rc == 0 and artifacts:
             missing = _record_artifacts(job_id, artifacts, commit, owner)
+            crashpoint("job.artifacts_recorded")
             if missing:
                 # exit 0 without the output it named is not a build to show
                 status = "failed"
@@ -831,6 +857,7 @@ def _cmd_start(args):
         command=" ".join(cmd) if cmd else None,
         notify=bool(getattr(args, "notify", False)),
     )
+    crashpoint("job.registered")
     log_path = args.log
     if cmd:
         # Absolute in the row, so the console finds a relative --log

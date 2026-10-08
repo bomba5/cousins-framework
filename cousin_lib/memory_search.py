@@ -1166,6 +1166,24 @@ def _hit_id(entry):
     return ", id " + entry_id(entry)
 
 
+def _home_rel(home, path, collection, inside):
+    """`path` relative to the home, the way the console's file routes take
+    it: resolved, then as written (a symlinked home resolves elsewhere),
+    then `inside` (the path within its collection) under the
+    collection's own directory. Never `inside` alone: the console would
+    look for it at the home's top and miss."""
+    try:
+        return path.resolve().relative_to(home.resolve()).as_posix()
+    except (ValueError, OSError):
+        pass
+    try:
+        return path.absolute().relative_to(home.absolute()).as_posix()
+    except ValueError:
+        pass
+    under = {"raw": "memory/raw", "memory": "memory", "notes": "notes"}.get(collection)
+    return "%s/%s" % (under, inside) if under else inside
+
+
 def recall_item(home, hit, root=None):
     """One recalled hit for a reader (the reasoning pane): `name`,
     `collection`, `rel` the way the console's memory search gives it
@@ -1182,11 +1200,8 @@ def recall_item(home, hit, root=None):
         item["rel"] = _hit_relpath(home, hit, root)
         item["layer"] = "harness"
     else:
-        try:
-            item["rel"] = Path(path).resolve().relative_to(home.resolve()).as_posix() \
-                + ("#" + line if line else "")
-        except (ValueError, OSError):
-            item["rel"] = _hit_relpath(home, hit, root)
+        inside = _hit_relpath(home, dict(hit, path=path), root)
+        item["rel"] = _home_rel(home, Path(path), collection, inside) + ("#" + line if line else "")
     if hit.get("similarity") is not None:
         item["similarity"] = round(float(hit["similarity"]), 4)
     if collection == "raw":

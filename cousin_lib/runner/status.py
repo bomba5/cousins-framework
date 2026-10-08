@@ -133,21 +133,25 @@ def _offset(path, *, tail=None, after=None):
 
 
 def status(home):
-    """{"alive", "state", "since", "session", "kind", "pid", "unsupported"}.
-    Everything but `alive` is None (unsupported: []) when no stream exists."""
+    """{"alive", "state", "since", "session", "kind", "pid", "unsupported",
+    "model"}. Everything but `alive` is None (unsupported: []) when no
+    stream exists. `model` is what the session reported it runs on (the
+    SDK's init), so a cousin on its lane's default still names one."""
     from cousin_lib.runner.main import is_running
     out = {"alive": is_running(home), "state": None, "since": None, "session": None,
-           "kind": None, "pid": None, "unsupported": []}
+           "kind": None, "pid": None, "unsupported": [], "model": None}
     path = primary_stream(home)
     if path is None:
         return out
     out["session"] = path.stem
     try:
         for event in _events(_head(path)):
-            if event.get("kind") == "runner":
-                payload = event.get("payload") or {}
+            payload = event.get("payload") or {}
+            if event.get("kind") == "runner" and out["kind"] is None:
                 out.update(kind=payload.get("kind"), pid=payload.get("pid"),
                            unsupported=list(payload.get("unsupported") or []))
+            elif event.get("kind") == "session_init" and payload.get("model"):
+                out["model"] = payload["model"]
                 break
         for event in _events(text for _start, text in _backwards(path)):
             if event.get("kind") == "state":

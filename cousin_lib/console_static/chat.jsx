@@ -1477,7 +1477,8 @@ function runnerEventLine(ev) {
 // node becomes an element, through a fixed tag list, so model and tool
 // output (untrusted) can never inject markup. Colors live in styles.css
 // (`.rp-*`) on the theme variables.
-const RP_TAGS = { span: 1, strong: 1, em: 1, code: 1, pre: 1, div: 1, a: 1 };
+const RP_TAGS = { span: 1, strong: 1, em: 1, code: 1, pre: 1, div: 1, a: 1,
+                  table: 1, thead: 1, tbody: 1, tr: 1, th: 1, td: 1 };
 const rpSafeHref = (u) => /^https?:\/\//i.test(String(u || "")) ? String(u) : null;
 const rpCut = (s, n) => { s = String(s == null ? "" : s); return s.length > n ? s.slice(0, n - 3) + "..." : s; };
 const rpSpan = (cls, text) => ({ tag: "span", cls, children: [String(text)] });
@@ -1589,6 +1590,14 @@ function mdInline(text) {
 // parsed; the rest follows as plain text, under a marker (.rp-md-rest in
 // styles.css: a thin rule and "raw text from here").
 const RP_MD_MAX = 20000;
+const RP_MD_TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+// One table row's cells: the outer pipes dropped, split on the pipes
+// that are not escaped (\|), each cell trimmed.
+function rpMdCells(line) {
+  const t = line.trim().replace(/^\|/, "").replace(/(^|[^\\])\|$/, "$1");
+  return t.split(/(?<!\\)\|/).map(c => c.trim().replace(/\\\|/g, "|"));
+}
+
 function renderMarkdownLite(text) {
   const all = String(text == null ? "" : text);
   if (!all) return [];
@@ -1607,6 +1616,16 @@ function renderMarkdownLite(text) {
       const kids = (lang === "diff" || looksLikeDiff(code)) ? renderDiff(code)
         : lang === "json" ? highlightJson(code) : [code];
       out.push({ tag: "pre", cls: "rp-md-pre", children: kids });
+      continue;
+    }
+    // a GFM table: a pipe row, a separator row (|---|:--:|), then rows
+    if (/\|/.test(line) && i + 1 < lines.length && RP_MD_TABLE_SEP.test(lines[i + 1])) {
+      const head = rpMdCells(line), body = [];
+      for (i += 2; i < lines.length && /\|/.test(lines[i]) && lines[i].trim(); i++) body.push(rpMdCells(lines[i]));
+      const row = (cells, tag) => ({ tag: "tr", children: cells.map(c => ({ tag, children: mdInline(c) })) });
+      out.push({ tag: "div", cls: "rp-md-table", children: [{ tag: "table", children: [
+        { tag: "thead", children: [row(head, "th")] },
+        { tag: "tbody", children: body.map(r => row(r, "td")) }] }] });
       continue;
     }
     let m;
@@ -2470,7 +2489,7 @@ function RpRecall({ recall, slug }) {
     <div className="rp-recall">
       <div className="rp-recall-head">Recalled for this message</div>
       {items.length ? items.map((it, i) => <RpRecallItem key={i} item={it} slug={slug} />)
-        : <div className="rp-recall-src">{recall.text || recall.hits + " hits (this runner did not record which)"}</div>}
+        : <div className="rp-recall-src">{recall.text || recall.hits + " hits (not listed: an older runner did not record them)"}</div>}
     </div>
   );
 }

@@ -217,6 +217,16 @@ def effective_runtime(config, defaults):
             "effort": config.effort or defaults["default_effort"]}
 
 
+def _with_reported_model(runtime, runner):
+    """A runner cousin with no model of its own runs on its lane's
+    default: name the model its session reported (`modelDefault` true)
+    rather than nothing."""
+    out = dict(runtime, modelDefault=False)
+    if not out.get("model") and runner and runner.get("model"):
+        out.update(model=runner["model"], modelDefault=True)
+    return out
+
+
 _UNREAD = object()
 
 
@@ -311,7 +321,7 @@ def fleet_row(server, config, defaults=None, snap=_UNREAD, plugins=None):
         "memoryScope": config.memory_scope,
         "heartbeat": config.heartbeat_seconds,
         "flipAt": config.flip_at,
-        **effective_runtime(config, defaults),
+        **_with_reported_model(effective_runtime(config, defaults), runner),
         "hidden": bool(cousin.get("hidden", False)),
         "status": status,
         "attention": attention,

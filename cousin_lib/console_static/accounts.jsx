@@ -65,7 +65,7 @@ function AccountOpStages({ op }) {
       <div className="longop-hdr">
         <StatePill state={op.status} />
         <span className="mono">{op.kind}</span>
-        {op.finished_at && <span className="muted">{fmtAgo(Date.now() / 1000 - op.finished_at)} ago</span>}
+        {op.finished_at && <span className="muted">{fmtAgo(Date.now() / 1000 - op.finished_at)}</span>}
       </div>
       <ol className="longop-stages">
         {(op.stages || []).map(s => (

@@ -198,7 +198,8 @@ prompt and the tool list it started with (the CLI's prompt snapshot), so when
 either changed since then (the law, its identity files, your rules, the
 registry or `.mcp.json`), the runner rolls it over after its first
 [turn](glossary.md#turn) (which still runs with the old ones), and the next
-session gets the new ones. A new release alone does not. The console's card and inspector have
+session gets the new ones. A release's version number alone does not; a
+release that changes the contract text or the shipped registry does, once. The console's card and inspector have
 the same buttons. See [commands](commands.md#running-cousins) and
 [runners](reference/runners.md).
 

@@ -23,11 +23,13 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   runner asks for a rollover: a handoff, then a fresh session that
   records the new snapshot. A lost resume starts fresh as before. The
   first turn after such a resume still runs with the old snapshot; the
-  rollover follows it. A release alone moves no snapshot.
+  rollover follows it. A release's version number alone moves no
+  snapshot; a release that changes the contract text or the shipped
+  registry (after `--apply-homes`) rolls sdk sessions over once.
 - **The upgrade to this version rolls every sdk session over once.** No
   session file on file has a record yet, so each sdk cousin (side
-  sessions included) hands off and boots fresh after its first turn: on
-  a fleet of 13, 13 handoffs and 13 boots. A switch from `tmux` to `sdk`
+  sessions included) hands off and boots fresh after its first turn:
+  one handoff and one boot per sdk cousin and per side session. A switch from `tmux` to `sdk`
   rolls over once too: the tmux session's file has no record, and its
   recorded tools were the tmux kind's.
 

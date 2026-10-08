@@ -193,6 +193,21 @@ class TestRemovedKeysAtStart(HermeticCase):
         self.assertTrue(all(c["line"] for c in config))
         self.assertEqual(events[0]["kind"], "runner")          # the head stays the head
 
+    def test_the_state_it_starts_in_is_on_the_stream(self):
+        """A machine reports changes only: the state a runner starts in is
+        written once at start, so a runner that waits idle reads as idle
+        to the fleet (runner/status) and the pane, not as starting."""
+        import json as _json
+        from cousin_lib.runner import status
+        home = temp_home(self, runner="fake")
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 0, err)
+        events = [_json.loads(line) for line in status.primary_stream(home).read_text().splitlines()]
+        states = [e["payload"] for e in events if e["kind"] == "state"]
+        self.assertEqual(states[0], {"from": None, "to": "idle", "detail": "started"})
+        self.assertEqual(events[0]["kind"], "runner")
+        self.assertIsNotNone(status.status(home)["state"])
+
     def test_a_clean_cousin_says_nothing(self):
         home = temp_home(self, runner="fake")
         rc, err = _run(["--home", str(home), "--once"])

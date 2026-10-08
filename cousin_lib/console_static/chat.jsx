@@ -1457,7 +1457,7 @@ function runnerEventLine(ev) {
   const p = ev.payload || {};
   const cut = (s, n) => { s = String(s == null ? "" : s); return s.length > n ? s.slice(0, n - 3) + "..." : s; };
   switch (ev.kind) {
-    case "state": return p.from + " -> " + p.to + (p.detail ? " (" + p.detail + ")" : "");
+    case "state": return (p.from ? p.from + " -> " : "") + p.to + (p.detail ? " (" + p.detail + ")" : "");
     case "turn_start": return (p.thread_id || "") + ": " + cut((p.bodies || [""])[0], 200);
     case "text": case "user": return String(p.text || "");
     case "thinking": return p.text ? p.text + (p.truncated ? " [truncated]" : "") : "(" + p.length + " chars, not recorded)";

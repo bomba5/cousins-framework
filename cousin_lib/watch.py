@@ -45,7 +45,9 @@ def summary(kind, p):
     p = p if isinstance(p, dict) else {}
     if kind == "state":
         detail = p.get("detail")
-        return "%s -> %s%s" % (p.get("from"), p.get("to"), " (%s)" % detail if detail else "")
+        # the state a runner starts in has no `from` (runner/main.py)
+        before = "%s -> " % p["from"] if p.get("from") else ""
+        return "%s%s%s" % (before, p.get("to"), " (%s)" % detail if detail else "")
     if kind == "turn_start":
         bodies = p.get("bodies") or [""]
         return "%s: %s" % (p.get("thread_id"), _cut(bodies[0], WIDTH - 20))

@@ -23,6 +23,7 @@ class TestFormat(unittest.TestCase):
         cases = [
             ("state", {"from": "idle", "to": "running", "detail": "turn"},
              "idle -> running (turn)"),
+            ("state", {"from": None, "to": "idle", "detail": "started"}, " idle (started)"),
             ("thinking", {"length": 5, "text": "hmm.."}, "hmm.."),
             ("thinking", {"length": 5}, "(5 chars, not recorded)"),
             ("tool", {"name": "Bash", "input": {"command": "ls"}}, 'Bash {"command": "ls"}'),

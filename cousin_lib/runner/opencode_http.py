@@ -172,10 +172,13 @@ def kill_marked(marker, *, exclude=()):
     """SIGKILL every process of this user whose environment carries this
     start's marker (what a server started, in whatever session), pass
     after pass until one kills nothing (one may start another while a
-    pass runs), at most MARK_PASSES; the pids. It misses what dropped the
-    marker (env -i, exec -c), what made its environment unreadable
-    (PR_SET_DUMPABLE 0), and what another manager started for it (tmux,
-    systemd-run, at): a Known gap."""
+    pass runs), at most MARK_PASSES; the pids, each once. A pid this
+    sweep already signalled that is still listed (not yet scheduled to
+    exit, or in an uninterruptible sleep) is dying, not new: it is not
+    killed or counted again. It misses what dropped the marker (env -i,
+    exec -c), what made its environment unreadable (PR_SET_DUMPABLE 0),
+    and what another manager started for it (tmux, systemd-run, at): a
+    Known gap."""
     if not marker:
         return []
     entry = ("%s=%s" % (MARKER_ENV, marker)).encode()
@@ -183,7 +186,7 @@ def kill_marked(marker, *, exclude=()):
     for _ in range(MARK_PASSES):
         this_pass = []
         for pid in _marked_pids(entry):
-            if pid in exclude:
+            if pid in exclude or pid in killed:
                 continue
             try:
                 os.kill(pid, signal.SIGKILL)

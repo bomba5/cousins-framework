@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.36.5 - 2026-10-08
+
+### Fixed
+
+- **The marker sweep kills a dying process once.** A process SIGKILLed
+  in one pass but not yet scheduled to exit (a loaded or stalled CPU,
+  or an uninterruptible sleep) was still listed in the next, so
+  `kill_marked` signalled and counted it again, spent every pass on
+  it, and `reap_leftover` reported its pid up to five times.
+  A pid the sweep already signalled is now dying, not new: it is not
+  killed or counted again, and a pass that finds only such pids ends
+  the sweep.
+
 ## 3.36.4 - 2026-10-08
 
 ### Fixed

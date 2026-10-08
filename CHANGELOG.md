@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.41.0 - 2026-10-08
+
+### Added
+
+- **The tool gate keeps a repository's git hooks in force** (#287).
+  Before any policy.toml pattern, and with no policy.toml at all, the
+  framework denies `git commit` or `git push` with `--no-verify`,
+  `git commit -n` and a command-line `core.hooksPath` override, on
+  every lane (the opencode plugin gets the same rules first in its
+  rendered policy). A repository's pre-push hook is then a gate a
+  cousin cannot step around; the fleet repository's own hook and CI
+  are the other half of the item.
+
 ## 3.40.1 - 2026-10-08
 
 ### Docs

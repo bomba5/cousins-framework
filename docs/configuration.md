@@ -1367,6 +1367,13 @@ present but malformed (bad TOML, an unknown key, a non-list value, an
 uncompilable regex) stops the runner at start, exit 2, naming the key. See
 `templates/policy.toml.example` for a documented starting point.
 
+Before any of the file's patterns, the framework applies its own command
+rules, with or without a policy.toml, on every lane: a repository's git
+hooks are its gate, so `git commit` or `git push` with `--no-verify`,
+`git commit -n`, and `git -c core.hooksPath=...` are denied, the reason
+starting `framework:`. A commit message that only mentions the flag is
+refused too; write it to a file and use `git commit -F`.
+
 What it is and is not:
 
 - The patterns are a guardrail, not a sandbox. They stop a command line you

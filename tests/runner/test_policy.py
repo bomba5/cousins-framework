@@ -364,3 +364,33 @@ class TestParseFromText(HermeticCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFrameworkHookBypass(unittest.TestCase):
+    """#287: a repository's git hooks are its gate; with or without a
+    policy.toml, a cousin's command that steps around them is denied."""
+
+    def decide(self, command, policy=None):
+        from cousin_lib.runner.policy import Policy
+        return (policy or Policy()).decide("Bash", {"command": command})
+
+    def test_hook_bypasses_are_denied(self):
+        for cmd in ("git commit --no-verify -m wip",
+                    "cd repo && git push --no-verify origin main",
+                    "git -C /srv/repo commit -n -m wip",
+                    "git -c core.hooksPath=/dev/null push",
+                    "git -c core.hookspath= commit -m x"):
+            decision, reason = self.decide(cmd)
+            self.assertEqual(decision, "deny", cmd)
+            self.assertTrue(reason.startswith("framework:"), reason)
+
+    def test_ordinary_git_is_allowed(self):
+        for cmd in ("git commit -m 'fix'", "git push origin main", "git push -n origin main",
+                    "git log --no-walk", "git config core.hooksPath .githooks",
+                    "echo --no-verify; git commit -m x"):
+            self.assertEqual(self.decide(cmd)[0], "allow", cmd)
+
+    def test_the_own_tools_are_not_command_lines(self):
+        from cousin_lib.runner.policy import Policy
+        self.assertEqual(Policy().decide("mcp__cousin__job", {"command": "git commit --no-verify"})[0],
+                         "allow")

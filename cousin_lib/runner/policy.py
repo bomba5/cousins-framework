@@ -35,6 +35,22 @@ FILE = "policy.toml"
 # not a command line, so the command patterns never look at them.
 OWN_TOOL_PREFIX = "mcp__cousin__"
 KEYS = ("deny_tools", "deny_bash_patterns", "ask", "outbound_filter")
+# The framework's own command rules, before any policy.toml (#287): a git
+# hook is the repository's gate, and a cousin may not step around it. Each
+# is (pattern, reason); the patterns stay JavaScript-compatible (no
+# lookbehind) because the opencode plugin applies them too. A commit
+# message that only mentions the flag is refused as well: write it to a
+# file and use `git commit -F`.
+FRAMEWORK_BASH_DENY = (
+    (re.compile(r"\bgit\b[^;&|\n]*\s(commit|push)\b[^;&|\n]*\s--no-verify\b"),
+     "framework: git --no-verify skips the repository's hooks, which are its gate"
+     " (a message that only mentions it: use git commit -F <file>)"),
+    (re.compile(r"\bgit\b[^;&|\n]*\scommit\b[^;&|\n]*\s-n\b"),
+     "framework: git commit -n is --no-verify, which skips the repository's hooks"),
+    (re.compile(r"\bgit\b[^;&|\n]*\s-c\s*core\.hooks[Pp]ath\s*="),
+     "framework: overriding core.hooksPath on the command line steps around the"
+     " repository's hooks"),
+)
 # Every generation ends through this tool: a policy that denies it (or
 # asks for it, which is enforced as a deny) leaves a cousin that cannot
 # hand over. The console refuses such an edit (handoff_blockers).
@@ -161,6 +177,9 @@ class Policy:
             return "deny", "%s: deny_tools lists %s" % (FILE, hit)
         command = tool_input.get("command") if isinstance(tool_input, dict) else None
         if isinstance(command, str) and not tool_name.startswith(OWN_TOOL_PREFIX):
+            for rx, reason in FRAMEWORK_BASH_DENY:
+                if rx.search(command):
+                    return "deny", reason
             for rx in self.deny_bash_patterns:
                 if rx.search(command):
                     return "deny", "%s: deny_bash_patterns %r matches" % (FILE, rx.pattern)

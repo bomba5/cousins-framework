@@ -132,6 +132,18 @@ class TestRollover(RolloverCase):
         self.assertGreaterEqual(self.clients[0].interrupts, 1)         # the turn was interrupted
         self.assertEqual(len(self.clients), 2)
 
+    def test_a_result_before_the_requests_echo_does_not_end_the_handoff(self):
+        # on resume the CLI runs a turn of its own (an orphaned task's
+        # notice); its result is still unread when the request is written
+        r = self.build(); r.start(); self.work(r)
+        self.clients[0].stream.append(result(session="s-1"))
+        out = r.rollover("the system prompt or the tools changed")
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(out["handoff"], "clean")
+        handoff = (self.home / "data" / "handoff.md").read_text()
+        self.assertNotIn("degraded_state: true", handoff)
+        self.assertIn("Reconcile March", handoff)
+
     def test_rows_queued_across_a_rollover_each_run_exactly_once(self):
         r = self.build(handoff_delay=0.5); r.start()
         before = self.work(r, "before")

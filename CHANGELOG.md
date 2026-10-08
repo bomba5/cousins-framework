@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.42.4 - 2026-10-08
+
+### Fixed
+
+- **A rollover's handoff is no longer cut short by a result from
+  before its request.** On resume the CLI can run a turn of its own (the
+  notice for background tasks the old process left behind); its result
+  was still unread when the handoff request went in, and the exchange
+  took it as the answer within a fraction of a second, so the generation
+  ended on an emergency handoff. The request is now answered by the
+  first result after its echo, the rule every turn already follows.
+
 ## 3.42.3 - 2026-10-08
 
 ### Changed

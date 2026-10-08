@@ -2708,36 +2708,45 @@ class SdkRunner:
         """One turn on the dying session asking for the handoff: write the
         request, read to its result. Returns the tool's summary, or None
         when the model answered without calling it. The request is not an
-        inbox row: the durable row is the `flip` row itself."""
+        inbox row: the durable row is the `flip` row itself. As in a turn,
+        the request is answered by the first result after its echo: a
+        result before it ends a CLI turn of its own (one the CLI ran on
+        resume for an orphaned task's notice), so the read goes on."""
         row = {"id": -1, "thread_id": "system", "source": "flip", "sender": "runner",
                "body": rollover.handoff_request_text(reason), "attachments": [],
                "context": "", "message_id": None}
         self._sent = []
         self._auth_turn = None
-        await self._send(sdk, row, [])
-        responses = self._client.receive_response()
-        it = responses.__aiter__()
-        try:
-            while True:
-                msg = await _next_by(it, time.monotonic() + self.handoff_deadline_s,
-                                     "handoff deadline")
-                if msg is _END:
-                    raise RunnerError("stream ended during the handoff")
-                self._record(sdk, msg)
-                if isinstance(msg, sdk.ResultMessage) and self._auth_turn is None:
-                    self._auth_turn = auth.result_signal(
-                        bool(msg.is_error), getattr(msg, "api_error_status", None),
-                        getattr(msg, "result", None), getattr(msg, "errors", None))
-                if self._auth_turn is not None:
-                    return None     # no handoff from a session that cannot answer
-                if isinstance(msg, sdk.ResultMessage):
-                    await self._record_usage(msg)      # the handoff turn costs too
-                    if not msg.is_error:
-                        self._note_good_result()       # a good result proves the login
-                    break
-        finally:
-            await _aclose(responses)
-        return self.handoff_box.summary
+        open_rows, echoed = [], set()
+        await self._send(sdk, row, open_rows)
+        deadline = time.monotonic() + self.handoff_deadline_s
+        while True:
+            responses = self._client.receive_response()
+            it = responses.__aiter__()
+            try:
+                while True:
+                    msg = await _next_by(it, deadline, "handoff deadline")
+                    if msg is _END:
+                        raise RunnerError("stream ended during the handoff")
+                    self._record(sdk, msg)
+                    if isinstance(msg, sdk.UserMessage):
+                        if self._match_echo(sdk, msg, open_rows, echoed) is not None:
+                            echoed.add(row["id"])
+                    if isinstance(msg, sdk.ResultMessage) and self._auth_turn is None:
+                        self._auth_turn = auth.result_signal(
+                            bool(msg.is_error), getattr(msg, "api_error_status", None),
+                            getattr(msg, "result", None), getattr(msg, "errors", None))
+                    if self._auth_turn is not None:
+                        return None     # no handoff from a session that cannot answer
+                    if isinstance(msg, sdk.ResultMessage):
+                        await self._record_usage(msg)      # the handoff turn costs too
+                        if not msg.is_error:
+                            self._note_good_result()       # a good result proves the login
+                        break
+            finally:
+                await _aclose(responses)
+            if echoed or self.handoff_box.summary is not None:
+                return self.handoff_box.summary
 
     async def _ask_handoff(self, reason):
         """'clean' when the handoff tool answered in time; 'emergency' when

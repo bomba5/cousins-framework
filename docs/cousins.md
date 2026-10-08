@@ -278,7 +278,7 @@ Ways to trigger one:
 - `cousin-flip` by hand, or the flip button in the console (now or in 1, 5 or
   15 minutes; a timed flip warns the cousin at T-5m, T-1m and T-30s).
 - A daily flip: every cousin gets one, at the install's `default_flip_at` (04:00 unless `config/harness.toml` says otherwise). Set `[lifecycle] flip_at = "HH:MM"` in `cousin.toml` to move this one, or `"never"` to opt it out; `cousin-loops flips` shows each cousin's time and where it comes from. The loops
-  daemon runs it once a day after that time, one cousin per tick; a cousin whose session started after that time is not flipped that day.
+  daemon runs it once a day after that time, one cousin per tick; a cousin whose session started after that time is not flipped that day, nor one whose generation was idle (only upkeep since it started) and whose prompt and tools have not changed.
 - Context pressure: the runner rolls over on its own at
   `[agent] rollover_at_percent` of the model's context (the `sdk` and
   `opencode` kinds; [configuration](configuration.md#agent-runner)).

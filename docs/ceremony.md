@@ -141,10 +141,11 @@ session's state digest. A rollover happens:
   pass;
 - once a day at the cousin's flip time (the daily flip), unless its session
   started after that time that day, or the generation was idle: nothing
-  but heartbeats and its own boot since it started (no chat, peer,
-  meeting, loop or self-set schedule). An idle generation keeps its
-  session, so an edit to its rules waits for its next work, or for a
-  flip by hand;
+  but upkeep since it started (heartbeats, its boot, a flip, memory
+  proposals; no chat, peer, meeting, loop, job notice or self-set
+  schedule). An idle generation keeps its session unless its recorded
+  system prompt or tools changed since (then it flips, so a new rule
+  reaches it); the daemon prints each skip;
 - when you flip it by hand, or reincarnate or transplant it.
 
 **Without it.** A session grows until the agent CLI compacts it itself, which

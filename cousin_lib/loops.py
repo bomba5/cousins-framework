@@ -729,6 +729,24 @@ def _walk_timed_flips(state, deliver, do_flip, now, report):
         con.close()
 
 
+def _snapshot_moved(home, root):
+    """True when the session on file recorded a prompt snapshot that is
+    not what a start would serve now (a new rule, a law line, a registry
+    change): an idle generation is flipped anyway, or the edit never
+    reaches it (#33, #280). A session with no record (another kind, an
+    old file) is not moved."""
+    try:
+        recorded = json.loads((Path(home) / "data" / "runner-session.json").read_text()).get(
+            "snapshot")
+    except (OSError, ValueError, AttributeError):
+        return False
+    if not recorded:
+        return False
+    from cousin_lib.runner import snapshot
+    now = snapshot.fingerprint(home, root)
+    return now is not None and now != recorded
+
+
 def _fire_daily_flips(state, do_flip, is_alive, now, report):
     """flip_at drivers: late-once per day, and AT MOST ONE flip per
     tick - the tick cadence is the stagger that keeps boot packets
@@ -742,10 +760,11 @@ def _fire_daily_flips(state, do_flip, is_alive, now, report):
     (a cousin spawned or started since), or none at all, is younger
     than the flip point: its day is marked done, not flipped seconds
     after its first turn (boot.generation_started). An idle generation
-    (upkeep.generation_idle: nothing but heartbeats and its own boot
-    since it started) keeps its session too: the flip would cost a
-    handoff and a boot and carry nothing (#280). It is reported in
-    `idle_flips` and flips at the first daily point after it works."""
+    (upkeep.generation_idle: nothing but upkeep rows since it started)
+    keeps its session too: the flip would cost a handoff and a boot and
+    carry nothing (#280), unless its recorded prompt snapshot moved, so a
+    new rule still reaches it. It is reported in `idle_flips` and printed
+    by the daemon, and flips at the first daily point after it works."""
     from cousin_lib import boot, upkeep
     if report["flips"]:
         return  # a timed flip already used this tick's slot
@@ -769,7 +788,8 @@ def _fire_daily_flips(state, do_flip, is_alive, now, report):
                     or not is_alive(config.slug)):
                 state["last_flips"][config.slug] = str(when.date())
                 continue
-            if upkeep.generation_idle(config.home, started):
+            if (upkeep.generation_idle(config.home, started)
+                    and not _snapshot_moved(config.home, framework.root)):
                 state["last_flips"][config.slug] = str(when.date())
                 report.setdefault("idle_flips", []).append(config.slug)
                 continue
@@ -1450,6 +1470,9 @@ def loops_main(argv=None):
             for slug, out in report.get("dreamed", []):
                 print("cousin-loops: dreaming %s: %s" % (slug, json.dumps(out)),
                       file=sys.stderr)
+            for slug in report.get("idle_flips", []):
+                print("cousin-loops: daily flip skipped for %s: idle since its"
+                      " generation started" % slug, file=sys.stderr)
             for error in report["errors"]:
                 print("cousin-loops: %s" % error, file=sys.stderr)
             count += 1

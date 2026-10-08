@@ -27,7 +27,6 @@ the stream for the next turn to misread.
 """
 import asyncio
 import collections
-import hashlib
 import json
 import os
 import threading
@@ -767,26 +766,12 @@ class SdkRunner:
         self._saved, self._saved_lane = session_id, lane
 
     def _snapshot_fingerprint(self):
-        """A hash of what the CLI's snapshot freezes (prompt.system_prompt_option):
-        the composed system prompt (law, contract, identity, the operator's
-        rules), the registry's tools and the cousin's own MCP servers. The
-        snapshot is recorded on a session's first request and sent on every
-        resume, so a session started before an edit to any of them keeps the
-        old text and schemas. The prompt is hashed with the version held
-        fixed: a release alone moves only the contract's header line. None
-        when it cannot be built: never a failed start."""
-        try:
-            from cousin_lib.runner import prompt
-            servers = self._user_mcp.servers if self._user_mcp is not None else {}
-            registry = (self.tool_context.registry
-                        or tools.resolve_registry(self.home, self.root)[0])
-            text = json.dumps({"prompt": prompt.compose_system_prompt(
-                                   self.home, root=self.root, registry=registry, version="0"),
-                               "tools": tools.tool_definitions(registry),
-                               "mcp": servers}, sort_keys=True, default=str)
-        except Exception:  # noqa: BLE001 - a fingerprint must never fail a start
-            return None
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        """snapshot.fingerprint of what this runner serves: its registry
+        and the MCP servers it loaded at start."""
+        from cousin_lib.runner import snapshot
+        return snapshot.fingerprint(
+            self.home, self.root, registry=self.tool_context.registry,
+            servers=self._user_mcp.servers if self._user_mcp is not None else None)
 
     def _session_generation(self):
         """The generation the session file records: the home's current one.

@@ -753,7 +753,7 @@ account = "metered"
 
 | key | default | meaning |
 |---|---|---|
-| `flip_at` | the install's `default_flip_at` (`04:00`) | `"HH:MM"`. The loops daemon flips this cousin once a day at or after that time, unless its session started after that time that day (then the next day's time is its first). `"never"` (or `"off"`, `"none"`, `"no"` or `""`, in any case) opts this cousin out. Leave it out and the install default applies, so a new cousin flips without being configured. `cousin-loops flips` prints the effective time and where it came from. |
+| `flip_at` | the install's `default_flip_at` (`04:00`) | `"HH:MM"`. The loops daemon flips this cousin once a day at or after that time, unless its session started after that time that day (then the next day's time is its first) or its generation was idle with an unchanged prompt and tool list ([ceremony](ceremony.md#rollover-and-the-daily-flip)). `"never"` (or `"off"`, `"none"`, `"no"` or `""`, in any case) opts this cousin out. Leave it out and the install default applies, so a new cousin flips without being configured. `cousin-loops flips` prints the effective time and where it came from. |
 
 `[[loops]]`, one table per loop:
 

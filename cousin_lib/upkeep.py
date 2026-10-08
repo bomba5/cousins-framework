@@ -79,7 +79,10 @@ def generation_idle(home, since):
     path = Path(home) / "data" / "inbox.db"
     if not path.exists():
         return False
-    conn = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+    try:
+        conn = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+    except sqlite3.Error:
+        return False
     try:
         rows = conn.execute("SELECT source, substr(body, 1, 40) FROM inbox"
                             " WHERE created_at >= ?", (float(since),)).fetchall()

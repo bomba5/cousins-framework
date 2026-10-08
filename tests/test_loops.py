@@ -503,6 +503,30 @@ class TestFlipDrivers(LoopsCase):
         self.assertEqual(report["idle_flips"], ["wren"])
         self.assertEqual(self._flipped_on("wren"), str(date.today()))
 
+    def test_an_idle_generation_whose_snapshot_moved_is_flipped(self):
+        # a new rule since the session started: the flip is how it reaches it
+        import json as _json
+        home = self._flip_cousin("wren")
+        self._seed_inbox(home, "loop", "Context heartbeat. nothing new", self._at(1))
+        (home / "data" / "runner-session.json").write_text(
+            _json.dumps({"session_id": "s-1", "snapshot": "0123456789abcdef"}))
+        report = self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, ["wren"])
+        self.assertEqual(report["idle_flips"], [])
+
+    def test_an_idle_generation_whose_snapshot_holds_keeps_its_session(self):
+        import json as _json
+        from cousin_lib.runner import snapshot
+        home = self._flip_cousin("wren")
+        self._seed_inbox(home, "loop", "Context heartbeat. nothing new", self._at(1))
+        current = snapshot.fingerprint(home, home.parent.parent)
+        self.assertIsNotNone(current)
+        (home / "data" / "runner-session.json").write_text(
+            _json.dumps({"session_id": "s-1", "snapshot": current}))
+        report = self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, [])
+        self.assertEqual(report["idle_flips"], ["wren"])
+
     def test_a_generation_that_worked_is_flipped(self):
         home = self._flip_cousin("wren")
         self._seed_inbox(home, "loop", "Context heartbeat. nothing new", self._at(1))

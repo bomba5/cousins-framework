@@ -14,7 +14,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   tick reports it in `idle_flips`; the generation flips at the first
   daily point after it does any work. A flip by hand, a timed flip and
   a rollover on context pressure are unchanged. `upkeep.generation_idle`
-  is the test; a missing or unreadable inbox is never idle.
+  is the test; a missing or unreadable inbox is never idle. An idle
+  generation whose recorded prompt snapshot no longer matches (a new
+  rule, a law line, a registry change) flips anyway, so the edit reaches
+  it; the fingerprint is `runner/snapshot.fingerprint`, shared with the
+  runner. The daemon prints each skip.
 ## 3.37.12 - 2026-10-08
 
 ### Fixed

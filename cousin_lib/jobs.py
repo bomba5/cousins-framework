@@ -721,7 +721,7 @@ def _record_artifacts(job_id, paths, commit, owner):
             row = artifacts.add(path, created_by=owner or "", job_id=job_id, git_commit=commit)
             _log_line("[cousin-job] artifact #%s recorded: %s sha256 %s"
                       % (row.get("id"), row.get("path"), str(row.get("sha256", ""))[:12]))
-        except (ValueError, OSError, sqlite3.Error) as err:
+        except Exception as err:  # noqa: BLE001 - any failure is named, and the row still closes
             missing.append("%s: %s" % (path, err))
             _log_line("[cousin-job] artifact NOT recorded: %s: %s" % (path, err))
     return missing
@@ -769,9 +769,10 @@ def _cmd_start(args):
                   " the home, outside .secrets)" % (args.home_log, err),
                   file=sys.stderr)
             return 2
-    # An artifact names a file the command will build: absolute now, from
-    # where this runs (the command runs here too), and only with a command
-    # to build it.
+    # An artifact names a file the command will build: absolute now, a
+    # relative path from where this runs, which is where the command runs
+    # and builds (the job tool launches from the cousin's home); and only
+    # with a command to build it.
     artifacts = [os.path.abspath(os.path.expanduser(p)) for p in (getattr(args, "artifact", None) or [])]
     if (artifacts or getattr(args, "artifact_commit", None)) and not cmd:
         print("cousin-job: --artifact needs a command that builds it", file=sys.stderr)
@@ -975,9 +976,10 @@ def _start_options(p, *, help_text=False):
     p.add_argument("--json", action="store_true")
     if help_text:
         p.add_argument("--artifact", action="append", metavar="PATH",
-                       help="a file the command builds (repeat for more): on exit 0 it is"
-                            " recorded as an artifact of this job (cousin-artifact); one"
-                            " that is missing then fails the job")
+                       help="a file the command builds (repeat for more), relative to"
+                            " the working directory, where the command runs: on exit 0 it is recorded as a shared"
+                            " artifact row of this job (cousin-artifact); one that is missing"
+                            " then fails the job. A private path: cousin-artifact add --private")
         p.add_argument("--artifact-commit", metavar="SHA",
                        help="the commit the artifacts were built from")
     else:

@@ -626,7 +626,7 @@ title that looks like a flag is only a title. Its options are `--desc`,
 `--json`, and one of `--log PATH` or `--home-log REL`, a log path relative to
 the cousin's home and confined to it (absolute, `~`, `..` and `.secrets` are
 refused). `--artifact PATH` (repeatable) names a file the command builds,
-relative to where `start` runs, and `--artifact-commit SHA` the commit it
+relative to where `start` runs (where the command runs and builds), and `--artifact-commit SHA` the commit it
 was built from: on exit 0 each one is recorded as an artifact of the job
 (`cousin-artifact`), and one that is not there fails the job with the
 reason, though the command exited 0.

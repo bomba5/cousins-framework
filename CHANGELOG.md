@@ -17,8 +17,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   the session started with (`tools`). When the first init proves a
   resume and the tools served now differ, or the file has no record,
   the runner asks for a rollover: a handoff, then a fresh session that
-  records the new tools. A lost resume starts fresh as before. After
-  this upgrade every sdk cousin rolls over once at its first turn.
+  records the new tools. A lost resume starts fresh as before. The
+  first turn after such a resume still runs with the old list; the
+  rollover follows it. After this upgrade every sdk cousin rolls over
+  once, after its first turn. A switch from `tmux` to `sdk` does too:
+  the tmux session's recorded tools are the tmux kind's.
 
 ## 3.37.10 - 2026-10-08
 

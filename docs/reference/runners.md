@@ -205,7 +205,10 @@ keeping its session (`data/runner-session.json`, resumed with `claude
 asked for. The switch's notice (a `system` `boot` row telling the model its
 new kind) is queued before the target starts and ranked ahead of every row,
 so it is the first turn after the switch, before any row queued earlier; a
-rollback drops it if nobody took it.
+rollback drops it if nobody took it. A switch to `sdk` resumes the tmux
+session for that first turn, then rolls it over once (a handoff, then a
+fresh session): the session's recorded tool list is the tmux kind's, not
+the sdk kind's.
 
 No step is needed before `--to tmux`. Whether the account's CLI has trusted
 the cousin's home is not known in advance: `~/.claude.json` (or the account's

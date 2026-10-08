@@ -637,8 +637,9 @@ def parse_decide_stdin(text):
 
 def _derived_args(p):
     p.add_argument("--derived-from", dest="derived_from", action="append", metavar="ID",
-                   default=None, help="an entry id this was built from (repeat for"
-                                      " more); `why ID` walks it")
+                   default=None, help="an entry id or raw ref (raw:<file>#<line>) this"
+                                      " was built from (repeat for more); `why ID`"
+                                      " walks it")
 
 
 def _level_args(p):
@@ -663,12 +664,60 @@ _DECIDE_USAGE = (
 # ------------------------------------------------ library (the one implementation)
 
 _ENTRY_ID = re.compile(r"^[0-9a-f]{12}$")
+# A raw entry the way recall and search name it: `raw:<file>#<line>`
+# (a recall line) or `.../memory/raw/<file>#<line>` (a search hit), the
+# file a day, a digest or a monthly archive under raw/ or raw/archive/.
+_RAW_REF = re.compile(r"(?:\braw:|(?<![\w-])(?P<home>[\w./~-]*/)?memory/raw/)"
+                      r"(?P<name>(?:archive/)?[\w.-]+\.jsonl(?:\.gz)?)#(?P<line>\d+)")
+_HEX_TOKEN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{12}(?![0-9A-Za-z])")
 
 
-def check_derived(derived_from):
-    """`derived_from` as a list of entry ids (12 hex characters, entry_id's
-    shape), or ValueError. None and [] mean none. One hop only: what this
-    entry was built from, never a chain or a confidence inherited along it."""
+def resolve_ref(home, ref):
+    """The entry id a raw ref names (`raw:<file>#<line>` or a
+    `memory/raw/<file>#<line>` path), or None when the line is gone: a
+    ref is a position, and folding a month moves it, so a link is stored
+    as the id the entry has, never as the ref."""
+    m = _RAW_REF.fullmatch(str(ref or "").strip())
+    if not m:
+        return None
+    base = (Path(home) / "memory" / "raw").resolve()
+    # a path that names a home names it absolutely: another cousin's raw
+    # file is not this one's, even when the file name is the same
+    prefix = m.group("home")
+    if prefix and prefix.startswith(("/", "~")):
+        try:
+            if Path(prefix).expanduser().resolve() != Path(home).resolve():
+                return None
+        except OSError:
+            return None
+    elif prefix:
+        # a relative one (root-relative, as the console and shared text
+        # write it) must be this home's own tail
+        rel = prefix.strip("/")
+        if rel.startswith("./"):
+            rel = rel[2:]
+        if rel not in ("", ".") and not Path(home).resolve().as_posix().endswith("/" + rel):
+            return None
+    name = m.group("name")
+    for path in (base / name, base / "archive" / name):
+        try:
+            path = path.resolve()
+            path.relative_to(base)
+        except (OSError, ValueError):
+            continue
+        if path.is_file():
+            from cousin_lib import memory_search
+            entry = memory_search.raw_entry("%s#%s" % (path, m.group("line")))
+            return entry_id(entry) if entry else None
+    return None
+
+
+def check_derived(derived_from, home=None):
+    """`derived_from` as a list of entry ids, or ValueError. Each value
+    is an entry id (12 hex characters, entry_id's shape) or, with `home`,
+    a raw ref (resolve_ref) turned into the id of the entry it names.
+    None and [] mean none. One hop only: what this entry was built from,
+    never a chain or a confidence inherited along it."""
     if derived_from in (None, "", []):
         return []
     if isinstance(derived_from, str):
@@ -679,11 +728,47 @@ def check_derived(derived_from):
     for value in derived_from:
         value = str(value or "").strip()
         if not _ENTRY_ID.match(value):
-            raise ValueError("derived_from: %r is not an entry id (12 hex characters,"
-                             " as `history` and `why` list them)" % value)
+            resolved = resolve_ref(home, value) if home is not None else None
+            if resolved is None:
+                raise ValueError("derived_from: %r is not an entry id (12 hex characters,"
+                                 " as `history` and `why` list them) or a raw ref"
+                                 " (raw:<file>#<line>, as recall and search name"
+                                 " one) to an entry that exists" % value)
+            value = resolved
         if value not in out:
             out.append(value)
     return out
+
+
+def refs_in(home, text):
+    """The entry ids `text` names: each raw ref that resolves, and each
+    12-hex token that is the id of an entry in raw memory (a commit sha
+    of the same length is not one). Order kept, no repeats. What a
+    decide's reasoning or a remember's cite already cites becomes its
+    derived_from without a separate step."""
+    text = str(text or "")
+    out = []
+    for m in _RAW_REF.finditer(text):
+        eid = resolve_ref(home, m.group(0))
+        if eid and eid not in out:
+            out.append(eid)
+    tokens = [t for t in _HEX_TOKEN.findall(text) if t not in out]
+    if tokens:
+        known = {entry_id(e) for e in _all_raw(home)}
+        for t in tokens:
+            if t in known and t not in out:
+                out.append(t)
+    return out
+
+
+def _linked(home, derived_from, *texts):
+    """check_derived's list, then what `texts` cite (refs_in) after it."""
+    derived = check_derived(derived_from, home)
+    for text in texts:
+        for eid in refs_in(home, text):
+            if eid not in derived:
+                derived.append(eid)
+    return derived
 
 
 def decide(home, topic, decision, reasoning, *, level=None, cite=None, derived_from=None):
@@ -700,7 +785,7 @@ def decide(home, topic, decision, reasoning, *, level=None, cite=None, derived_f
     resolved, err = resolve_level(level, cite)
     if err:
         raise ValueError(err)
-    derived = check_derived(derived_from)
+    derived = _linked(home, derived_from, reasoning, cite)
     entry = {"timestamp": datetime.now().astimezone().isoformat(),
              "topic": topic, "decision": decision, "reasoning": reasoning}
     decisions = home / "data" / "decisions.jsonl"
@@ -828,8 +913,9 @@ def remember_entry(home, topic, fact, *, level=None, cite=None, derived_from=Non
     writes `dream`, so a claim that reads as the operator's word is not
     left carrying a line that says `remember`.
 
-    `derived_from`: the entry ids this claim was built from (check_derived),
-    one hop, nothing inherited along it. `why` walks it.
+    `derived_from`: the entry ids or raw refs this claim was built from
+    (check_derived), one hop, nothing inherited along it; an entry the
+    `cite` names joins it (refs_in). `why` walks it.
 
     `scope`: what the claim holds for (check_scope), shown beside it.
     `valid_until`: when it stops holding (parse_valid_until), stored as the
@@ -843,7 +929,7 @@ def remember_entry(home, topic, fact, *, level=None, cite=None, derived_from=Non
     resolved, err = resolve_level(level, cite)
     if err:
         raise ValueError(err)
-    derived = check_derived(derived_from)
+    derived = _linked(Path(home), derived_from, cite)
     scope = check_scope(scope)
     valid_to = parse_valid_until(valid_until) if valid_until not in (None, "") else None
     entry = {"topic": topic, "content": fact, "truth_level": resolved, "source": source}

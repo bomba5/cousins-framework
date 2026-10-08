@@ -153,6 +153,68 @@ class TestDerivedFrom(HomeCase):
             tools.HANDLERS["memory"]["why"](ctx, {"id": "ffffffffffff"})
 
 
+class TestRawRefs(HomeCase):
+    """derived_from takes the refs recall and search show, and what a
+    decision's reasoning or a cite names is linked without the flag."""
+
+    def ref(self, topic):
+        """`raw:<file>#<line>` of the one entry on `topic`, and its id."""
+        for path in sorted((self.home / "memory" / "raw").glob("*.jsonl")):
+            for n, line in enumerate(path.read_text().splitlines(), 1):
+                entry = json.loads(line)
+                if entry.get("topic") == topic:
+                    return "raw:%s#%d" % (path.name, n), memory.entry_id(entry), path, n
+        raise AssertionError(topic)
+
+    def test_a_raw_ref_is_stored_as_the_id_it_names(self):
+        memory.remember(self.home, "kestrel", "seen on the roof at dawn")
+        ref, eid, path, n = self.ref("kestrel")
+        memory.remember(self.home, "nest", "nests on the roof",
+                        derived_from=[ref, "%s#%d" % (path, n), "memory/raw/%s#%d" % (path.name, n),
+                                      "cousins/wren/memory/raw/%s#%d" % (path.name, n)])
+        _, nest, _, _ = self.ref("nest")
+        self.assertEqual([e["id"] for e in memory.why(self.home, nest)["derived_from"]], [eid])
+
+    def test_a_ref_to_nothing_or_to_another_home_is_refused(self):
+        memory.remember(self.home, "kestrel", "seen")
+        ref, _, path, n = self.ref("kestrel")
+        other = self.root / "cousins" / "finch" / "memory" / "raw" / path.name
+        for bad in ([ref.replace("#%d" % n, "#99")], ["raw:../../cousin.toml#1"],
+                    [str(other) + "#%d" % n],
+                    ["cousins/finch/memory/raw/%s#%d" % (path.name, n)]):
+            with self.assertRaisesRegex(ValueError, "raw ref"):
+                memory.remember(self.home, "t", "f", derived_from=bad)
+
+    def test_what_the_reasoning_or_the_cite_names_is_linked(self):
+        memory.remember(self.home, "kestrel", "seen at dawn")
+        memory.remember(self.home, "owl", "seen at dusk")
+        k_ref, k, _, _ = self.ref("kestrel")
+        _, o, _, _ = self.ref("owl")
+        # a ref, a known id, an unknown 12-hex token (a commit sha) and a dead ref
+        memory.decide(self.home, "roof", "keep the roof clear",
+                      "the kestrel (%s) and %s; built at c1099544cc13; raw:2020-01-01.jsonl#3"
+                      % (k_ref, o), derived_from=[k])
+        _, roof, _, _ = self.ref("roof")
+        self.assertEqual([e["id"] for e in memory.why(self.home, roof)["derived_from"]], [k, o])
+        memory.remember(self.home, "barn", "no nest in the barn", cite="checked against " + k_ref)
+        _, barn, _, _ = self.ref("barn")
+        self.assertEqual([e["id"] for e in memory.why(self.home, barn)["derived_from"]], [k])
+        # nothing named, nothing linked
+        memory.remember(self.home, "plain", "a fact with no source")
+        _, plain, _, _ = self.ref("plain")
+        self.assertEqual(memory.why(self.home, plain)["derived_from"], [])
+
+    def test_the_memory_tool_takes_a_raw_ref(self):
+        from cousin_lib.runner import tools
+        memory.remember(self.home, "kestrel", "seen")
+        ref, eid, _, _ = self.ref("kestrel")
+        ctx = mock.Mock(home=self.home)
+        tools.HANDLERS["memory"]["remember"](ctx, {"topic": "nest", "fact": "on the roof",
+                                                  "derived_from": [ref]})
+        _, nest, _, _ = self.ref("nest")
+        self.assertEqual([e["id"] for e in memory.why(self.home, nest)["derived_from"]], [eid])
+
+
 class TestReceipt(HomeCase):
     def config(self, keyword_only=True):
         return mock.Mock(proactive_recall=True, recall_keyword_only=keyword_only)
@@ -184,6 +246,10 @@ class TestReceipt(HomeCase):
             entries, items = memory_search.recall_hits(self.home, "where is the kestrel",
                                                        config=self.config())
         self.assertEqual(len(entries), 2)
+        # a raw line carries the id derived_from stores, beside its ref
+        eid = memory.entry_id(json.loads((raw / "2026-10-06.jsonl").read_text()))
+        self.assertTrue(entries[1].endswith("(raw:2026-10-06.jsonl#1, id %s)" % eid), entries[1])
+        self.assertTrue(entries[0].endswith("(memory:a.md)"), entries[0])
         self.assertEqual([(i["collection"], i["rel"], i["similarity"]) for i in items],
                          [("memory", "memory/a.md", 0.9),
                           ("raw", "memory/raw/2026-10-06.jsonl#1", 0.8)])
@@ -198,7 +264,7 @@ class TestReceipt(HomeCase):
         with mock.patch.object(memory_search, "recall_thresholds",
                                return_value=({"min_chars": 1, "top": 3, "min_score": 0.5}, True)), \
                 mock.patch.object(memory_search, "search", return_value=(hits, None)), \
-                mock.patch.object(memory_search, "_hit_name", side_effect=lambda h: h["path"][-4:]):
+                mock.patch.object(memory_search, "_hit_name", side_effect=lambda h, entry=None: h["path"][-4:]):
             kept = memory_search.recall_entries(self.home, "where is the kestrel",
                                                 config=self.config())
         self.assertEqual(len(kept), 1)

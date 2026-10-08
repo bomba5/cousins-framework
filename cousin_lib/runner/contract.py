@@ -54,7 +54,11 @@ with `send`, never with `reply`.]][[meeting| A meeting line is answered with the
 told you is operator-stated: `remember` with `level=operator` and a
 `cite` saying where it was said. An unverified guess is
 `level=hypothesis`. Recall arrives on its own; search when you need
-more.]]
+more. When a decision or a fact rests on an entry you recalled or
+found, pass its ref (`raw:<file>#<line>`, or its id) in `derived_from`:
+that is the chain `why` walks. Naming a ref or an entry id in a
+decision's reasoning or a cite links it for you, so leave out one you
+only argue against.]]
 
 ## Tools, not the terminal CLIs
 

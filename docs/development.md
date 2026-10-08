@@ -127,7 +127,7 @@ three shards' records and passes only if all three passed and, together,
 ran every discovered module exactly once.
 
 Without its extras the suite skips every test that needs the Agent SDK
-or the MCP SDK, and the `sdk` lane is the one most cousins run on. So
+or the MCP SDK, and the `sdk` [lane](glossary.md#lane) is the one most cousins run on. So
 the same suite runs once more with them, on Python 3.13 only: three
 shards after `pip install -e ".[sdk,mcp]"`, checked by `test (sdk
 lane)` the way `test (3.x)` checks its own. The checks branch protection

@@ -1368,11 +1368,20 @@ uncompilable regex) stops the runner at start, exit 2, naming the key. See
 `templates/policy.toml.example` for a documented starting point.
 
 Before any of the file's patterns, the framework applies its own command
-rules, with or without a policy.toml, on every lane: a repository's git
-hooks are its gate, so `git commit` or `git push` with `--no-verify`,
-`git commit -n`, and `git -c core.hooksPath=...` are denied, the reason
-starting `framework:`. A commit message that only mentions the flag is
-refused too; write it to a file and use `git commit -F`.
+rules, with or without a policy.toml, on the `sdk` kind (both sessions) and
+the `opencode` kind; the `tmux` pane does not get them (its gaps are in
+[runners](reference/runners.md)). A repository's git hooks are its gate, so
+these are denied, the reason starting `framework:`: `git commit` or `git
+push` with `--no-verify` or a prefix of it, `git commit -n` alone or bundled
+(`-an`), setting `core.hooksPath` in any case or quoting (`git config
+--get` reads it fine), `GIT_CONFIG_*` in the environment, `SKIP=` and
+`HUSKY=`, and changing a file under `.git/hooks`. A policy.toml cannot turn
+them off. A commit message that only mentions a flag is refused too; write
+it to a file and use `git commit -F`.
+
+They are a speed bump against an honest mistake, not a wall: an alias, a
+variable holding the flag or a script spells the same thing. The gate that
+holds is the remote's: required CI checks and branch protection.
 
 What it is and is not:
 

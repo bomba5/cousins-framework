@@ -36,20 +36,32 @@ FILE = "policy.toml"
 OWN_TOOL_PREFIX = "mcp__cousin__"
 KEYS = ("deny_tools", "deny_bash_patterns", "ask", "outbound_filter")
 # The framework's own command rules, before any policy.toml (#287): a git
-# hook is the repository's gate, and a cousin may not step around it. Each
-# is (pattern, reason); the patterns stay JavaScript-compatible (no
-# lookbehind) because the opencode plugin applies them too. A commit
-# message that only mentions the flag is refused as well: write it to a
-# file and use `git commit -F`.
+# hook is the repository's gate, and these refuse the usual ways around
+# it. A text scan is a speed bump against an honest mistake, not a wall: an
+# alias, a variable holding the flag or a script spells the same thing.
+# The gate that holds is the remote's (required CI, branch protection).
+# Each is (pattern, reason); the patterns stay JavaScript-compatible (no
+# lookbehind, no inline flags) because the opencode plugin applies them
+# too. A commit message that only mentions a flag is refused as well:
+# write it to a file and use `git commit -F`.
+_HOOKSPATH = "[Cc][Oo][Rr][Ee]\\.[Hh][Oo][Oo][Kk][Ss][Pp][Aa][Tt][Hh]"
 FRAMEWORK_BASH_DENY = (
-    (re.compile(r"\bgit\b[^;&|\n]*\s(commit|push)\b[^;&|\n]*\s--no-verify\b"),
+    (re.compile(r"\bgit\b[^;&|\n]*\s(commit|push)\b[^;&|\n]*\s--no-veri[a-z]*\b"),
      "framework: git --no-verify skips the repository's hooks, which are its gate"
      " (a message that only mentions it: use git commit -F <file>)"),
-    (re.compile(r"\bgit\b[^;&|\n]*\scommit\b[^;&|\n]*\s-n\b"),
-     "framework: git commit -n is --no-verify, which skips the repository's hooks"),
-    (re.compile(r"\bgit\b[^;&|\n]*\s-c\s*core\.hooks[Pp]ath\s*="),
-     "framework: overriding core.hooksPath on the command line steps around the"
-     " repository's hooks"),
+    (re.compile(r"\bgit\b[^;&|\n]*\scommit\b[^;&|\n]*\s-[a-zA-Z]*n[a-zA-Z]*\b"),
+     "framework: git commit -n (alone or with other short flags) is --no-verify,"
+     " which skips the repository's hooks"),
+    (re.compile(r"\bgit\b(?![^;&|\n]*--get)[^;&|\n]*" + _HOOKSPATH),
+     "framework: setting core.hooksPath steps around the repository's hooks"
+     " (reading it with git config --get is fine)"),
+    (re.compile(r"\bGIT_CONFIG_(COUNT|PARAMETERS|KEY_[0-9]+|VALUE_[0-9]+)\s*="),
+     "framework: GIT_CONFIG_* in the environment can set core.hooksPath for one command"),
+    (re.compile(r"(^|[\s;&|(])(SKIP|HUSKY)=\S"),
+     "framework: SKIP= and HUSKY= turn a repository's hooks off"),
+    (re.compile(r"\b(chmod|rm|mv|cp|ln|tee|truncate|sed)\b[^;&|\n]*\.git/hooks\b"
+                r"|>\s*\S*\.git/hooks/"),
+     "framework: changing .git/hooks changes the repository's gate"),
 )
 # Every generation ends through this tool: a policy that denies it (or
 # asks for it, which is enforced as a deny) leaves a cousin that cannot

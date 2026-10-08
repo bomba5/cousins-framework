@@ -377,17 +377,27 @@ class TestFrameworkHookBypass(unittest.TestCase):
     def test_hook_bypasses_are_denied(self):
         for cmd in ("git commit --no-verify -m wip",
                     "cd repo && git push --no-verify origin main",
+                    "git push --no-verif",                       # a unique prefix
                     "git -C /srv/repo commit -n -m wip",
+                    "git commit -an", "git commit -nm wip",      # bundled short flags
                     "git -c core.hooksPath=/dev/null push",
-                    "git -c core.hookspath= commit -m x"):
+                    "git -c core.hookspath= commit -m x",
+                    "git -c 'core.hooksPath=' commit", "git -c CORE.HOOKSPATH= push",
+                    "git config core.hooksPath /dev/null",
+                    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath git push",
+                    "SKIP=check git commit -m x", "HUSKY=0 git push",
+                    "chmod -x .git/hooks/pre-push", "rm .git/hooks/pre-push",
+                    "echo > .git/hooks/pre-push"):
             decision, reason = self.decide(cmd)
             self.assertEqual(decision, "deny", cmd)
             self.assertTrue(reason.startswith("framework:"), reason)
 
     def test_ordinary_git_is_allowed(self):
         for cmd in ("git commit -m 'fix'", "git push origin main", "git push -n origin main",
-                    "git log --no-walk", "git config core.hooksPath .githooks",
-                    "echo --no-verify; git commit -m x"):
+                    "git log --no-walk", "git config --get core.hooksPath",
+                    "echo --no-verify; git commit -m x", "ls .git/hooks",
+                    "cat .git/hooks/pre-push", "git commit -F /tmp/msg", "just hooks",
+                    "PYTEST_SKIP=1 pytest"):
             self.assertEqual(self.decide(cmd)[0], "allow", cmd)
 
     def test_the_own_tools_are_not_command_lines(self):

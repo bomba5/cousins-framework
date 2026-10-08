@@ -3,6 +3,23 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.11 - 2026-10-08
+
+### Fixed
+
+- **A resumed sdk session no longer keeps an old tool list.** The CLI's
+  prompt snapshot records the tools with the system prompt on a
+  session's first request and sends that record on every resume. A
+  session started before a registry or `.mcp.json` change kept the old
+  schemas across restarts, so a cousin could not set `scope`,
+  `valid_until` or `depth` though the registry had them and the handler
+  took them. `data/runner-session.json` now records a hash of the tools
+  the session started with (`tools`). When the first init proves a
+  resume and the tools served now differ, or the file has no record,
+  the runner asks for a rollover: a handoff, then a fresh session that
+  records the new tools. A lost resume starts fresh as before. After
+  this upgrade every sdk cousin rolls over once at its first turn.
+
 ## 3.37.10 - 2026-10-08
 
 ### Fixed

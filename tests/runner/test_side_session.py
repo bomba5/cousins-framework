@@ -224,9 +224,10 @@ class TestReset(SideCase):
         self.assertIn("SIDE SESSION", _text(self.clients[1].queries[0]))
 
     def test_a_session_saved_in_this_generation_is_resumed_without_a_digest(self):
-        (self.home / "data" / "runner-session-peer.json").write_text(json.dumps(
-            {"session_id": "s-old", "lane": "unknown", "generation": 0}))
         r = self.side([[_turn("s-old")]])
+        (self.home / "data" / "runner-session-peer.json").write_text(json.dumps(
+            {"session_id": "s-old", "lane": "unknown", "generation": 0,
+             "tools": r._tool_fingerprint()}))
         r.start()
         a = r.enqueue(_peer("hello again"))
         self.assertTrue(self.done(r, a))

@@ -399,5 +399,54 @@ class TestPressureTrigger(RolloverCase):
         self.assertEqual([e["reason"] for e in events], ["context pressure 150000 tokens"])
 
 
+class TestToolSnapshot(RolloverCase):
+    """The CLI's snapshot records the tools with the prompt on a session's
+    first request and sends that record on every resume: a resume over a
+    changed tool list rolls over, so the next session records the new one."""
+
+    def saved(self, r, **fields):
+        (self.home / "data" / "runner-session.json").write_text(json.dumps(
+            dict({"session_id": "s-1", "lane": "unknown", "generation": 0, "updated": 0},
+                 **fields)))
+
+    def rollover_reasons(self, r):
+        return [e["payload"]["reason"] for e in r.events()
+                if e["kind"] == "rollover" and e["payload"].get("phase") == "start"]
+
+    def test_a_resume_with_the_tools_it_recorded_is_not_rolled_over(self):
+        r = self.build(); self.saved(r, tools=r._tool_fingerprint()); r.start(); self.work(r)
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        self.assertEqual(asked_resume(self.clients[0].options), "s-1")
+        self.assertEqual(len(self.clients), 1)
+        self.assertEqual(self.rollover_reasons(r), [])
+
+    def test_a_resume_whose_tools_changed_rolls_over_once(self):
+        r = self.build(); self.saved(r, tools="0123456789abcdef"); r.start(); self.work(r)
+        self.assertTrue(_wait(lambda: len(self.clients) == 2))
+        self.assertTrue(_wait(lambda: r.saved_session() == "s-2"))
+        self.assertEqual(self.rollover_reasons(r),
+                         ["the tool list changed since this session started"])
+        on_file = json.loads((self.home / "data" / "runner-session.json").read_text())
+        self.assertEqual(on_file["tools"], r._tool_fingerprint())
+        self.work(r, "after the rollover")
+        self.assertEqual(len(self.clients), 2)
+
+    def test_a_resume_from_a_file_without_tools_rolls_over(self):
+        r = self.build(); self.saved(r); r.start(); self.work(r)
+        self.assertTrue(_wait(lambda: len(self.clients) == 2))
+        self.assertEqual(self.rollover_reasons(r),
+                         ["the tool list changed since this session started"])
+
+    def test_a_save_for_the_same_session_keeps_the_tools_it_recorded(self):
+        r = self.build(); self.saved(r, tools="0123456789abcdef")
+        r._save_session("s-1")     # a lane move: the same session, saved again
+        on_file = json.loads((self.home / "data" / "runner-session.json").read_text())
+        self.assertEqual(on_file["tools"], "0123456789abcdef")
+        r._save_session("s-2")     # a new session records what it is given
+        on_file = json.loads((self.home / "data" / "runner-session.json").read_text())
+        self.assertEqual(on_file["tools"], r._tool_fingerprint())
+        self.assertIsNotNone(on_file["tools"])
+
+
 if __name__ == "__main__":
     unittest.main()

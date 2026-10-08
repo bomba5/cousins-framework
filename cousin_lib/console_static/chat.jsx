@@ -1776,6 +1776,16 @@ function rpCompact(prev, add) {
 
 const RP_BOOT_KINDS = { runner: 1, policy: 1, mcp_config: 1, session: 1 };
 const RP_SKIP_SYSTEM = { vcs_state_changed: 1, background_tasks_changed: 1 };
+
+// A gate that sent a turn back (hooks.gate_events; the opencode lane's
+// repeat nudge): what it says in the pane.
+function rpGateLine(p) {
+  const threads = (p.threads || []).join(", ");
+  if (p.gate === "reply") return { cls: "rp-warn", text: "reply gate · sent back once, no reply to " + (threads || "the thread") };
+  if (p.gate === "send") return { cls: "rp-warn", text: "send gate · sent back once, no send to " + (threads || "the peer") };
+  if (p.gate === "repeat") return { cls: "rp-warn", text: "repeat gate · " + (p.tool || "a tool") + " called " + (p.count || "?") + " times in a row" + (p.action ? " · " + p.action : "") };
+  return { cls: "rp-warn", text: "gate · " + String(p.gate || "?") + (threads ? " · " + threads : "") };
+}
 const RP_TASK_SUBTYPES = { task_started: 1, task_progress: 1, task_updated: 1, task_notification: 1 };
 // the SDK's TERMINAL_TASK_STATUSES: task_notification says "stopped",
 // task_updated the raw "killed"
@@ -1837,6 +1847,8 @@ function rpModel(events) {
   // message's recall waits here for its own divider
   let recalls = [];
   let turn = null, meta = {}, thinkSince = null;
+  // the gate row whose send-back message (a user event) comes next
+  let gateRow = null;
   const newMeta = () => { meta = {}; return meta; };
   (events || []).forEach((ev, i) => {
     const p = ev.payload || {};
@@ -1850,6 +1862,8 @@ function rpModel(events) {
     }
     const thought = thinkSince;
     thinkSince = null;
+    const lastGate = gateRow;
+    if (k !== "gate" && !(k === "system" && p.subtype === "notification")) gateRow = null;
     if (k === "state") {
       strip.state = p.to || null;
       if (p.to === "running") strip.activity = { kind: "working", since: ts };
@@ -1862,6 +1876,15 @@ function rpModel(events) {
       // the SDK reports one around many ordinary tool calls
       if (RP_TASK_SUBTYPES[p.subtype]) strip.bgUntracked = Math.max(0, strip.bgUntracked + rpTaskEvent(strip.tasks, p, ts));
       else if (p.subtype === "fresh" || p.subtype === "init" || p.subtype === "resumed") rpBoot(rows, key, ev);
+      // the opencode lane's boot report: in the boot group when it holds
+      else if ((p.subtype === "mcp" && p.status === "connected")
+               || (p.subtype === "policy_plugin" && !(p.errors || []).length)) rpBoot(rows, key, ev);
+      else if (p.subtype === "mcp")
+        rows.push({ t: "line", key, ev, cls: "rp-err", text: "mcp · " + String(p.status || "not connected") + (p.error ? " · " + rpCut(p.error, 120) : "") });
+      else if (p.subtype === "policy_plugin")
+        rows.push({ t: "line", key, ev, cls: "rp-err", text: "policy plugin · " + rpCut((p.errors || []).join("; "), 160) });
+      else if (p.subtype === "perimeter")
+        rows.push({ t: "line", key, ev, cls: p.level === "warning" ? "rp-warn" : "rp-dim", text: "perimeter · " + rpCut(p.line || "", 160), detail: p.line || null });
       // a CLI turn of its own between turns (a task notification)
       else if (p.subtype === "background_turn" && p.phase === "start") {
         turn = { t: "turn", key, ev, thread: "background", bodies: [], user: null, recall: null, meta: newMeta() };
@@ -1876,6 +1899,10 @@ function rpModel(events) {
         rows.push({ t: "line", key, ev, cls: auth ? "rp-err" : "rp-warn",
                     text: "API retry " + (p.attempt || 1) + ": " + [p.error_status, p.error].filter(x => x != null && x !== "").join(" ") });
       }
+      // the CLI's own notice around a hook's feedback: says nothing alone
+      else if (p.subtype === "notification") {
+        if (p.message) rows.push({ t: "line", key, ev, cls: "rp-dim", text: "notification · " + rpCut(String(p.message), 160) });
+      }
       else if (!RP_SKIP_SYSTEM[p.subtype]) rows.push({ t: "meta", key, ev });
       return;
     }
@@ -1886,7 +1913,14 @@ function rpModel(events) {
         if (t.ended == null) { t.ended = ts; t.status = "lost"; t.summary = "the runner restarted"; }
       });
     }
-    if (RP_BOOT_KINDS[k]) { rpBoot(rows, key, ev); return; }
+    // the runner's SDK and CLI version check: part of the boot when it
+    // holds, a line of its own when it does not
+    if (k === "harness" && !p.ok) {
+      rows.push({ t: "line", key, ev, cls: p.level === "error" ? "rp-err" : "rp-warn",
+                  text: "harness · " + String(p.message || (p.problems || []).join("; ") || "version check failed") });
+      return;
+    }
+    if (RP_BOOT_KINDS[k] || k === "harness") { rpBoot(rows, key, ev); return; }
     switch (k) {
       case "rate_limit": strip.rate[p.type || "limit"] = p; return;
       case "session_init":
@@ -1897,7 +1931,15 @@ function rpModel(events) {
         recalls = [];
         rows.push(turn);
         return;
+      case "gate": {
+        const line = rpGateLine(p);
+        gateRow = { t: "line", key, ev, cls: line.cls, text: line.text, detail: null };
+        rows.push(gateRow);
+        return;
+      }
       case "user":
+        // a gate's send-back is the gate's text, not a message: onto its row
+        if (lastGate) { lastGate.detail = (lastGate.detail ? lastGate.detail + "\n" : "") + String(p.text || ""); return; }
         if (turn && turn.user == null) { turn.user = String(p.text || ""); return; }
         // a message folded into the running turn: its own divider
         rows.push({ t: "turn", mid: true, key, ev, thread: null, bodies: [], user: String(p.text || ""), recall: recalls.shift() || null });
@@ -2406,7 +2448,7 @@ function RpRow({ row, now, activeTool, slug }) {
     case "error":
       return <div className="rp-line rp-err">error: {String(p.error || "")}</div>;
     case "line":
-      return <div className={"rp-line " + row.cls}>{row.text}</div>;
+      return <div className={"rp-line " + row.cls} title={row.detail || undefined}>{row.text}</div>;
     case "footer": {
       const parts = rpFooterParts(row.meta);
       const bad = row.meta.result && (row.meta.result.is_error || row.meta.result.interrupted);

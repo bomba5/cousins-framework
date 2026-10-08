@@ -625,13 +625,18 @@ process.stdout.write(JSON.stringify(m.rows.map(r => [r.t + (r.mid ? ":mid" : "")
         got = self.run_node("""
 const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
 const evs = [
-  E(1, "runner", {kind: "sdk"}), E(2, "system", {subtype: "resumed", session_id: "s"}),
+  E(1, "runner", {kind: "sdk"}), E(2, "harness", {kind: "sdk", ok: true, level: "info"}), E(2, "system", {subtype: "resumed", session_id: "s"}),
+  E(2, "system", {subtype: "mcp", status: "connected"}), E(2, "system", {subtype: "policy_plugin", errors: []}),
   E(3, "system", {subtype: "api_retry", error_status: 401, error: "authentication_failed", attempt: 1}),
   E(4, "auth", {account: "host", kind: "claude-login", reason: "login_required", detail: "OAuth session expired", action: "run claude auth login"}),
   E(5, "rollover", {phase: "start", reason: "max_age", session_id: "s"}),
   E(6, "review_gate", {turn: 3, held: 5, kept: 4, dropped: 1, pending: 0, error: null}),
   E(7, "tool_call", {tool: "reply", command: "", is_error: true, ms: 4}),
   E(8, "tool_call", {tool: "memory", command: "search", is_error: false, ms: 4}),
+  E(10, "harness", {kind: "sdk", ok: false, level: "warning", message: "cli 2.1.0, locked 2.1.286"}),
+  E(11, "system", {subtype: "perimeter", kind: "opencode", level: "warning", line: "no perimeter on this lane"}),
+  E(12, "system", {subtype: "mcp", status: "failed"}),
+  E(13, "system", {subtype: "policy_plugin", errors: ["bad pattern"]}),
 ];
 const blocked = rpModel(evs).strip.auth;
 const m = rpModel(evs.concat([E(9, "auth", {account: "host", restored: true})]));
@@ -642,12 +647,16 @@ process.stdout.write(JSON.stringify({
   mismatch: rpAuthLine({mismatch: true, expected: "none", got: "ANTHROPIC_API_KEY"}),
 }));""")
         self.assertEqual(got["rows"], [
-            ["boot", 2],
+            ["boot", 5],
             ["line", "rp-err", "API retry 1: 401 authentication_failed"],
             ["line", "rp-err", "login required · OAuth session expired · run claude auth login"],
             ["line", "rp-roll", "session rollover · start · max age"],
             ["line", "rp-dim", "memory review · 4 kept, 1 dropped"],
             ["line", "rp-err", "tool reply failed"],
+            ["line", "rp-warn", "harness · cli 2.1.0, locked 2.1.286"],
+            ["line", "rp-warn", "perimeter · no perimeter on this lane"],
+            ["line", "rp-err", "mcp · failed"],
+            ["line", "rp-err", "policy plugin · bad pattern"],
             ["line", "rp-ok", "login restored · host"],
         ])
         self.assertTrue(got["blocked"])
@@ -655,6 +664,32 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(got["retry"], "rp-warn")
         self.assertEqual(got["mismatch"], {"cls": "rp-err", "blocking": True,
                                            "text": "credentials mismatch · expected none, got ANTHROPIC_API_KEY"})
+
+    def test_a_gate_is_a_line_and_its_send_back_folds_into_it(self):
+        """A `gate` event reads as a line naming the threads, the
+        send-back message after it is that line's detail and not a new
+        turn divider, and a bare system notification is no row."""
+        got = self.run_node("""
+const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
+const m = rpModel([
+  E(1, "turn_start", {bodies: ["a"]}), E(2, "user", {text: "a"}),
+  E(3, "gate", {gate: "reply", threads: ["operator:op"]}),
+  E(4, "gate", {gate: "send", threads: ["peer:p"]}),
+  E(5, "user", {text: "Stop hook feedback: answer"}),
+  E(6, "system", {subtype: "notification"}),
+  E(7, "gate", {gate: "repeat", tool: "Bash", count: 4, action: "nudge"}),
+  E(8, "text", {text: "ok"}),
+  E(9, "user", {text: "folded"}),
+]);
+process.stdout.write(JSON.stringify(m.rows.map(r => [r.t + (r.mid ? ":mid" : ""), r.text || r.user || null, r.detail || null])));""")
+        self.assertEqual(got, [
+            ["turn", "a", None],
+            ["line", "reply gate · sent back once, no reply to operator:op", None],
+            ["line", "send gate · sent back once, no send to peer:p", "Stop hook feedback: answer"],
+            ["line", "repeat gate · Bash called 4 times in a row · nudge", None],
+            ["text", None, None],
+            ["turn:mid", "folded", None],
+        ])
 
     TASKS = """
 const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});

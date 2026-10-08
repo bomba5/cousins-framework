@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.35.1 - 2026-10-08
+
+### Fixed
+
+- **The reasoning pane reads every event the runners send.** A reply or
+  send gate that sends a turn back is now a line naming the threads
+  (`reply gate · sent back once, no reply to ...`), and the send-back
+  message after it is that line's tooltip instead of a new turn divider.
+  The opencode lane's repeat nudge, the runner's SDK and CLI version
+  check, and the opencode lane's boot report (MCP, policy plugin,
+  perimeter) go into the boot group when they hold and show as a line
+  when they don't. A bare `notification` system event is no longer a
+  row. None of them shows as raw JSON any more.
+
 ## 3.35.0 - 2026-10-07
 
 ### Added

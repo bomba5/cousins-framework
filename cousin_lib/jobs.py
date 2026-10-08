@@ -49,6 +49,11 @@ def _db():
         "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)"
     )
     add_column(conn, "jobs", "pgid", "INTEGER")
+    # the runner pid's identity: its /proc start time in clock ticks and
+    # the boot it ran in, so a pid reused later (or after a reboot) is
+    # never taken for the job's own, whatever the wall clock did
+    add_column(conn, "jobs", "start_ticks", "INTEGER")
+    add_column(conn, "jobs", "boot_id", "TEXT")
     conn.commit()
     return conn
 
@@ -97,7 +102,7 @@ def finish_job(job_id, *, status="done", summary="", exit_code=None):
                            (job_id,)).fetchone()
     finally:
         conn.close()
-    if before is not None and before["status"] == "running" and row:
+    if before is not None and before["status"] in ("running", "lost") and row:
         record_job_result(dict(row))
 
 
@@ -200,7 +205,7 @@ def list_jobs(*, status=None, spawned_by=None, active_only=False,
         conn.close()
 
 
-STATUSES = ("running", "done", "failed", "cancelled")
+STATUSES = ("running", "done", "failed", "cancelled", "lost")
 _UPDATABLE = ("status", "result_summary", "exit_code", "title",
               "description")
 
@@ -469,6 +474,154 @@ def live_members(job):
     return group_members(job.get("pgid"), _started_epoch(job))
 
 
+def boot_id():
+    """This boot's id (/proc/sys/kernel/random/boot_id), or None."""
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
+def pid_start_ticks(pid):
+    """A live pid's start time in clock ticks since boot (/proc/<pid>/stat
+    field 22), or None when it is gone."""
+    try:
+        with open("/proc/%d/stat" % int(pid)) as fh:
+            stat = fh.read()
+        fields = stat[stat.rfind(")") + 2:].split()
+        if fields[0] == "Z":
+            return None                         # a zombie has exited: nothing runs
+        return int(fields[19])
+    except (OSError, ValueError, TypeError, IndexError):
+        return None
+
+
+def record_spawn(job_id, pid):
+    """Store a spawned runner's pid as the job's pid and process group,
+    with its start ticks and the boot id: the identity reap_lost checks."""
+    conn = _db()
+    try:
+        conn.execute("UPDATE jobs SET pid=?, pgid=?, start_ticks=?, boot_id=? WHERE id=?",
+                     (pid, pid, pid_start_ticks(pid), boot_id(), job_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _leader_alive(job):
+    """For a row that stored its runner's identity: True while that very
+    process runs (same boot, same start ticks), False once it is gone;
+    None for an older row that stored no identity."""
+    if job.get("start_ticks") is None or not job.get("boot_id"):
+        return None
+    if job["boot_id"] != boot_id():
+        return False                                    # it ran in an earlier boot
+    return pid_start_ticks(job["pid"]) == job["start_ticks"]
+
+
+def _groups():
+    """{pgid: [(pid, start epoch)]} from one pass over /proc."""
+    btime = _boot_time()
+    hz = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+    out = {}
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return out
+    for name in entries:
+        if not name.isdigit():
+            continue
+        try:
+            with open("/proc/%s/stat" % name) as fh:
+                stat = fh.read()
+            fields = stat[stat.rfind(")") + 2:].split()
+            if fields[0] == "Z":
+                continue                        # a zombie runs nothing
+            pgrp, ticks = int(fields[2]), int(fields[19])
+        except (OSError, IndexError, ValueError):
+            continue
+        started = btime + ticks / hz if btime is not None else None
+        out.setdefault(pgrp, []).append((int(name), started))
+    return out
+
+
+def _process_gone(job, groups):
+    """True only when the job names a process and nothing of it runs. A
+    row with its runner's identity is alive while that exact process
+    runs; failing that (or for an older row), while its group has a member
+    started since the job did, or its pid-only process still runs. A row
+    with no pid has nothing to check and is never called gone."""
+    if not job.get("pid"):
+        return False
+    leader = _leader_alive(job)
+    if leader:
+        return False
+    since = _started_epoch(job)
+    if job.get("pgid"):
+        members = groups.get(job["pgid"], [])
+        live = [p for p, started in members
+                if since is None or started is None or started >= since - 2]
+        if live and leader is None:
+            return False
+        if live and leader is False and job.get("boot_id") == boot_id():
+            # the runner died but processes it started still run: not lost
+            return False
+        return True
+    ticks = pid_start_ticks(job["pid"])
+    if ticks is None:
+        return True
+    btime, hz = _boot_time(), (os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100)
+    return not (since is None or btime is None or btime + ticks / hz >= since - 2)
+
+
+LOST_NOTE = " [lost: its process is gone]"
+
+
+def reap_lost():
+    """Rows 'running' whose process is gone are marked 'lost' at once,
+    not 24 hours later (reap_stale): a job's runner closes its own row
+    before it exits, so a running row with no live process means the
+    runner died without closing it. Returns the ids marked. A host with
+    no /proc cannot tell, and marks nothing. Maintenance any reader may
+    run, like reap_stale; one /proc pass however many rows it checks.
+    Not final: a runner that does finish later still closes the row."""
+    if not os.path.isdir("/proc/self"):
+        return []
+    conn = _db()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM jobs WHERE status='running' AND pid IS NOT NULL")]
+        if not rows:
+            return []
+        groups = _groups()
+        marked = []
+        for job in rows:
+            if not _process_gone(job, groups):
+                continue
+            cur = conn.execute(
+                "UPDATE jobs SET status='lost', finished_at=?,"
+                " result_summary=COALESCE(result_summary, '') || ?"
+                " WHERE id=? AND status='running'",
+                (_now(), LOST_NOTE, job["id"]))
+            if cur.rowcount:
+                marked.append(job["id"])
+        conn.commit()
+        return marked
+    finally:
+        conn.close()
+
+
+def reap_lost_quietly():
+    """reap_lost for a reader whose own answer must not fail on it (the
+    console's stream, the job tool): an error is printed, never raised."""
+    try:
+        return reap_lost()
+    except Exception as err:  # noqa: BLE001 - maintenance never costs the read
+        print("cousin-job: lost-job check failed: %s" % err, file=sys.stderr, flush=True)
+        return []
+
+
 def reap_group(job, *, grace=3.0):
     """SIGTERM the job's live group members, SIGKILL whatever is left
     after `grace` seconds. Returns the pids that were alive."""
@@ -535,7 +688,8 @@ def _spawn_tracked(cmd, log_path, job_id):
         # which is the loud version of that failure.
         status = "done" if rc == 0 else "failed"
         current = get_job(job_id)
-        if current and current["status"] == "running":
+        # a row a reader wrongly marked lost is still this runner's to close
+        if current and current["status"] in ("running", "lost"):
             finish_job(job_id, status=status, exit_code=rc)
     finally:
         os._exit(0)
@@ -598,13 +752,7 @@ def _cmd_start(args):
         _write_log_header(log_path, args.kind, args.title,
                           "$ " + " ".join(cmd))
         pid = _spawn_tracked(cmd, log_path, job_id)
-        conn = _db()
-        try:
-            conn.execute("UPDATE jobs SET pid=?, pgid=? WHERE id=?",
-                         (pid, pid, job_id))
-            conn.commit()
-        finally:
-            conn.close()
+        record_spawn(job_id, pid)
     elif not log_path:
         # A job with no process of its own (a hand-registered subagent,
         # a manual step) still gets a log: its header now, its outcome
@@ -696,6 +844,7 @@ def _cmd_cancel(args):
 
 
 def _cmd_list(args):
+    reap_lost()
     spawned_by = CousinConfig.from_env().slug if args.mine else None
     jobs = list_jobs(status=args.status, spawned_by=spawned_by,
                      active_only=args.active)
@@ -718,6 +867,7 @@ def _cmd_list(args):
 
 
 def _cmd_show(args):
+    reap_lost()
     job = get_job(args.id)
     if not job:
         print("job #%d not found" % args.id, file=sys.stderr)
@@ -762,6 +912,7 @@ def _cmd_tail(args):
         if current["status"] != "running":
             print("--- job #%d %s ---" % (args.id, current["status"]))
             return 0
+        reap_lost_quietly()         # a runner that died never closes the row
         time.sleep(1)
 
 

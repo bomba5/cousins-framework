@@ -13,7 +13,7 @@ function JobsView() {
   const [jobs, setJobs] = React.useState([]);
   // Default to "last24h" so an idle dashboard shows recent activity
   // instead of an empty 'active' tab when nothing is running NOW.
-  // Order: active | last24h | done | failed | all.
+  // Order: active | last24h | done | failed | lost | all.
   const [filter, setFilter] = React.useState("last24h");
   const [spawnedBy, setSpawnedBy] = React.useState("all");  // all | <slug>
   const [kind, setKind] = React.useState("all");            // all | <kind>
@@ -28,6 +28,7 @@ function JobsView() {
         if (filter === "active") params.set("active_only", "1");
         else if (filter === "done") params.set("status", "done");
         else if (filter === "failed") params.set("status", "failed");
+        else if (filter === "lost") params.set("status", "lost");
         else if (filter === "last24h") params.set("since_hours", "24");
         if (spawnedBy && spawnedBy !== "all") params.set("spawned_by", spawnedBy);
         if (kind && kind !== "all") params.set("kind", kind);
@@ -61,6 +62,7 @@ function JobsView() {
     running: jobs.filter(j => j.status === "running").length,
     done: jobs.filter(j => j.status === "done").length,
     failed: jobs.filter(j => j.status === "failed").length,
+    lost: jobs.filter(j => j.status === "lost").length,
   };
 
   const fmtAge = (started, ended) => {
@@ -132,11 +134,12 @@ function JobsView() {
           <span style={{ color: "var(--accent)" }}><b>{counts.running}</b> running</span>
           <span><b>{counts.done}</b> done</span>
           <span style={{ color: "var(--red, #d24)" }}><b>{counts.failed}</b> failed</span>
+          {counts.lost > 0 && <span style={{ color: "var(--amber, #c90)" }}><b>{counts.lost}</b> lost</span>}
           <span style={{ color: "var(--fg-3)" }}>(in view)</span>
         </div>
         <div style={{ flex: 1 }} />
         <div className="radio-row" style={{ display: "flex", gap: 4 }}>
-          {["active", "last24h", "done", "failed", "all"].map(f => (
+          {["active", "last24h", "done", "failed", "lost", "all"].map(f => (
             <button key={f} className={filter === f ? "sel" : ""} onClick={() => setFilter(f)}>
               {f}
             </button>
@@ -163,13 +166,15 @@ function JobsView() {
                style={{ cursor: "pointer", padding: "12px 16px", borderLeft: `3px solid ${
                  j.status === "running" ? "var(--accent)" :
                  j.status === "done" ? "var(--green, #4a7)" :
-                 j.status === "failed" ? "var(--red, #d24)" : "var(--fg-3)"
+                 j.status === "failed" ? "var(--red, #d24)" :
+                 j.status === "lost" ? "var(--amber, #c90)" : "var(--fg-3)"
                }` }}>
             <div className="job-head" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
               <CousinTag slug={j.spawned_by} />
               <span style={{ color: "var(--fg-3)", fontSize: 10, fontFamily: "var(--mono)" }}>#{j.id}</span>
               <span style={{ color: "var(--fg-3)", fontSize: 10, fontFamily: "var(--mono)" }}>[{j.kind}]</span>
-              <span className={"pill " + ({ running: "cyan", done: "green", failed: "red" }[j.status] || "")}>{j.status}</span>
+              <span className={"pill " + ({ running: "cyan", done: "green", failed: "red", lost: "amber" }[j.status] || "")}
+                    title={j.status === "lost" ? "its process died without closing the job" : undefined}>{j.status}</span>
               <span className="job-title" style={{ flex: 1, fontWeight: 500 }}>{j.title}</span>
               <span className="job-time" style={{ color: "var(--fg-3)", fontSize: 10, fontFamily: "var(--mono)" }}
                     title={j.started_at || ""}>
@@ -1952,7 +1957,7 @@ function fleetEvents(jobs, fires, flips, now) {
   for (const j of jobs || []) {
     const at = Date.parse(j.finished_at || j.started_at || "");
     if (!Number.isFinite(at)) continue;
-    const tone = j.status === "failed" ? "red" : j.status === "running" ? "accent" : j.status === "done" ? "green" : "gray";
+    const tone = j.status === "failed" ? "red" : j.status === "running" ? "accent" : j.status === "done" ? "green" : j.status === "lost" ? "amber" : "gray";
     out.push({ key: "j" + j.id, ts: at, who: j.spawned_by, text: j.title, word: j.status === "running" ? "job started" : "job " + j.status, tone });
   }
   for (const [i, f] of (fires || []).entries()) {
@@ -2029,7 +2034,7 @@ function HostView({ onOpen }) {
   const health = fleetHealth(cousins, now);
   const ordered = fleetOrder(cousins);
   const jobsRunning = visibleJobs.filter(j => j.status === "running").length;
-  const jobsFailed = visibleJobs.filter(j => j.status === "failed").length;
+  const jobsFailed = visibleJobs.filter(j => j.status === "failed" || j.status === "lost").length;
   const events = fleetEvents(visibleJobs, fires, FLEET_FLIPS, now);
 
   return (

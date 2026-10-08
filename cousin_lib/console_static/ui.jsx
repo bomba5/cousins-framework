@@ -6,7 +6,7 @@ function Led({ state, pulse }) {
     running: "green", healthy: "green", succeeded: "green", done: "green", ok: "green",
     waiting_tool: "cyan", waiting_user: "amber", queued: "amber", idle: "amber",
     degraded: "amber", paused: "amber", starting: "amber", stopping: "amber",
-    failed: "red", down: "red", cancelled: "gray", stopped: "gray", disabled: "gray",
+    failed: "red", down: "red", lost: "amber", cancelled: "gray", stopped: "gray", disabled: "gray",
   };
   const cls = map[state] || "gray";
   return <span className={`led ${cls}${pulse ? " pulse" : ""}`} />;
@@ -23,7 +23,7 @@ function StatePill({ state }) {
     succeeded: "cyan",
     waiting_tool: "cyan", waiting_user: "amber", queued: "amber", idle: "amber",
     degraded: "amber", starting: "amber", stopping: "amber",
-    failed: "red", cancelled: "gray", stopped: "gray", disabled: "gray",
+    failed: "red", lost: "amber", cancelled: "gray", stopped: "gray", disabled: "gray",
   }[state] || "gray";
   return (
     <span className={`pill ${tone}`}>

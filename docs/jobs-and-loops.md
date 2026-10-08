@@ -146,7 +146,10 @@ job tool's `run` with `artifacts` and `commit`) records each named file
 for the job once the command exits 0, before the row closes, with a line
 per file in the job's log; a named file that is not there fails the job
 with the reason, so a build that did not produce what it said never reads
-`done`. Outside a cousin (no `COUSIN_HOME`)
+`done`. The rows a job records are shared, like `cousin-artifact add`'s
+default: path, sha256, job and commit, readable by the whole install. A
+private path is recorded by hand, with `cousin-artifact add --private
+--label`. Outside a cousin (no `COUSIN_HOME`)
 the row's owner is `$USER`, so `--mine` won't find it later.
 
 A file on another machine is recorded with `--host` and the checksum and

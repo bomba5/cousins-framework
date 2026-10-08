@@ -776,6 +776,10 @@ def _cmd_start(args):
     if (artifacts or getattr(args, "artifact_commit", None)) and not cmd:
         print("cousin-job: --artifact needs a command that builds it", file=sys.stderr)
         return 2
+    if getattr(args, "artifact_commit", None) and not artifacts:
+        print("cousin-job: --artifact-commit names what the artifacts were built from;"
+              " give --artifact too", file=sys.stderr)
+        return 2
     job_id = register_job(
         kind=args.kind, title=args.title, description=args.desc or "",
         spawned_by=slug, log_path=args.log,

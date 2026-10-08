@@ -228,6 +228,9 @@ class TestBackgroundCommand(JobsCase):
         rc, _, err = self._main(["start", "shell", "nothing", "--artifact", "x.bin"])
         self.assertEqual(rc, 2)
         self.assertIn("needs a command", err)
+        rc, _, err = self._main(["start", "shell", "--artifact-commit", "abc", "--", "t", "true"])
+        self.assertEqual(rc, 2)
+        self.assertIn("give --artifact too", err)
 
     def test_a_relative_log_is_recorded_absolute(self):
         # The job tool's `run` passes its `log` relative to the home, the

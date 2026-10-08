@@ -3,6 +3,24 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.36.0 - 2026-10-08
+
+### Added
+
+- **A claim links to what it was built from without the cousin looking
+  up ids.** `derived_from` (the memory tool's list, `--derived-from` on
+  `remember` and `decide`) takes the refs recall and search show,
+  `raw:<file>#<line>` or a `memory/raw/<file>#<line>` path in the
+  cousin's own home, and stores the id of the entry each one names; a
+  ref to a missing line or to another cousin's home is refused. Every
+  raw ref, and every entry id of the cousin's raw memory, named in a
+  decision's reasoning or cite or in a fact's cite joins `derived_from`
+  on its own (a commit sha of the same length is not linked). A recall
+  line shows the entry's id beside its ref, and the system prompt's
+  memory section tells the cousin to pass the ref when a decision rests
+  on a recalled entry. The console's "why" button walks what this
+  links.
+
 ## 3.35.1 - 2026-10-08
 
 ### Fixed

@@ -1148,11 +1148,23 @@ def recall_hits(home, text, *, config=None, root=None):
                                         thresholds["min_score"])))
                 continue
         returned.append(row)
-        kept.append("%s (%s:%s)" % (_hit_name(hit), hit.get("collection"),
-                                    _hit_relpath(home, hit, root)))
+        kept.append("%s (%s:%s%s)" % (_hit_name(hit), hit.get("collection"),
+                                      _hit_relpath(home, hit, root), _hit_id(hit)))
         items.append(recall_item(home, hit, root))
     _receipt(home, text, returned=returned, excluded=excluded)
     return kept, items
+
+
+def _hit_id(hit):
+    """", id <entry id>" for a raw hit (what derived_from stores and `why`
+    takes), else ""."""
+    if hit.get("collection") != "raw":
+        return ""
+    entry = raw_entry(hit["path"])
+    if not entry:
+        return ""
+    from cousin_lib.memory import entry_id
+    return ", id " + entry_id(entry)
 
 
 def recall_item(home, hit, root=None):

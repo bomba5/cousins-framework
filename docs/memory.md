@@ -189,10 +189,20 @@ carries no scope or end of its own).
 ### What an entry was built from
 
 `remember` and `decide` take `--derived-from ID` (repeatable; the memory
-tool's `derived_from` list): the ids of the raw entries a claim was built
-from. An id is the 12 hex characters `history`, `why` and a recall line
-show; anything else is refused. `why ID` walks the whole chain each way,
-indented by hop:
+tool's `derived_from` list): the raw entries a claim was built from. A
+value is an entry id, the 12 hex characters `history`, `why` and a
+recall line show, or a raw ref the way recall and search name an entry
+(`raw:2026-10-03.jsonl#56`, or a `memory/raw/<file>#<line>` path in the
+cousin's own home), which is stored as the id of the entry it names: a
+ref is a position, and folding a month into its archive moves it.
+Anything else, or a ref to a line that is not there, is refused.
+
+The cousin does not have to remember the flag: every raw ref, and every
+12-hex token that is the id of an entry in its raw memory, named in a
+decision's reasoning or cite or in a fact's cite, joins `derived_from`
+on its own (a commit sha of the same length is not an entry id, so it
+is not linked). `why ID` walks the whole chain each way, indented by
+hop:
 
 ```
 cousin-memory why 5e0b9d2a71c4

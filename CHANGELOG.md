@@ -10,7 +10,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 - **A cousin on its lane's default model names it.** The Overview table
   and the cousin's card showed `-` for a runner cousin with no
   `[agent] model`. They show the model its session reported at start,
-  marked `(default)`, or "lane default" before it has run; the fleet
+  marked `(default)` (the sdk lane reports one; an opencode cousin with
+  no model of its own, or one that has not run yet, shows "lane
+  default"); the fleet
   row carries it with `modelDefault` true.
 - **The dreaming line says "2m ago", not "2m ago ago".**
 - **Tables read on a phone.** A wide table in a chat message scrolls

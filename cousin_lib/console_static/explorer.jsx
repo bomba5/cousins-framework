@@ -892,9 +892,41 @@ function claimEnd(validTo) {
   return "until " + d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
 }
 
+// A claim's provenance, both ways (GET /api/memory/<slug>/why): what it was
+// built from and what was built on it, the whole chain, nothing inherited.
+function WhyNode({ n, kids }) {
+  if (n.missing) return <li className="muted" data-why-node={n.id}>{n.id} · not in raw memory</li>;
+  if (n.cycle) return <li className="muted" data-why-node={n.id}>{n.id} · already on this chain (a cycle)</li>;
+  const next = n[kids] || [];
+  return (
+    <li data-why-node={n.id}>
+      <LevelPill level={normLevel(n.truth_level)} /> <span className="mx-topic">{n.topic}</span>{" "}
+      <span className="muted">{n.id}</span> · {String(n.content || "").slice(0, 240)}
+      {n.more && <span className="muted"> (and further)</span>}
+      {next.length > 0 && <ul className="mx-why">{next.map((k, i) => <WhyNode key={k.id + i} n={k} kids={kids} />)}</ul>}
+    </li>
+  );
+}
+
+function WhyTree({ slug, id }) {
+  const [data, , err] = useMemoryJson(`/api/memory/${slug}/why?id=${encodeURIComponent(id)}`, 0);
+  if (!data) return <Pending data={data} err={err} />;
+  return (
+    <div className="mx-why-tree" data-why={id}>
+      <div className="eyebrow">built from</div>
+      {data.derived_from.length ? <ul className="mx-why">{data.derived_from.map((n, i) => <WhyNode key={n.id + i} n={n} kids="built_from" />)}</ul>
+        : <div className="muted">nothing recorded</div>}
+      <div className="eyebrow">built on by</div>
+      {data.used_by.length ? <ul className="mx-why">{data.used_by.map((n, i) => <WhyNode key={n.id + i} n={n} kids="built_on_by" />)}</ul>
+        : <div className="muted">nothing</div>}
+    </div>
+  );
+}
+
 // `operator`: the viewer is the operator account; an operator-level claim
 // is theirs alone to retire (the server refuses anyone else).
-function ClaimRow({ c, topic, onRetire, showTopic, operator }) {
+function ClaimRow({ c, topic, onRetire, showTopic, operator, slug }) {
+  const [whyOpen, setWhyOpen] = React.useState(false);
   // A declared end still ahead is live until then; a mark's end is past.
   const live = !c.valid_to || (!c.retired_by && new Date(c.valid_to) > new Date());
   const theirs = normLevel(c.truth_level) === "L0_OPERATOR" && !operator;
@@ -918,9 +950,11 @@ function ClaimRow({ c, topic, onRetire, showTopic, operator }) {
           : c.retired_by ? <>valid to <b>{fmtStamp(c.valid_to)}</b>{` (mark ${c.retired_by})`}</>
           : <>expired ({claimEnd(c.valid_to).replace(/^through /, "after ").replace(/^until /, "")})</>}</span>
         <span style={{ flex: 1 }} />
+        {slug && <button className="btn ghost" data-why-toggle onClick={() => setWhyOpen(!whyOpen)}>{whyOpen ? "hide why" : "why"}</button>}
         {live && onRetire && !theirs && <ClaimRetire topic={topic || c.topic} id={c.id} onRetire={onRetire} />}
         {live && onRetire && theirs && <span className="muted" data-operator-only>the operator's to retire</span>}
       </div>
+      {whyOpen && slug && <WhyTree slug={slug} id={c.id} />}
     </div>
   );
 }
@@ -953,7 +987,7 @@ function TensionsList({ slug, reload, onRetire, onHistory, operator }) {
               <span style={{ flex: 1 }} />
               <button className="btn ghost" onClick={() => onHistory(t.topic)}>history</button>
             </div>
-            {t.claims.map(c => <ClaimRow key={c.id} c={c} topic={t.topic} onRetire={onRetire} operator={operator} />)}
+            {t.claims.map(c => <ClaimRow key={c.id} c={c} topic={t.topic} onRetire={onRetire} operator={operator} slug={slug} />)}
           </section>
         ))}
       </div>
@@ -981,7 +1015,7 @@ function TopicHistory({ slug, topic: initial, reload, onRetire, operator }) {
         {!asked && <div className="mx-empty">type a topic</div>}
         {asked && <Pending data={data} err={err} />}
         {data && data.claims.length === 0 && <div className="mx-empty">no claims for "{asked}"</div>}
-        {data && data.claims.map(c => <ClaimRow key={c.id} c={c} topic={asked} onRetire={onRetire} operator={operator} />)}
+        {data && data.claims.map(c => <ClaimRow key={c.id} c={c} topic={asked} onRetire={onRetire} operator={operator} slug={slug} />)}
       </div>
     </div>
   );

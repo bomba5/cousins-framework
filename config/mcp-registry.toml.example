@@ -45,6 +45,7 @@ derived_from = { type = "array", items = "string", optional = true, description 
 scope = { type = "string", optional = true, description = "what the fact holds for, e.g. 'board rev A' (remember)" }
 valid_until = { type = "string", optional = true, description = "when the fact stops holding: ISO date (through that day, UTC) or time; past it the fact leaves the views (remember)" }
 id = { type = "string", description = "an entry id, from `history` or a recall line (why)" }
+depth = { type = "integer", optional = true, description = "hops to walk each way, 1 to 12; default the whole chain up to 12 (why)" }
 keyword = { type = "string", optional = true, description = "what to recall; empty lists the newest entries (recall)" }
 last = { type = "integer", description = "how many entries (recall)" }
 text = { type = "string", description = "what you are doing now (activity)" }
@@ -65,7 +66,7 @@ options = { level = "--level", cite = "--cite", derived_from = "--derived-from",
 
 [tools.memory.commands.why]
 argv = ["why", "{id}"]
-options = { json = "--json" }
+options = { json = "--json", depth = "--depth" }
 
 [tools.memory.commands.obsolete]
 argv = ["obsolete", "{topic}"]

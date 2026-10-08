@@ -746,6 +746,10 @@ Query `layer`: `active`, `index`, `distilled`, `memory`, `notes`, `harness` or `
 
 Query `path`, `start`, `count`, and `layer=harness` to read from the harness auto-memory directory (`404` if none is configured). Same answer as [the file reader](#get-apicousinsslugfilesread).
 
+### `GET /api/memory/<slug>/why`
+
+`?id=<entry id>[&depth=N]`: the entry's provenance chain, as `cousin-memory why --json` gives it ([memory](../memory.md#what-an-entry-was-built-from)): `{"ok": true, "entry", "derived_from", "used_by", "retired_by", "valid_to", "depth"}`, each entry of the first hop carrying its next as `built_from` / `built_on_by`, with `more: true` where a limit cut it, `cycle: true` for a loop and `{"id", "missing": true}` for an id with no raw entry. No `depth` walks the whole chain (at most 12 hops); a `depth` is held to 1-12, and the answer's `depth` is the one used. `400` no id or a non-integer depth, `404` an id no raw entry has.
+
 ### `GET /api/memory/<slug>/tensions`
 
 `{"tensions": [{"topic", "claims": [...]}]}`, newest first: the cousin's authored topics with two or more live claims of different content (`cousin-memory tensions`). Each claim is a raw entry with its `id`, `valid_from`, `valid_to` (null for a live claim with no declared end; a declared end still ahead keeps it live) and `scope` when it has one. Nothing judges whether the claims are opposite; the operator settles a tension by retiring one claim, `cousin-memory obsolete <topic> --why <reason> --entry <id>` or `POST /api/memory/<slug>/obsolete` with `entry`.

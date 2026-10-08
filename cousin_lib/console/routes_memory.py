@@ -145,6 +145,22 @@ def register():
         except home_files.PathRefused as err:
             raise refused(err)
 
+    @router.route("GET", "/api/memory/{slug}/why")
+    def why(req, slug):
+        """?id=<entry id>[&depth=N]: the entry's provenance chain, both
+        ways (memory.why)."""
+        home = cousin_home(req.server, slug)
+        eid = str(req.query.get("id") or "").strip()
+        if not eid:
+            raise HttpError(400, "id is required")
+        depth = req.int_query("depth")
+        from cousin_lib import memory as memory_lib     # `memory` here is the tree route
+        try:
+            out = memory_lib.why(home, eid, depth=depth)
+        except KeyError:
+            raise HttpError(404, "no raw entry with id %s" % eid)
+        return 200, json.loads(json.dumps(dict(out, ok=True), default=str))
+
     @router.route("GET", "/api/memory/{slug}/tensions")
     def tensions(req, slug):
         """Topics whose live claims disagree (memory.tensions), for the

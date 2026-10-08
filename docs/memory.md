@@ -123,7 +123,7 @@ cousin-memory remember TOPIC FACT [--level L] [--cite SRC] [--derived-from ID]..
                        [--scope TEXT] [--valid-until WHEN]
 cousin-memory activity "what I'm doing now"
 cousin-memory recall [KEYWORD] [--last N]
-cousin-memory why ID [--json]
+cousin-memory why ID [--json] [--depth N]
 ```
 
 `decide` appends to `data/decisions.jsonl` and also writes a raw entry
@@ -191,20 +191,33 @@ carries no scope or end of its own).
 `remember` and `decide` take `--derived-from ID` (repeatable; the memory
 tool's `derived_from` list): the ids of the raw entries a claim was built
 from. An id is the 12 hex characters `history`, `why` and a recall line
-show; anything else is refused. `why ID` walks one hop each way:
+show; anything else is refused. `why ID` walks the whole chain each way,
+indented by hop:
 
 ```
-cousin-memory why cdaa66b17209
-#   -> cdaa66b17209 [L3_COUSIN_CONCLUSION] backups: verify the snapshot after 02:30
+cousin-memory why 5e0b9d2a71c4
+#   -> 5e0b9d2a71c4 [L3_COUSIN_CONCLUSION] backups: a loop checks the snapshot at 02:45
 #      built from:
-#        ad5d2cfaab7a [L2_TOOL] backups: the NAS snapshot runs at 02:00
+#        cdaa66b17209 [L3_COUSIN_CONCLUSION] backups: verify the snapshot after 02:30
+#          ad5d2cfaab7a [L2_TOOL] backups: the NAS snapshot runs at 02:00
 #      built on by: nothing
 ```
 
-It also names the mark that retired the entry, if one did. Nothing is
-inherited along the hop: each entry keeps its own truth level, so a
-conclusion built from a tool fact is still a conclusion. `--json` prints
-the same as one object.
+It also names the mark that retired the entry, if one did. `--depth N`
+stops after N hops each way (N is held to 1-12: 0 or less walks one hop,
+and the answer's `depth` says what was used); without it the walk goes
+to the end of the chain, at most 12 hops. An entry cut by either limit
+says `(and further)`. An id no raw entry has is shown `(not in raw
+memory)`. An entry already on the same path is shown as a cycle, never
+walked again; an entry two routes reach is shown under both. Nothing is inherited along the chain: each entry keeps its
+own truth level, so a conclusion built from a tool fact is still a
+conclusion. `--json` prints the same as one object: the top level's
+`derived_from` and `used_by` are the first hop, and each entry there
+carries its next hop as `built_from` / `built_on_by` (`more: true` where
+the depth cut it, `cycle: true` for a loop, `{"id", "missing": true}` for
+an id with no raw entry). The memory tool's `why`
+takes `depth` too, and on the console every claim card has a "why"
+button that opens the same chain.
 
 If the decision text has backticks or `$(...)` in it, don't pass it as
 arguments: your shell runs them before `decide` sees the text. Use the

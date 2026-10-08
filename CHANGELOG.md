@@ -3,6 +3,23 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.32.0 - 2026-10-07
+
+### Added
+
+- **`why` walks the whole provenance chain, and the console shows it.**
+  `cousin-memory why ID` (and the memory tool's `why`) used to stop one
+  hop from the entry. It now follows `derived_from` back to the chain's
+  roots and forward through everything built on it, indented by hop, up
+  to 12 hops; `--depth N` (the tool's `depth`, held to 1-12) stops
+  sooner. An entry a limit cut says `(and further)`, and one already on
+  the same path is shown as a cycle, never walked again. In `--json`
+  each entry carries its next hop as `built_from` / `built_on_by`. On
+  the console every claim card under history and tensions has a "why"
+  button that opens the same chain, read from the new
+  `GET /api/memory/<slug>/why`. An existing cousin gets the tool's
+  `depth` once its own `mcp-registry.toml` is updated.
+
 ## 3.31.0 - 2026-10-07
 
 ### Added

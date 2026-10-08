@@ -1015,7 +1015,8 @@ def register():
         from cousin_lib.config import FrameworkConfig
         fw = FrameworkConfig(req.server.root)
         return 200, {"ok": True, "days": days,
-                     "cousins": {c.slug: upkeep.measure(c.home, days=days)
+                     "cousins": {c.slug: dict(upkeep.measure(c.home, days=days),
+                                              alarm_percent=upkeep.alarm_percent(c.home))
                                  for c in fw.list_cousins()}}
 
     @router.route("GET", "/api/tokens")

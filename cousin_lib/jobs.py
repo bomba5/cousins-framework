@@ -644,11 +644,13 @@ def reap_group(job, *, grace=3.0):
     return members
 
 
-def _spawn_tracked(cmd, log_path, job_id):
+def _spawn_tracked(cmd, log_path, job_id, *, artifacts=(), commit=None, owner=None):
     """Fork the command as a detached background process with its
     output in log_path, and write its exit status back to the store
     when it finishes. Double fork: the runner is reparented to init so
-    nothing waits on the CLI. Returns the runner's pid."""
+    nothing waits on the CLI. Returns the runner's pid. `artifacts`
+    (absolute paths) are recorded for the job on exit 0, before the row
+    closes (_record_artifacts)."""
     read_fd, write_fd = os.pipe()
     pid = os.fork()
     if pid != 0:
@@ -687,12 +689,42 @@ def _spawn_tracked(cmd, log_path, job_id):
         # fails, the row stays 'running' and `list --active` shows it,
         # which is the loud version of that failure.
         status = "done" if rc == 0 else "failed"
+        summary = ""
+        if rc == 0 and artifacts:
+            missing = _record_artifacts(job_id, artifacts, commit, owner)
+            if missing:
+                # exit 0 without the output it named is not a build to show
+                status = "failed"
+                summary = "exit 0, but not recorded: " + "; ".join(missing)
         current = get_job(job_id)
         # a row a reader wrongly marked lost is still this runner's to close
         if current and current["status"] in ("running", "lost"):
-            finish_job(job_id, status=status, exit_code=rc)
+            finish_job(job_id, status=status, summary=summary, exit_code=rc)
     finally:
         os._exit(0)
+
+
+def _log_line(text):
+    """One line into the job's log: fd 1 in the runner is the log file,
+    whatever object sys.stdout has become in this process."""
+    os.write(1, (text + "\n").encode("utf-8", "replace"))
+
+
+def _record_artifacts(job_id, paths, commit, owner):
+    """Each path as an artifact of the job (artifacts.add), a line per
+    path in the job's log; returns what could not be recorded,
+    "<path>: <why>" each."""
+    from cousin_lib import artifacts
+    missing = []
+    for path in paths:
+        try:
+            row = artifacts.add(path, created_by=owner or "", job_id=job_id, git_commit=commit)
+            _log_line("[cousin-job] artifact #%s recorded: %s sha256 %s"
+                      % (row.get("id"), row.get("path"), str(row.get("sha256", ""))[:12]))
+        except (ValueError, OSError, sqlite3.Error) as err:
+            missing.append("%s: %s" % (path, err))
+            _log_line("[cousin-job] artifact NOT recorded: %s: %s" % (path, err))
+    return missing
 
 
 def home_log_path(home, rel):
@@ -737,6 +769,13 @@ def _cmd_start(args):
                   " the home, outside .secrets)" % (args.home_log, err),
                   file=sys.stderr)
             return 2
+    # An artifact names a file the command will build: absolute now, from
+    # where this runs (the command runs here too), and only with a command
+    # to build it.
+    artifacts = [os.path.abspath(os.path.expanduser(p)) for p in (getattr(args, "artifact", None) or [])]
+    if (artifacts or getattr(args, "artifact_commit", None)) and not cmd:
+        print("cousin-job: --artifact needs a command that builds it", file=sys.stderr)
+        return 2
     job_id = register_job(
         kind=args.kind, title=args.title, description=args.desc or "",
         spawned_by=slug, log_path=args.log,
@@ -751,7 +790,8 @@ def _cmd_start(args):
         set_log_path(job_id, log_path)
         _write_log_header(log_path, args.kind, args.title,
                           "$ " + " ".join(cmd))
-        pid = _spawn_tracked(cmd, log_path, job_id)
+        pid = _spawn_tracked(cmd, log_path, job_id, artifacts=artifacts,
+                             commit=getattr(args, "artifact_commit", None), owner=slug)
         record_spawn(job_id, pid)
     elif not log_path:
         # A job with no process of its own (a hand-registered subagent,
@@ -929,6 +969,16 @@ def _start_options(p, *, help_text=False):
     else:
         p.add_argument("--home-log")
     p.add_argument("--json", action="store_true")
+    if help_text:
+        p.add_argument("--artifact", action="append", metavar="PATH",
+                       help="a file the command builds (repeat for more): on exit 0 it is"
+                            " recorded as an artifact of this job (cousin-artifact); one"
+                            " that is missing then fails the job")
+        p.add_argument("--artifact-commit", metavar="SHA",
+                       help="the commit the artifacts were built from")
+    else:
+        p.add_argument("--artifact", action="append")
+        p.add_argument("--artifact-commit")
 
 
 def _title_after_separator(argv):
@@ -971,6 +1021,8 @@ def _reparse_start_remainder(args):
             args.log = args.log or known.log
             args.home_log = args.home_log or known.home_log
             args.json = args.json or known.json
+            args.artifact = (args.artifact or []) + (known.artifact or []) or None
+            args.artifact_commit = args.artifact_commit or known.artifact_commit
             cl = rest
         except SystemExit:
             pass

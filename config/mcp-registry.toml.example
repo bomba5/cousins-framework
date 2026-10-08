@@ -123,6 +123,8 @@ mine = { type = "boolean", description = "only this cousin's jobs (list)" }
 active = { type = "boolean", description = "(list)" }
 json = { type = "boolean", description = "machine output (start, list, show)" }
 argv = { type = "array", items = "string", description = "the command as a list, one element per argument, never a shell string (run)" }
+artifacts = { type = "array", items = "string", optional = true, description = "files the command builds, relative to your home or absolute (run): on exit 0 each is recorded as an artifact of the job (path, sha256, size); one that is missing fails the job" }
+commit = { type = "string", optional = true, description = "the git commit the artifacts were built from (run)" }
 log = { type = "string", optional = true, description = "log file, relative to your home (not absolute, no .., not in .secrets); default: the job's own log under data/job-logs (run)" }
 
 [tools.job.commands.start]
@@ -136,7 +138,7 @@ options = { desc = "--desc", json = "--json" }
 # title after it, so a title such as "--json" is never read as an option.
 # --home-log confines the log to the home.
 argv = ["start", "shell", "--json", "--", "{title}", "{argv}"]
-options = { desc = "--desc", log = "--home-log" }
+options = { desc = "--desc", log = "--home-log", artifacts = "--artifact", commit = "--artifact-commit" }
 
 [tools.job.commands.done]
 argv = ["done", "{id}", "{summary}"]

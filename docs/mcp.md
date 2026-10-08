@@ -80,8 +80,8 @@ job without a shell of its own: it takes `title`, `argv` (the command as
 an array, one element per argument, never a shell string), and
 optionally `desc` and `log` (a path relative to the cousin's home;
 without it, the job's own log under `data/job-logs/`). It runs
-`cousin-job start shell --json [--desc D] [--home-log L] -- TITLE
-ARGV...`, so it's the same launcher. The title comes after `--`, so a
+`cousin-job start shell --json [--desc D] [--home-log L] [--artifact P]...
+[--artifact-commit C] -- TITLE ARGV...`, so it's the same launcher. The title comes after `--`, so a
 title like `--json` is only a title. `--home-log` confines the log to
 the home: an absolute path, `~`, `..` or anything under `.secrets` is
 refused before a row exists. From there it's the usual launcher: the command runs detached in its own process group, from the

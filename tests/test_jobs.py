@@ -186,6 +186,49 @@ class TestBackgroundCommand(JobsCase):
         self.assertIn("hello-from-job",
                       pathlib.Path(job["log_path"]).read_text())
 
+    def test_named_artifacts_are_recorded_on_exit_zero(self):
+        """`--artifact` names what the command builds: on exit 0 each one
+        is an artifact row of the job (measured then), relative paths
+        from where the start ran; a named file that is not there fails
+        the job with the reason, though the command exited 0."""
+        from cousin_lib import artifacts
+        here = os.getcwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, here)
+        _, out, _ = self._main([
+            "start", "shell", "build", "--artifact", "out/fw.bin",
+            "--artifact-commit", "abc1234", "--",
+            "sh", "-c", "mkdir -p out && printf firmware > out/fw.bin",
+        ])
+        job_id = int(out.strip())
+        job = self._wait_status(job_id, ("done", "failed"))
+        self.assertEqual(job["status"], "done", job.get("result_summary"))
+        [row] = artifacts.list_rows(job_id=job_id)
+        self.assertEqual(row["path"], str(self.root / "out" / "fw.bin"))
+        self.assertEqual(row["size"], len("firmware"))
+        self.assertEqual(row["git_commit"], "abc1234")
+        self.assertIn("artifact #%d recorded" % row["id"], pathlib.Path(job["log_path"]).read_text())
+        _, out, _ = self._main([
+            "start", "shell", "forgot", "--artifact", "out/missing.bin", "--", "true"])
+        job = self._wait_status(int(out.strip()), ("done", "failed"))
+        self.assertEqual((job["status"], job["exit_code"]), ("failed", 0))
+        self.assertIn("missing.bin", job["result_summary"])
+        self.assertEqual(artifacts.list_rows(job_id=job["id"]), [])
+
+    def test_a_failing_build_records_nothing(self):
+        from cousin_lib import artifacts
+        _, out, _ = self._main([
+            "start", "shell", "broken", "--artifact", str(self.root / "x.bin"), "--",
+            "sh", "-c", "printf x > %s; exit 3" % (self.root / "x.bin")])
+        job = self._wait_status(int(out.strip()), ("failed",))
+        self.assertEqual(job["exit_code"], 3)
+        self.assertEqual(artifacts.list_rows(job_id=job["id"]), [])
+
+    def test_an_artifact_needs_a_command(self):
+        rc, _, err = self._main(["start", "shell", "nothing", "--artifact", "x.bin"])
+        self.assertEqual(rc, 2)
+        self.assertIn("needs a command", err)
+
     def test_a_relative_log_is_recorded_absolute(self):
         # The job tool's `run` passes its `log` relative to the home, the
         # working directory there; the console reads the row from anywhere.
@@ -251,7 +294,8 @@ class TestBackgroundCommand(JobsCase):
             build(p)
             return sorted(o for a in p._actions for o in a.option_strings)
         self.assertEqual(options(jobs._start_options),
-                         ["--desc", "--home-log", "--json", "--log"])
+                         ["--artifact", "--artifact-commit", "--desc", "--home-log",
+                          "--json", "--log"])
         # the separated shape counts an option given before `--` the same way
         self.assertTrue(jobs._title_after_separator(
             ["start", "shell", "--home-log", "logs/x.log", "--", "t"]))

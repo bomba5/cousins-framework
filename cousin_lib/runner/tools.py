@@ -227,6 +227,17 @@ def _j_run(ctx, a):
             raise ValueError("run: log %r refused: %s (a path relative to your home,"
                              " outside .secrets)" % (log, err))
         cli += ["--home-log", log]
+    outputs = a.get("artifacts") or []
+    if not isinstance(outputs, list) or not all(isinstance(o, str) and o.strip() for o in outputs):
+        raise ValueError("run: artifacts must be a list of file paths (relative to your home,"
+                         " or absolute): what the command builds")
+    for output in outputs:
+        cli += ["--artifact", output]
+    commit = _str(a, "commit")
+    if commit:
+        if not outputs:
+            raise ValueError("run: commit names what the artifacts were built from; give artifacts too")
+        cli += ["--artifact-commit", commit]
     cli += ["--", title] + argv
     env = dict(os.environ, FRAMEWORK_ROOT=str(ctx.root), COUSIN_HOME=str(ctx.home),
                COUSIN_SLUG=ctx.slug)

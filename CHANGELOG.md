@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.0 - 2026-10-08
+
+### Added
+
+- **A job records what it built.** `cousin-job start shell --artifact
+  PATH` (repeatable) with `--artifact-commit SHA`, and the job tool's
+  `run` with `artifacts` and `commit`, name the files the command
+  builds. When it exits 0, each one is recorded as an artifact of the
+  job (path, sha256, size, the commit) before the row closes, with a
+  line per file in the job's log; one that is not there fails the job
+  with the reason, though the command exited 0. A cousin building an
+  image names it once and the artifacts store fills itself, instead of
+  waiting for a `cousin-artifact add` nobody remembered to run.
+
 ## 3.36.5 - 2026-10-08
 
 ### Fixed

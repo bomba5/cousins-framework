@@ -560,6 +560,26 @@ class TestJobRun(HermeticCase):
         self.assertIn("cwd=%s" % os.path.realpath(ctx.home), log)
         self.assertIn("arg=$(echo no) `x` ;", log)
 
+    def test_run_records_the_artifacts_it_names(self):
+        """`artifacts` (relative to the home) are recorded for the job on
+        exit 0, with the commit; `commit` alone and a non-list are
+        refused before anything runs."""
+        from cousin_lib import artifacts, jobs
+        ctx = self._ctx()
+        code = "import pathlib; pathlib.Path('build').mkdir(exist_ok=True); pathlib.Path('build/fw.bin').write_bytes(b'abc')"
+        out = self._run(ctx, title="fw", argv=[sys.executable, "-c", code],
+                        artifacts=["build/fw.bin"], commit="deadbee")
+        job = self._wait(out["job_id"])
+        self.assertEqual(job["status"], "done", job.get("result_summary"))
+        [row] = artifacts.list_rows(job_id=out["job_id"])
+        self.assertEqual((row["path"], row["size"], row["git_commit"], row["created_by"]),
+                         (os.path.realpath(ctx.home / "build" / "fw.bin"), 3, "deadbee", ctx.slug))
+        for bad in ({"commit": "deadbee"}, {"artifacts": "build/fw.bin"}, {"artifacts": [""]}):
+            text, err = tools.call(ctx, "job", dict({"command": "run", "title": "t",
+                                                     "argv": [sys.executable, "-c", "print(1)"]}, **bad))
+            self.assertTrue(err, bad)
+        self.assertEqual(len(jobs.list_jobs()), 1)
+
     def test_a_relative_log_lands_under_the_home(self):
         ctx = self._ctx()
         out = self._run(ctx, title="logged", log="data/my-run.log",

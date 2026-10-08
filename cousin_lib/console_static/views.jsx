@@ -9,6 +9,9 @@ function CousinTag({ slug }) {
 // ============ JOBS ============
 // Sub-agent runs and long-running shell jobs. Live last-N-lines per running
 // job, click to expand to the full log. Backed by /api/jobs (jobs.db).
+// /api/artifacts lists at most this many (artifacts.LIST_CAP)
+const ARTIFACT_LIST_CAP = 100;
+
 function JobsView() {
   // jobs | artifacts: the artifacts list is a tab of its own, not a panel
   // under every job row where nobody scrolled to it
@@ -23,7 +26,8 @@ function JobsView() {
   }, [tab]);
   const tabs = (
     <div className="pane-tabs" role="tablist" data-jobs-tabs style={{ marginBottom: 12 }}>
-      {[["jobs", "jobs"], ["artifacts", "artifacts" + (artifactCount ? ` (${artifactCount})` : "")]]
+      {[["jobs", "jobs"], ["artifacts", "artifacts" + (artifactCount
+        ? ` (${artifactCount >= ARTIFACT_LIST_CAP ? ARTIFACT_LIST_CAP + "+" : artifactCount})` : "")]]
         .map(([key, label]) => (
           <button key={key} className={"btn " + (tab === key ? "active" : "ghost")} role="tab"
                   aria-selected={tab === key} data-jobs-tab={key}

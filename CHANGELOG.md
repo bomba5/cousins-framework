@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.4 - 2026-10-08
+
+### Fixed
+
+- **A name keys one thread however its accents were typed.** The
+  thread key lowercased the name and replaced spaces but kept its
+  Unicode form, so "Totò" sent composed and sent decomposed (as some
+  terminals and keyboards do) landed in two threads. Names are
+  normalized to NFC first, in the framework and in the hive node alike.
+  A thread already stored under a decomposed key keeps that key.
+
 ## 3.37.3 - 2026-10-08
 
 ### Fixed

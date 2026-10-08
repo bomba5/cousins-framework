@@ -185,6 +185,22 @@ class TestSenderName(HermeticCase):
                 with self.assertRaises(SenderRefused):
                     send_message(self.fw, toto, "sam", "x", display_name=name)
 
+    def test_a_decomposed_name_keys_the_same_thread(self):
+        """NFC before the key: "Totò" composed and decomposed is one
+        thread, in the framework and in the hive node's own copy."""
+        import importlib.util
+        import unicodedata
+        from cousin_lib.server.storage import normalize_chat_user
+        nfd = unicodedata.normalize("NFD", "Totò Rossi")
+        self.assertNotEqual(nfd, "Totò Rossi")
+        self.assertEqual(normalize_chat_user(nfd), normalize_chat_user("Totò Rossi"))
+        self.assertEqual(normalize_chat_user("Totò Rossi"), "totò_rossi")
+        node = pathlib.Path(__file__).resolve().parents[1] / "templates" / "hive-node" / "cousin_node.py"
+        spec = importlib.util.spec_from_file_location("cousin_node_nfc", node)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        self.assertEqual(mod.normalize_chat_user(nfd), "totò_rossi")
+
     def test_a_cousin_whose_own_name_is_the_operators_is_refused(self):
         from cousin_lib.chat import SenderRefused
         (self.root / "cousins" / "wren" / "cousin.toml").write_text(

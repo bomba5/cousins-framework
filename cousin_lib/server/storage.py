@@ -10,6 +10,7 @@ import base64
 import binascii
 import re
 import sqlite3
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,7 +23,8 @@ def normalize_chat_user(name):
     sent no usable name; those rows still need a queryable key."""
     if not name:
         return "unknown"
-    return name.lower().replace(" ", "_")
+    # NFC first: "Totò" typed composed or decomposed is one person, one thread
+    return unicodedata.normalize("NFC", name).lower().replace(" ", "_")
 
 
 def is_operator(config, user):

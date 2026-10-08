@@ -142,6 +142,31 @@ class TestInboundGate(_BridgeFixture):
                         "the rejected id must reach the log")
 
 
+class TestInboundNotDelivered(_BridgeFixture):
+    """#243: a message stored but not delivered is told to the sender on
+    the wire, and relay_inbound returns normally so the offset moves on
+    (a retry would store the row a second time)."""
+
+    def test_the_sender_is_told_and_nothing_raises(self):
+        from cousin_lib.server import chat_api
+        cfg = self._bridge()
+        replied, logged = [], []
+
+        def failing_send(**kw):
+            raise chat_api.NotDelivered("wren: not delivered: its inbox did not take it")
+
+        relay_inbound(
+            cfg,
+            update={"message": {"from": {"id": 42, "first_name": "Sam"},
+                                "chat": {"id": 4242}, "text": "hello"}},
+            chat_send=failing_send, tg_send=lambda **kw: replied.append(kw),
+            log=logged.append)
+        self.assertEqual(len(replied), 1)
+        self.assertEqual(replied[0]["chat_id"], 4242)
+        self.assertTrue(replied[0]["text"].startswith("Not delivered:"))
+        self.assertTrue(any("not delivered" in line for line in logged))
+
+
 class TestOutbound(_BridgeFixture):
     def test_cousin_reply_is_relayed_to_telegram(self):
         cfg = self._bridge()
@@ -709,3 +734,28 @@ class TestLoginNotice(HermeticCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheBridgeKeepsNothingUndelivered(_BridgeFixture):
+    """#243 review: a message the inbox did not take leaves no row and
+    fires no hook in the bridge either."""
+
+    def test_no_row_and_no_hook(self):
+        from cousin_lib import delivery, telegram
+        from cousin_lib.server import chat_api
+        self._bridge()
+        (self.home / "cousin.toml").write_text(
+            (self.home / "cousin.toml").read_text() + '\n[agent]\nrunner = "fake"\n')
+        cfg = telegram.load_bridge_config(self.home)
+        fired = []
+        with mock.patch("cousin_lib.delivery.deliver", return_value=delivery.FAILED), \
+                mock.patch("cousin_lib.chat_hooks.on_message", lambda *a, **kw: fired.append(kw)):
+            with self.assertRaises(chat_api.NotDelivered):
+                telegram._store_and_deliver(cfg, user="Sam", message="hi")
+        self.assertEqual(fired, [])
+        import sqlite3
+        db = sqlite3.connect(self.home / "data" / "chat.db")
+        try:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 0)
+        finally:
+            db.close()

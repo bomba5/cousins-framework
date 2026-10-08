@@ -304,6 +304,11 @@ but you may delete the message.
 - An HTTP error in the log carries Telegram's reason, taken from its
   `description` (`_describe`, 0.11.0): `HTTP 403: Forbidden: bot was blocked by the
   user`, not just `HTTP Error 403`.
+- **Not delivered**: when the cousin's inbox does not take a message (the
+  inbox write failed), nothing is kept: the bridge removes the row it
+  stored, answers the sender in Telegram with "Not delivered: ..." and
+  the reason, logs it, and moves on to the next update. Send it again
+  yourself.
 - A pass runs about every 5 seconds (`run_bridge`, `poll_interval`).
 
 ## Security notes

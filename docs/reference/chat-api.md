@@ -4,7 +4,7 @@ The calls that read and write a [cousin](../glossary.md#cousin)'s chat history, 
 
 ## Where it runs
 
-No cousin on this machine runs a chat server or has a port. The console, `cousin-chat`, `cousin-reply` and the Telegram bridge make these calls in-process, through `cousin_lib/server/chat_api.py` (`history`, `search`, `send`, `reply`, `archive`, `react`), over the cousin's own `data/chat.db`. Each takes the body or query described below and gives back the JSON described below, or the `400` text. A script on this machine goes through `cousin-chat` or the console's chat routes ([the console API](console-api.md)), which answer with these calls.
+No cousin on this machine runs a chat server or has a port. The console, `cousin-chat`, `cousin-reply` and the Telegram bridge make these calls in-process, through `cousin_lib/server/chat_api.py` (`history`, `search`, `send`, `reply`, `archive`, `react`), over the cousin's own `data/chat.db`. Each takes the body or query described below and gives back the JSON described below, or the `400` text (and a send the [inbox](../glossary.md#inbox) did not take raises `NotDelivered`, below). A script on this machine goes through `cousin-chat` or the console's chat routes ([the console API](console-api.md)), which answer with these calls.
 
 A local cousin with no `[agent] runner` has nothing to deliver to: 2.0.0 has no legacy tmux [lane](../glossary.md#lane). It is refused by name, and `cousin-chat send` to it exits 1.
 
@@ -65,7 +65,7 @@ curl -s 127.0.0.1:8210/api/send -H 'Content-Type: application/json' \
   -d '{"user": "ana", "message": "can you check the backups?"}'
 ```
 
-Body: `user` and a non-empty `message` (both required), plus optional `reply_to` (any JSON) and `image` (a `data:image/<type>;base64,...` URI). A node reads only `user` and `message`. The answer is `200 {"ok": true, "id": 413, "timestamp": "..."}` once the row is stored. It doesn't wait for the cousin.
+Body: `user` and a non-empty `message` (both required), plus optional `reply_to` (any JSON) and `image` (a `data:image/<type>;base64,...` URI). A node reads only `user` and `message`. The answer is `200 {"ok": true, "id": 413, "timestamp": "..."}` once the row is stored and the cousin's inbox took it. It doesn't wait for the cousin to read it.
 
 On this machine, before any of that, every send checks whether the message is a login
 code a running `cousin-account login|token --via <this cousin>` is waiting
@@ -83,6 +83,8 @@ What happens on an ordinary (non-diverted) send on this machine, in order:
 3. The message is delivered: a `chat` item on the sender's thread goes into the cousin's [inbox](../glossary.md#inbox), with the image's path as an attachment. The send doesn't wait for it. Nothing is appended to the message; recall is the [runner](../glossary.md#runner)'s own prompt hook.
 4. If `user` is you (`[operator] name`), the message is checked for corrections ("stop", "don't", "instead", ...) and any hit goes to `data/corrections.jsonl`. Failures here never fail the send.
 5. Chat hooks from `<home>/chat-hooks.json` run (see below).
+
+If the inbox didn't take the message in step 3 (its write failed; or, in a race, the cousin lost its runner kind after the caller checked), the cousin would never see it, so nothing is kept: the row and any image saved for it are removed again, steps 4 and 5 don't run, and the in-process call raises `NotDelivered`. The console's `POST /api/chat/send` and `POST /api/cousins/<slug>/peer` answer `503 {"ok": false, "error": "<slug>: not delivered: ...; nothing was kept, send it again", "stored": false}`. `cousin-chat send` prints `cousin-chat: <that line>` on stderr and exits 1, the runner's `send` tool fails with it, the Telegram bridge answers the sender "Not delivered: ...", and an external peer's `POST /peer/send` answers `502` with the id freed for its retry. Since nothing was kept, a send again leaves one row, not two.
 
 On a node the row is stored and the answer goes back at once. The node's brain runs the [turn](../glossary.md#turn) on a background thread, and its reply shows up in the history. A node has no login codes, no corrections and no chat hooks.
 

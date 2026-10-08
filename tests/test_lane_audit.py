@@ -137,6 +137,8 @@ SITES = (
     ('cousin_lib/spawn.py', 'parser.add_argument("--runner", choices=RUNNER_KINDS,', 'kinds'),
     ('cousin_lib/spawn.py', 'on_runner = runner_lane(root / "cousins" / args.slug)', 'transport'),
     ('cousin_lib/spawn.py', 'why = delivery.lane_refusal(root / "cousins" / args.slug)', 'refusal'),
+    ('cousin_lib/server/chat_api.py', 'if not isinstance(delivery.backend_for(config.home), delivery.InboxBackend):', 'transport'),
+    ('cousin_lib/server/chat_api.py', 'why = delivery.lane_refusal(config.home)', 'refusal'),
     ('cousin_lib/supervisor.py', 'delivery.RUNNER_KINDS gets a runner child, unless `[agent] auto_start = false`', 'transport'),
     ('cousin_lib/supervisor.py', 'from cousin_lib.delivery import RUNNER_KINDS, lane_refusal  # the one list of runner kinds', 'kinds'),
     ('cousin_lib/supervisor.py', 'return {"ok": False, "error": lane_refusal(self.root / "cousins" / slug)}', 'refusal'),

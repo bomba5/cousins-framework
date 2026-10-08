@@ -13,7 +13,7 @@ console proxies to.
 Each call takes the request's parameters as a plain mapping (query
 parameters: the first value of each, as strings) and returns the JSON
 body of a 200, or raises BadRequest, whose message is the 400 body's
-`error`. The seams a send and a reaction need (delivery, the reaction
+`error` (and a send whose delivery failed raises NotDelivered, a 503). The seams a send and a reaction need (delivery, the reaction
 notice) are passed in: `make_deliver` and `make_notify` build them.
 """
 import json
@@ -26,6 +26,33 @@ from cousin_lib.server.storage import ChatStore, normalize_chat_user, save_data_
 
 class BadRequest(ValueError):
     """A client error: its message is the 400 body's `error`."""
+
+
+class NotDelivered(Exception):
+    """The cousin's inbox did not take the message, so its runner would
+    never see it: nothing is kept (the row is removed again) and the
+    sender has to know (a 503 over HTTP) and send it again."""
+
+
+def not_delivered(config):
+    """The NotDelivered for a send whose delivery failed: the lane
+    refusal for a cousin with no runner kind, else the inbox's failure."""
+    if not isinstance(delivery.backend_for(config.home), delivery.InboxBackend):
+        why = delivery.lane_refusal(config.home)
+    else:
+        why = "its inbox did not take it"
+    return NotDelivered("%s: not delivered: %s; nothing was kept, send it again"
+                        % (config.slug, why))
+
+
+def drop_undelivered(home, message_id, attachments=()):
+    """Remove a stored row nobody will see, with the files saved for it."""
+    _with_store(home, lambda store: store.delete_message(message_id))
+    for path in attachments:
+        try:
+            Path(path).unlink()
+        except (OSError, TypeError, ValueError):
+            pass
 
 
 def db_path(home):
@@ -114,10 +141,13 @@ def _attachment(home, message_id, image):
 
 def send(config, body, *, deliver=None):
     """One inbound chat message: divert a login code, store the row,
-    deliver it (`deliver(user=, message=, message_id=, attachments=)`,
-    fire-and-forget), touch the presence marker and capture a correction,
-    then fire the chat hooks. A runner recalls in its own prompt hook, so
-    the delivered item carries no recall line."""
+    deliver it (`deliver(user=, message=, message_id=, attachments=)`),
+    touch the presence marker and capture a correction, then fire the
+    chat hooks. A delivery that failed removes the row again, fires
+    nothing and raises NotDelivered: the sender learns the cousin will
+    not see it, and a send again leaves one row, not two. A runner
+    recalls in its own prompt hook, so the delivered
+    item carries no recall line."""
     user = body.get("user")
     message = body.get("message")
     if not user or not message:
@@ -137,7 +167,12 @@ def send(config, body, *, deliver=None):
     if body.get("image"):
         attachments.append(_attachment(home, row["id"], body["image"]))
     if deliver is not None:
-        deliver(user=user, message=message, message_id=row["id"], attachments=attachments)
+        outcome = deliver(user=user, message=message, message_id=row["id"],
+                          attachments=attachments)
+        if outcome == delivery.FAILED:
+            # the runner will never see it: keep nothing, fire nothing
+            drop_undelivered(home, row["id"], [a for a in attachments if a.startswith("/")])
+            raise not_delivered(config)
     after_inbound_stored(config, user, message)
     chat_hooks.on_message(home, user=user, message=message, message_id=row["id"],
                           slug=config.slug, deliver=deliver)

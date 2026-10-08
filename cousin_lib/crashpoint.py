@@ -26,6 +26,7 @@ POINTS = {
     "rollover.handed_off": "a rollover: the handoff is written, the old session not yet ended",
     "rollover.connected": "a rollover: the new session exists, the generation not yet moved",
     "rollover.bumped": "a rollover: the generation moved, the digest not yet queued",
+    "rollover.digest_put": "a rollover: the digest row is put, the journal not yet told",
     "rollover.digest_queued": "a rollover: the digest is queued, the flip row not yet closed",
 }
 

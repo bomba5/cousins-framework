@@ -158,3 +158,10 @@ class TestRolloverCrash(HermeticCase):
         self.assertEqual(second.returncode, 0, second.stderr[-3000:])
         self.assert_one_rollover()
 
+    def test_killed_between_the_digest_and_the_journal_the_restart_adopts_it(self):
+        first = self.child("first", crash="rollover.digest_put")
+        self.assertEqual(first.returncode, -9, first.stderr[-2000:])
+        second = self.child("second")
+        self.assertEqual(second.returncode, 0, second.stderr[-3000:])
+        self.assert_one_rollover()
+

@@ -20,8 +20,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   it and skips what is done, so the handoff stays (`"handoff": "kept"`),
   the generation moves once, one digest boots the new session, and a
   start whose old session was already ended makes no boot of its own.
-  Shown by real processes killed at `rollover.handed_off`,
-  `rollover.connected`, `rollover.bumped` and `rollover.digest_queued`
+  A digest put just before a kill (its journal write not yet done) is
+  adopted, not put twice. The start hooks run again on a rerun, so they
+  are assumed idempotent. Shown by real processes killed at
+  `rollover.handed_off`, `rollover.connected`, `rollover.bumped`,
+  `rollover.digest_put` and `rollover.digest_queued`
   (`tests/runner/test_crash_rollover.py`).
 
 ## 3.42.0 - 2026-10-08

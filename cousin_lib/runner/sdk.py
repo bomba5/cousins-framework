@@ -1056,6 +1056,19 @@ class SdkRunner:
             self._request_rollover("the system prompt or the tools changed since this"
                                    " session started")
 
+    def _boot_row_since(self, ts):
+        """The newest boot row put at or after `ts` (the journal's last
+        write), or None."""
+        if not ts:
+            return None
+        try:
+            with self.inbox._db() as conn:
+                hit = conn.execute("SELECT id FROM inbox WHERE source='boot' AND created_at >= ?"
+                                   " ORDER BY id DESC LIMIT 1", (float(ts),)).fetchone()
+        except Exception:  # noqa: BLE001 - not found is a fresh digest, never a crash
+            return None
+        return hit[0] if hit else None
+
     def _rollover_pending(self):
         """A rollover journal whose flip row is still open: the restart
         finishes that rollover (rollover.JOURNAL). A journal whose row
@@ -2936,7 +2949,10 @@ class SdkRunner:
         """The rollover after its generation moved: start hooks, the digest,
         the row closed. A rerun from the journal (the runner died after the
         bump) takes the moved generation from it and puts no second digest
-        when the first is still in the inbox."""
+        when the first is still in the inbox: the one the journal names, or
+        a boot row put after the bump was recorded (a kill between the put
+        and the journal write). The start hooks run again on a rerun, so
+        they are assumed idempotent."""
         problems = list(problems or [])
         if journal is not None:
             generation = journal.get("new_generation") or boot.read_generation(self.home)
@@ -2947,6 +2963,8 @@ class SdkRunner:
             problems.append("start hooks: %s: %s" % (type(exc).__name__, exc))
         queued = journal.get("digest_id") if journal and journal.get("phase") == "digest_queued" \
             else None
+        if journal is not None and queued is None:
+            queued = self._boot_row_since(journal.get("ts"))
         if queued and self.inbox.get(queued):
             digest_state = "built (queued before the restart)"
             row_now = self.inbox.get(queued)
@@ -2963,6 +2981,7 @@ class SdkRunner:
                 except Exception as exc:  # noqa: BLE001 - the session runs on without it
                     digest_state = "none: the digest row could not be stored: %s: %s" \
                                    % (type(exc).__name__, exc)
+                crashpoint("rollover.digest_put")
                 if digest_id is not None and handed:
                     handover.consume(self.home)
                 if digest_id is not None:

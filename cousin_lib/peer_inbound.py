@@ -93,25 +93,51 @@ def _target(root, to, allowed):
     return target
 
 
+# The Latin letters that are real letters of a language and do not
+# decompose to an ASCII base, with what a reader takes each for. Any other
+# non-ASCII letter is refused: small capitals, IPA forms, other scripts and
+# fullwidth forms all pass for an ASCII letter.
+_LATIN_EXTRA = {"ø": "o", "Ø": "O", "æ": "ae", "Æ": "AE", "œ": "oe", "Œ": "OE",
+                "ß": "ss", "ł": "l", "Ł": "L", "đ": "d", "Đ": "D", "þ": "th",
+                "Þ": "TH", "ð": "d", "Ð": "D"}
+
+
+def _ascii_base(char):
+    """The ASCII letters a letter is, by its canonical decomposition (ò is
+    o and a grave) or _LATIN_EXTRA; None for anything else. Canonical
+    only: a fullwidth "Ａ" decomposes to "A" only by compatibility, and is
+    not one."""
+    if char.isascii():
+        return char
+    if char in _LATIN_EXTRA:
+        return _LATIN_EXTRA[char]
+    base = "".join(c for c in unicodedata.normalize("NFD", char) if not unicodedata.combining(c))
+    return base if base and base.isascii() and base.isalpha() else None
+
+
 def _plain(display):
-    """A plain name: _DISPLAY's shape, where a letter may also be a Latin
-    letter with a diacritic (Totò, Nicolò, Søren), compared composed (NFC).
-    No other script: a Cyrillic "А" would pass for a Latin "A"."""
+    """A plain name: _DISPLAY's shape, where a letter may also be an ASCII
+    letter with diacritics (Totò, Nicolò) or one of _LATIN_EXTRA (Søren,
+    Łukasz), compared composed (NFC). Nothing else: a look-alike from
+    another script, a small capital or an IPA letter would pass for an
+    ASCII one."""
     if not isinstance(display, str):
         return False
-    name = unicodedata.normalize("NFC", display)
-    ascii_shape = "".join(c if c.isascii() else
-                          ("a" if unicodedata.category(c).startswith("L")
-                           and unicodedata.name(c, "").startswith("LATIN ") else "\0")
-                          for c in name)
-    return bool(_DISPLAY.match(ascii_shape))
+    shape = []
+    for char in unicodedata.normalize("NFC", display):
+        base = _ascii_base(char)
+        if base is None:
+            return False
+        shape.append(base[0] if not char.isascii() else char)
+    return bool(_DISPLAY.match("".join(shape)))
 
 
 def skeleton(name):
-    """The name a reader would take it for: composed, its accents dropped,
-    case-folded, spaces as underscores. "Àna" and "Ana" are one skeleton."""
-    folded = "".join(c for c in unicodedata.normalize("NFKD", str(name or ""))
-                     if not unicodedata.combining(c))
+    """The name a reader would take it for: _LATIN_EXTRA spelled out, the
+    accents dropped, case-folded, spaces as underscores. "Àna" and "Ana"
+    are one skeleton, so are "Søren" and "Soren"."""
+    spelled = "".join(_LATIN_EXTRA.get(c, c) for c in unicodedata.normalize("NFC", str(name or "")))
+    folded = "".join(c for c in unicodedata.normalize("NFKD", spelled) if not unicodedata.combining(c))
     return folded.casefold().replace(" ", "_")
 
 

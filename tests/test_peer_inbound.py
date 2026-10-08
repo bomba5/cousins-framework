@@ -59,10 +59,14 @@ class TestAccept(InboundCase):
             '[cousin]\nslug = "wren"\nname = "Wren"\n\n[operator]\nname = "Ana"\n\n'
             '[agent]\nrunner = "sdk"\n')
         self.accept(display="Totò", msg_id="m-accent-01")
-        self.assertEqual(_messages(home)[-1], ("Totò", "the tins moved"))
+        self.accept(display="Søren Łukasz", msg_id="m-accent-02")
+        self.assertEqual([u for u, _ in _messages(home)[-2:]], ["Totò", "Søren Łukasz"])
+        self.assertEqual(peer_inbound.skeleton("Søren"), "soren")
         for n, (display, why) in enumerate((("\u0422oto", "plain"), ("Àna", "operator"),
                                             ("ANÁ", "operator"), ("Wrén", "cousin"),
-                                            ("Tèsta", "cousin"))):
+                                            ("Tèsta", "cousin"), ("A\u029cna", "plain"),
+                                            ("An\u0251", "plain"), ("\u1d00na", "plain"),
+                                            ("\uff21na", "plain"), ("N\u0131no", "plain"))):
             with self.subTest(display=display):
                 with self.assertRaises(peer_inbound.Refused) as cm:
                     self.accept(display=display, msg_id="m-accent-%02d" % n)

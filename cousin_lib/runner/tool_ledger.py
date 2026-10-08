@@ -121,6 +121,16 @@ def calls(home):
     return out
 
 
+# How to check a call that STARTED and left no result, instead of running
+# it again: look at what it would have changed, where it would have
+# changed it.
+CHECK_HINT = ("To check a NO RESULT call, look at its effect, don't rerun it: after a"
+              " `git push`, compare `git ls-remote <remote> <branch>` with your commit;"
+              " after a command over ssh, read the remote state over ssh first (the"
+              " file, the service, the device) before acting again; after a send or a"
+              " reply, read the chat history; after a file write, read the file.")
+
+
 def lines(home, *, comes_again):
     """The cut turn's calls as text for the restart note, or "" when there
     were none. The last MAX_LINES calls only, with how many came before.
@@ -150,4 +160,6 @@ def lines(home, *, comes_again):
             head += " The message was: %s" % json.dumps(body, ensure_ascii=False)
     if len(found) > len(shown):
         head += " (%d earlier calls not shown.)" % (len(found) - len(shown))
+    if any(c["state"] == "open" for c in shown):
+        head += " " + CHECK_HINT
     return head + "\n" + "\n".join(rows)

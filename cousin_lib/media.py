@@ -106,6 +106,17 @@ def generate_tracked(kind, prompt, *, home=None, **params):
         path = generate(kind, prompt, home=home, **params)
         job.log("saved %s (%d bytes)" % (path, Path(path).stat().st_size))
         job.summary = str(path)
+        # the render as an artifact of its job (#284): a claim can name
+        # artifact:<id>, and `why` reaches the job and its prompt
+        try:
+            from cousin_lib import artifacts
+            from cousin_lib.jobs import get_job
+            owner = (get_job(job.job_id) or {}).get("spawned_by") or ""
+            row = artifacts.add(str(path), created_by=owner, job_id=job.job_id,
+                                note="%s render" % kind)
+            job.log("artifact #%s" % row["id"])
+        except Exception as err:  # noqa: BLE001 - the render stands without its row
+            job.log("artifact not recorded: %s" % err)
     return path
 
 

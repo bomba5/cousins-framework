@@ -41,7 +41,7 @@ cite = { type = "string", optional = true, description = "where it comes from: c
 why = { type = "string", description = "what superseded the topic (obsolete); required, non-empty" }
 force = { type = "boolean", description = "mark a topic that has no raw entries yet (obsolete)" }
 entry = { type = "string", optional = true, description = "retire one claim of the topic by its id, from `tensions` or `history`; the topic stays (obsolete)" }
-derived_from = { type = "array", items = "string", optional = true, description = "entry ids or raw refs (raw:<file>#<line>) this was built from, one hop (decide, remember); a ref named in the reasoning or cite is added for you; `why` walks it" }
+derived_from = { type = "array", items = "string", optional = true, description = "entry ids, raw refs (raw:<file>#<line>), or job:<id> / artifact:<id> this was built from, one hop (decide, remember); a ref named in the reasoning or cite is added for you; `why` walks it, a job or artifact down to its build and commit" }
 scope = { type = "string", optional = true, description = "what the fact holds for, e.g. 'board rev A' (remember)" }
 valid_until = { type = "string", optional = true, description = "when the fact stops holding: ISO date (through that day, UTC) or time; past it the fact leaves the views (remember)" }
 id = { type = "string", description = "an entry id, from `history` or a recall line (why)" }

@@ -307,3 +307,62 @@ class TestTheToolPassesDepth(HomeCase):
                                                                         "json": True}))
         self.assertEqual(out["depth"], 1)
         self.assertTrue(out["derived_from"][0]["more"])
+
+
+class TestTypedRefs(HomeCase):
+    """#284: a claim names the job or the artifact it was built from, and
+    `why` walks it down to the build: artifact -> job, with its sha and
+    commit."""
+
+    def setUp(self):
+        super().setUp()
+        import os
+        p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(self.root),
+                                         "COUSIN_HOME": str(self.home)})
+        p.start(); self.addCleanup(p.stop)
+        from cousin_lib import artifacts, jobs
+        self.job = jobs.register_job(kind="build", title="image rev A", spawned_by="wren")
+        jobs.finish_job(self.job, status="done", summary="built", exit_code=0)
+        out = self.root / "image.bin"
+        out.write_bytes(b"firmware")
+        self.art = artifacts.add(str(out), created_by="wren", job_id=self.job,
+                                 git_commit="3f2a9c1")["id"]
+
+    def test_why_walks_a_claim_to_its_artifact_job_and_commit(self):
+        memory.remember(self.home, "rev-a", "rev A boots on the board",
+                        derived_from=["artifact:%d" % self.art])
+        (c,) = self.ids("rev-a")
+        out = memory.why(self.home, c)
+        (art,) = out["derived_from"]
+        self.assertEqual((art["id"], art["kind"], art["truth_level"]),
+                         ("artifact:%d" % self.art, "artifact", "L2_TOOL"))
+        self.assertEqual(art["git_commit"], "3f2a9c1")
+        (job,) = art["built_from"]
+        self.assertEqual(job["id"], "job:%d" % self.job)
+        self.assertEqual(job["topic"], "job #%d done (exit 0)" % self.job)
+        self.assertIn("artifact:%d" % self.art, job["content"])
+        text = memory.format_why(out)
+        self.assertIn("commit 3f2a9c1", text)
+        self.assertIn("image rev A - built", text)
+
+    def test_a_job_or_artifact_that_does_not_exist_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "names no job"):
+            memory.check_derived(["job:999999"], home=self.home)
+        with self.assertRaisesRegex(ValueError, "names no artifact"):
+            memory.check_derived(["artifact:999999"], home=self.home)
+        self.assertEqual(memory.check_derived(["job:%d" % self.job], home=self.home),
+                         ["job:%d" % self.job])
+
+    def test_a_ref_named_in_a_cite_is_linked(self):
+        self.assertEqual(memory.refs_in(self.home, "measured by job:%d and artifact:%d, not job:999999"
+                                        % (self.job, self.art)),
+                         ["job:%d" % self.job, "artifact:%d" % self.art])
+
+    def test_a_row_gone_later_is_said_not_crashed(self):
+        from cousin_lib import artifacts
+        memory.remember(self.home, "rev-a", "rev A boots", derived_from=["artifact:%d" % self.art])
+        (c,) = self.ids("rev-a")
+        artifacts.remove(self.art, by="wren", home=self.home)
+        out = memory.why(self.home, c)
+        self.assertTrue(out["derived_from"][0]["missing"])
+        self.assertIn("artifact:%d (not found)" % self.art, memory.format_why(out))

@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.2 - 2026-10-08
+
+### Fixed
+
+- **A hive node stops cleanly, and retries what it could not tell
+  home.** The node's `main` served until killed: a SIGTERM (a restart,
+  `systemctl stop`) ended the process mid-whatever, a reply being
+  written included, and it never started the node's retrier, so a
+  tell-home that failed once (3.33.0's retry) was never tried again on
+  a real node. `main` now starts the whole node and turns SIGTERM and
+  Ctrl-C into `node.stop()`, which stops taking sends and waits up to
+  30 s for the replies in flight (looking again for one a late send
+  started), and logs any still running.
+
 ## 3.37.1 - 2026-10-08
 
 ### Fixed

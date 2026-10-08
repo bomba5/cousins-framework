@@ -708,6 +708,40 @@ class TestConsoleAndCliRetries(unittest.TestCase):
         self.assertEqual(seen, ["cli-0001"] * 3)
 
 
+class TestNodeProcess(NodeCase):
+    """main() is what a node runs: it starts the whole node (the retrier
+    included) and a SIGTERM or Ctrl-C ends in node.stop()."""
+
+    def test_main_starts_the_node_and_a_sigterm_stops_it(self):
+        import signal as _signal
+        from unittest import mock
+        node = mock.Mock(port=1)
+        node.config.home_chat_url, node.config.tell_home = "", False
+        handlers = {}
+        with mock.patch.object(self.module, "build_node", return_value=node), \
+                mock.patch.object(self.module.signal, "signal",
+                                  side_effect=lambda sig, fn: handlers.__setitem__(sig, fn)):
+            stopper = threading.Timer(0.2, lambda: handlers[_signal.SIGTERM](_signal.SIGTERM, None))
+            stopper.start()
+            self.assertEqual(self.module.main([]), 0)
+        node.start.assert_called_once_with()
+        node.stop.assert_called_once_with()
+        self.assertIn(_signal.SIGINT, handlers)
+
+    def test_a_real_node_exits_cleanly_on_sigterm(self):
+        import signal as _signal
+        import subprocess
+        env = dict(os.environ, **self._env())
+        node_py = pathlib.Path(self.module.__file__)
+        proc = subprocess.Popen([sys.executable, str(node_py)], env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: proc.poll() is None and proc.kill())
+        self.assertIn("listening on", proc.stdout.readline())
+        proc.send_signal(_signal.SIGTERM)
+        self.assertEqual(proc.wait(timeout=15), 0)
+        self.assertNotIn("Traceback", proc.stderr.read())
+
+
 class TestRetryReviewFixes(NodeCase):
     """#251 review: concurrent tries of one send store once; no queen is
     not an outage; the window starts at the first try; nothing pending is

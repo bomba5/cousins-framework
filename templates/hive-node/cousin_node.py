@@ -50,6 +50,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import threading
@@ -797,9 +798,7 @@ class _Handler(BaseHTTPRequestHandler):
         # Think off the request thread: the send returns as soon as the
         # message is stored, and the reply lands in the thread for the
         # next history poll.
-        threading.Thread(
-            target=self.node.brain.turn, args=(user, message),
-            daemon=True).start()
+        self.node.start_turn(user, message)
         self._send_json(200, {"ok": True, "id": row["id"],
                               "timestamp": row["timestamp"]})
 
@@ -845,9 +844,26 @@ class Node:
         Handler.node = node
         self.httpd = ThreadingHTTPServer((config.host, config.port), Handler)
         self._thread = None
+        self._turns, self._turns_lock = set(), threading.Lock()
 
     SEND_IDS_KEPT_S = 900.0
     SEND_CLAIM_WAIT_S = 10.0          # under the console's 15 s a try
+    TURN_JOIN_S = 30.0                # stop() waits this long for a reply in flight
+
+    def start_turn(self, user, message):
+        """Answer a stored send off the request thread, tracked: stop()
+        waits for it, so a stop never cuts a reply half written."""
+        def run():
+            try:
+                self.brain.turn(user, message)
+            finally:
+                with self._turns_lock:
+                    self._turns.discard(threading.current_thread())
+        thread = threading.Thread(target=run, name="turn", daemon=True)
+        with self._turns_lock:
+            self._turns.add(thread)
+        thread.start()
+        return thread
 
     def claim_send(self, msg_id):
         """Claim a /api/send's msg_id, atomically: None when this request is
@@ -900,13 +916,30 @@ class Node:
         self.retrier.start()
 
     def stop(self):
-        self.retrier.stop()
         self.checkin.stop()
         self.poller.stop()
         self.httpd.shutdown()
         self.httpd.server_close()
         if self._thread:
             self._thread.join(timeout=5)
+        # no new sends now: wait for the replies being written, again and
+        # again until none is left, since a send still in its handler when
+        # the server stopped can start one after a first look
+        deadline = time.time() + self.TURN_JOIN_S
+        while time.time() < deadline:
+            with self._turns_lock:
+                turns = [t for t in self._turns if t.is_alive()]
+            if not turns:
+                break
+            for thread in turns:
+                thread.join(timeout=max(0.0, deadline - time.time()))
+        with self._turns_lock:
+            left = [t for t in self._turns if t.is_alive()]
+        if left:
+            self.log("cousin_node: stopped with %d reply turn(s) still running" % len(left))
+        # last: a turn's tell-home that met a transient answer is queued on a
+        # retrier still running, and what is still unsent is logged as dropped
+        self.retrier.stop()
 
 
 def build_node(environ=None, *, log=None):
@@ -923,7 +956,12 @@ def main(argv=None):
     except OSError as err:
         print("cousin_node: cannot bind: %s" % err, file=sys.stderr)
         return 2
-    node.poller.start()
+    # SIGTERM (a restart, systemctl stop) and Ctrl-C both end in node.stop(),
+    # which waits for the replies in flight
+    stopping = threading.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: stopping.set())
+    node.start()
     print("%s (%s) listening on %s:%d [brain=%s]" % (
         node.config.name, node.config.slug, node.config.host, node.port,
         node.config.brain), flush=True)
@@ -931,15 +969,11 @@ def main(argv=None):
         print("cousin_node: HOME_CHAT_URL is ignored since 2.0.0 (no home chat"
               " server); set TELL_HOME=1 to reach the home cousin through the"
               " queen", file=sys.stderr, flush=True)
-    node.checkin.start()
     try:
-        node.httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        while not stopping.wait(1.0):
+            pass
     finally:
-        node.checkin.stop()
-        node.poller.stop()
-        node.httpd.server_close()
+        node.stop()
     return 0
 
 

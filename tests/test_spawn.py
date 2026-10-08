@@ -946,6 +946,19 @@ class TestRegistrySyncCarriesJobRun(unittest.TestCase):
         self.assertEqual(job["properties"]["argv"]["type"], "array")
 
 
+def ts_inline(table):
+    """A TOML inline table for a flat dict of strings, booleans and
+    string lists."""
+    import json as _json
+    def val(v):
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, list):
+            return "[" + ", ".join(_json.dumps(x) for x in v) + "]"
+        return _json.dumps(v)
+    return "{ " + ", ".join("%s = %s" % (k, val(v)) for k, v in table.items()) + " }"
+
+
 class TestRegistrySyncCorrectsShippedText(unittest.TestCase):
     """A cousin's registry that still carries the job tool's pre-`run`
     description and `kind` text (what the sync only ever ADDED to, never
@@ -1023,6 +1036,30 @@ class TestRegistrySyncCorrectsShippedText(unittest.TestCase):
         self.assertEqual(now["properties"]["keyword"], shipped["properties"]["keyword"])
         self.assertEqual(self._sync()["corrected"], [])
         self.assertEqual(ts._depth('a = { d = "raw:<f>#<n>" }\n'), 0)
+
+    def test_a_property_table_a_release_changed_is_migrated_whole(self):
+        """An enum is not a string field: a `kind` that still offers the
+        retired `shell` gets the shipped table whole. A cousin's own edit
+        of the table (here an extra field) blocks the whole migration."""
+        ts = self.template_sync
+        old_kind = next(v for v in ts.SHIPPED_BEFORE[("tools.job.properties", "kind")]
+                        if "shell" in v.get("enum", []))
+        line = "kind = " + ts_inline(old_kind) + "\n"
+        out = []
+        for path, body in ts._blocks(self.shipped):
+            lines = []
+            for key, entry in ts._entries(body):
+                lines.extend([line] if (path, key) == ("tools.job.properties", "kind") else entry)
+            out.append(("" if path is None else "[%s]\n" % path) + "".join(lines))
+        self.reg.write_text("".join(out))
+        self.assertIn("tools.job.properties.kind", self._sync()["corrected"])
+        kind = tomllib.loads(self.reg.read_text())["tools"]["job"]["properties"]["kind"]
+        self.assertNotIn("shell", kind["enum"])
+        self.assertEqual(kind, tomllib.loads(self.shipped)["tools"]["job"]["properties"]["kind"])
+        edited = dict(old_kind, mine=True)
+        self.reg.write_text("".join(out).replace(line, "kind = " + ts_inline(edited) + "\n"))
+        self._sync()
+        self.assertIn("shell", tomllib.loads(self.reg.read_text())["tools"]["job"]["properties"]["kind"]["enum"])
 
     def test_old_shipped_text_is_corrected(self):
         self.reg.write_text(self._old_registry())

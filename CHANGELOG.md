@@ -12,10 +12,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   descriptions, so `options` and `argv` a release changed never reached
   an existing cousin: `remember` still mapped no `scope` or
   `valid_until`, `why` no `depth`, `obsolete` no `entry`, the operator
-  send no `video`, and `job start` had no `--` before its title. On the
+  send no `video`, `job start` had no `--` before its title, and the
+  job `kind` still offered the retired `shell`. On the
   stdio MCP path (the opencode and tmux lanes) a call with those
   replied as done and dropped them. The old values now come from the
-  registry's git history (`cousin_lib/registry_history.py`, regenerated
+  registry's git history, a property's whole table as well as its
+  string fields (`cousin_lib/registry_history.py`, regenerated
   with `python -m cousin_lib.registry_history --write`; a test fails
   while one is missing), and `cousin-upgrade --apply-homes` or the next
   start rewrites each one that is still exactly what a release shipped.

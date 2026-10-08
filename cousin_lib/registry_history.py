@@ -26,11 +26,14 @@ END = "# --- end generated ---\n"
 
 def entries(registry, path=""):
     """(table path, spec, value) for every migratable value: a table's
-    plain keys (an `options` or `argv` value whole), and each string
-    field of a property's inline table."""
+    plain keys (an `options` or `argv` value whole), a property's inline
+    table whole, and each string field of it."""
     for key, value in registry.items():
         here = "%s.%s" % (path, key) if path else key
         if isinstance(value, dict) and path.endswith(".properties"):
+            # the whole table first (an enum, a type, an items change),
+            # then each string field for a cousin who edited another one
+            yield path, key, value
             for field, text in value.items():
                 if isinstance(text, str):
                     yield path, "%s.%s" % (key, field), text
@@ -103,15 +106,28 @@ SHIPPED_BEFORE = {
     ('tools.job.commands.start', 'argv'): (
         ['start', '{kind}', '{title}'],
     ),
+    ('tools.job.properties', 'desc'): (
+        {'type': 'string', 'description': 'context for the job (start)'},
+    ),
     ('tools.job.properties', 'desc.description'): (
         'context for the job (start)',
+    ),
+    ('tools.job.properties', 'kind'): (
+        {'type': 'string', 'enum': ['subagent', 'build', 'other'], 'description': '(start) not shell: start takes no command, so a shell row would never close. For long shell work use a Bash call with run_in_background (tracked automatically by the job hooks), or run `cousin-job start shell TITLE -- CMD` from a shell, which launches CMD and closes the row with its exit code'},
+        {'type': 'string', 'enum': ['subagent', 'shell', 'build', 'other'], 'description': '(start)'},
     ),
     ('tools.job.properties', 'kind.description'): (
         '(start) not shell: start takes no command, so a shell row would never close. For long shell work use a Bash call with run_in_background (tracked automatically by the job hooks), or run `cousin-job start shell TITLE -- CMD` from a shell, which launches CMD and closes the row with its exit code',
         '(start)',
     ),
+    ('tools.job.properties', 'log'): (
+        {'type': 'string', 'optional': True, 'description': "log file, relative to your home; default: the job's own log under data/job-logs (run)"},
+    ),
     ('tools.job.properties', 'log.description'): (
         "log file, relative to your home; default: the job's own log under data/job-logs (run)",
+    ),
+    ('tools.job.properties', 'title'): (
+        {'type': 'string', 'description': '(start)'},
     ),
     ('tools.job.properties', 'title.description'): (
         '(start)',
@@ -135,14 +151,26 @@ SHIPPED_BEFORE = {
     ('tools.memory.commands.why', 'options'): (
         {'json': '--json'},
     ),
+    ('tools.memory.properties', 'depth'): (
+        {'type': 'integer', 'optional': True, 'description': 'hops to walk each way; default the whole chain (why)'},
+    ),
     ('tools.memory.properties', 'depth.description'): (
         'hops to walk each way; default the whole chain (why)',
+    ),
+    ('tools.memory.properties', 'derived_from'): (
+        {'type': 'array', 'items': 'string', 'optional': True, 'description': 'entry ids this was built from, one hop (decide, remember); `why` walks it'},
     ),
     ('tools.memory.properties', 'derived_from.description'): (
         'entry ids this was built from, one hop (decide, remember); `why` walks it',
     ),
+    ('tools.memory.properties', 'keyword'): (
+        {'type': 'string', 'optional': True, 'description': 'filter (recall)'},
+    ),
     ('tools.memory.properties', 'keyword.description'): (
         'filter (recall)',
+    ),
+    ('tools.memory.properties', 'topic'): (
+        {'type': 'string', 'description': 'decision topic (decide)'},
     ),
     ('tools.memory.properties', 'topic.description'): (
         'decision topic (decide)',

@@ -52,6 +52,16 @@ def _gone(pid):
     return False
 
 
+def _carries(pid, marker):
+    """The process's environment holds this start's marker, as the marker
+    sweep reads it."""
+    entry = ("%s=%s" % (opencode_http.MARKER_ENV, marker)).encode()
+    try:
+        return entry in Path("/proc/%d/environ" % pid).read_bytes().split(b"\0")
+    except OSError:
+        return False
+
+
 class ServerCase(HermeticCase):
     """A fake `opencode` binary: a sh wrapper that runs _fake_opencode.py."""
 
@@ -265,6 +275,13 @@ class TestOrphans(ServerCase):
                 pass
         self.addCleanup(kill)
         self.assertNotEqual(os.getpgid(child), srv.pid)        # its own session
+        # The fake writes the pid when Popen returns, once the child's exec
+        # is past its point of no return but before the kernel has set up
+        # the new image's environment: until then /proc/<pid>/environ reads
+        # empty and the sweep cannot see the child. A stalled CPU there
+        # (a loaded runner) left it unseen at the reap.
+        self.assertTrue(_wait(lambda: _carries(child, srv.marker)),
+                        "the detached child never showed its marker")
         return child
 
     def test_stop_kills_what_the_server_started_in_a_session_of_its_own(self):

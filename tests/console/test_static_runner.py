@@ -342,6 +342,15 @@ process.stdout.write(JSON.stringify([
         self.assertNotIn("rp-md-table", not_tables[1])
         self.assertEqual(not_tables[2], ["rp-md-table"])
 
+    def test_no_console_script_uses_a_regex_lookbehind(self):
+        """The console's JSX is compiled in the browser, and a lookbehind
+        regex literal is a syntax error to Safari before 16.4: the whole
+        file then fails to load, not just the one feature."""
+        import re as _re
+        for path in sorted(_STATIC.glob("*.jsx")):
+            for n, line in enumerate(path.read_text().splitlines(), 1):
+                self.assertIsNone(_re.search(r"\(\?<[!=]", line), "%s:%d" % (path.name, n))
+
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_markdown_lite_never_makes_markup_from_its_input(self):
         """Model output is untrusted: `<script>`, `<img onerror>` and a

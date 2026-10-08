@@ -1594,8 +1594,18 @@ const RP_MD_TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
 // One table row's cells: the outer pipes dropped, split on the pipes
 // that are not escaped (\|), each cell trimmed.
 function rpMdCells(line) {
+  // a character scan, not a lookbehind split: Safari before 16.4 cannot
+  // parse a lookbehind, and one regex literal stops the whole file loading
   const t = line.trim().replace(/^\|/, "").replace(/(^|[^\\])\|$/, "$1");
-  return t.split(/(?<!\\)\|/).map(c => c.trim().replace(/\\\|/g, "|"));
+  const cells = [];
+  let cur = "";
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] === "\\" && t[i + 1] === "|") { cur += "|"; i++; }
+    else if (t[i] === "|") { cells.push(cur.trim()); cur = ""; }
+    else cur += t[i];
+  }
+  cells.push(cur.trim());
+  return cells;
 }
 
 function renderMarkdownLite(text) {

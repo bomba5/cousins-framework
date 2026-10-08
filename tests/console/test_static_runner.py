@@ -730,6 +730,8 @@ const m = rpModel([
   E(17, "policy", {tool: "Write", decision: "ask", reason: "outside the home"}),
   S(18, {subtype: "something_new", detail: 1}),
   E(19, "runner", {kind: "sdk"}), E(20, "policy", {describe: "policy.toml: 2 rules"}),
+  S(21, {subtype: "session", session_id: "ses_a"}),
+  S(22, {subtype: "retry", attempt: 1}), S(23, {subtype: "session", session_id: "ses_b"}),
 ]);
 process.stdout.write(JSON.stringify(m.rows.map(r => r.t === "line" ? [r.cls, r.text] : [r.t])));""")
         self.assertEqual(got, [
@@ -748,6 +750,8 @@ process.stdout.write(JSON.stringify(m.rows.map(r => r.t === "line" ? [r.cls, r.t
             ["rp-warn", "policy · ask Write · outside the home"],
             ["meta"],
             ["boot"],
+            ["rp-warn", "retry 1"],
+            ["rp-dim", "new session · ses_b"],
         ])
 
     TASKS = """

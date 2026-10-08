@@ -1935,7 +1935,11 @@ function rpModel(events) {
       else if (p.subtype === "notification") {
         if (p.message) rows.push({ t: "line", key, ev, cls: "rp-dim", text: "notification · " + rpCut(String(p.message), 160) });
       }
-      else if (RP_SYSTEM_BOOT[p.subtype]) rpBoot(rows, key, ev);
+      // the opencode lane names its session at boot and again when it
+      // opens a new one mid-stream: the boot group's only at boot
+      else if (RP_SYSTEM_BOOT[p.subtype] && rows.length && rows[rows.length - 1].t === "boot") rpBoot(rows, key, ev);
+      else if (RP_SYSTEM_BOOT[p.subtype])
+        rows.push({ t: "line", key, ev, cls: "rp-dim", text: "new session · " + rpCut(p.session_id || "", 60) });
       else if (RP_SYSTEM_LINES[p.subtype]) {
         const [cls, text] = RP_SYSTEM_LINES[p.subtype](p);
         rows.push({ t: "line", key, ev, cls, text });

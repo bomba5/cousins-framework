@@ -20,7 +20,9 @@ def fingerprint(home, root, *, registry=None):
     start reads it. The cousin's own MCP servers count as the text of its
     `.mcp.json`, not the servers a process loaded from it: a server whose
     `${VAR}` is unset is skipped by the loading process's environment, and
-    the runner and the loops daemon must hash the same thing."""
+    the runner and the loops daemon must hash the same thing. The plugins'
+    MCP servers it enables count too (plugins.mcp_servers, rendered before
+    any environment), so adding or removing one rolls the session over."""
     try:
         from pathlib import Path
 
@@ -31,10 +33,16 @@ def fingerprint(home, root, *, registry=None):
             mcp_text = (Path(home) / mcp_config.FILE).read_text()
         except OSError:
             mcp_text = ""
+        try:
+            from cousin_lib import plugins
+            plugin_servers = plugins.mcp_servers(home, root)[0]
+        except Exception:  # noqa: BLE001 - no plugins is a list too
+            plugin_servers = {}
         text = json.dumps({"prompt": prompt.compose_system_prompt(
                                home, root=root, registry=registry, version="0"),
                            "tools": tools.tool_definitions(registry),
-                           "mcp": mcp_text}, sort_keys=True, default=str)
+                           "mcp": mcp_text, "plugins": plugin_servers},
+                          sort_keys=True, default=str)
     except Exception:  # noqa: BLE001 - a fingerprint must never fail a start
         return None
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]

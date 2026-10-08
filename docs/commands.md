@@ -54,6 +54,7 @@ Each command has one class, so you know which ones to learn first:
 | `cousin-version` | core | the version and commit you run |
 | `cousin-watch` | core | a cousin's reasoning, live |
 | `cousin-cache-audit` | optional | the prompt cache hit rate, from the harness transcripts |
+| `cousin-upkeep` | optional | how much of each cousin's spend is upkeep (heartbeats, boots) and how much is work |
 | `cousin-chat-import` | optional | import a cousin's chat history from an older install |
 | `cousin-hive` | optional | the queen for cousins on other machines, and its node tokens |
 | `cousin-image` | optional | generate an image ([media](media.md)) |
@@ -849,6 +850,37 @@ lists each suspect invalidator with its turn pair.
 
 ```
 cousin-cache-audit --days 7 --diagnose
+```
+
+`cousin-upkeep` splits each cousin's spend over the last `--days` (1-90,
+default 7) from what the runner already wrote: each turn's `result` and
+`usage` events in `data/stream/`, and the inbox rows the turn answered.
+Four classes:
+
+- **upkeep**: every row the turn answered is the context heartbeat, a
+  boot or flip digest, or a memory proposal;
+- **self**: a prompt the cousin scheduled for itself (`cousin-schedule`).
+  The tool can't tell a cousin's self-set heartbeat from a real reminder,
+  so this is shown apart: read upkeep as a floor and upkeep plus self as a
+  ceiling;
+- **work**: any row is a chat, a meeting turn, a reaction, a hook, a
+  loop or the operator stopping a turn (`interrupt`), or the turn is one
+  the SDK started when a background task finished (`task`); a heartbeat
+  that a message joined is work;
+- **other**: a row gone from the inbox, a source in no list (an `outbox`
+  report), or a turn with no row that isn't a `task`.
+
+It prints one line per cousin and a row per kind; `--json` prints the
+numbers (`{"<slug>": {...}}`); name cousins to report only those. Tokens
+are usage totals, cache reads included, so a heartbeat in a long session
+shows a large count. On a login lane the dollars are the API-equivalent
+estimate the tokens page shows: read them as a share. The console's Tokens
+page shows the same split (`GET /api/tokens/upkeep`). Only the `sdk` and
+`opencode` runners write the `usage` events it reads, so a `tmux` cousin
+always shows no costed turns.
+
+```
+cousin-upkeep --days 7 wren
 ```
 
 `cousin-version` prints the framework version (and commit in a git checkout),

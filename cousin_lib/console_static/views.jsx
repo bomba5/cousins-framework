@@ -994,6 +994,45 @@ function LoopsTable({ loops, allCousins }) {
 // ============ TOKENS ============
 // Counts come from the harness transcripts through the seam; when the
 // seam is not configured the view says so instead of showing zeros.
+// Each cousin's spend split into upkeep (heartbeats, boot digests, memory
+// proposals) and work, over the last 7 days (GET /api/tokens/upkeep).
+function UpkeepPanel() {
+  const [d, setD] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    apiGet("/api/tokens/upkeep?days=7").then(x => { if (!cancelled) setD(x); });
+    return () => { cancelled = true; };
+  }, []);
+  if (!d || !d.cousins) return null;
+  const rows = Object.entries(d.cousins).filter(([, m]) => m.turns > 0);
+  const usd = (v) => "$" + (Number(v) || 0).toFixed(2);
+  const pct = (v) => v == null ? "-" : Math.round(v * 100) + "%";
+  const cls = (m, k) => (m.classes && m.classes[k]) || { turns: 0, cost_usd: 0 };
+  return (
+    <div className="panel" data-upkeep style={{ marginTop: 16, padding: "12px 16px" }}>
+      <div className="eyebrow">upkeep vs work, last {d.days} days</div>
+      <div className="muted" style={{ fontSize: 11, margin: "4px 0 8px" }}>
+        upkeep = turns that only answered the heartbeat, a boot digest or a memory proposal (a floor); self = prompts a cousin scheduled for itself, its own heartbeat included (upkeep + self is a ceiling); dollars on a login are estimates (cousin-upkeep)
+      </div>
+      <div className="table-scroll">
+        <table className="data">
+          <thead><tr><th>cousin</th><th className="num">upkeep share</th><th className="num">with self</th><th className="num">upkeep</th><th className="num">self</th><th className="num">work</th><th className="num">other</th><th className="num">turns</th></tr></thead>
+          <tbody>{rows.map(([slug, m]) => <tr key={slug}>
+            <td className="mono">{slug}</td>
+            <td className="num"><b>{pct(m.upkeep_share)}</b></td>
+            <td className="num">{pct(m.upkeep_or_self_share)}</td>
+            <td className="num">{usd(cls(m, "upkeep").cost_usd)}</td>
+            <td className="num">{usd(cls(m, "self").cost_usd)}</td>
+            <td className="num">{usd(cls(m, "work").cost_usd)}</td>
+            <td className="num">{usd(cls(m, "other").cost_usd)}</td>
+            <td className="num">{m.turns}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function TokensView({ cousins: allCousins }) {
   const showHidden = (window.useSetting && window.useSetting("showHidden")) || false;
   const cousins = React.useMemo(
@@ -1136,6 +1175,7 @@ function TokensView({ cousins: allCousins }) {
           <div style={{ padding: 20, color: "var(--fg-3)", fontFamily: "var(--mono)", fontSize: 12 }}>no cousins registered</div>
         )}
       </div>
+      <UpkeepPanel />
     </div>
   );
 }

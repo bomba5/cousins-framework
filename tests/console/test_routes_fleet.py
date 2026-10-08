@@ -994,3 +994,35 @@ class TestRemovedKeysRow(ConsoleCase):
                          [("cousin.toml", "[chat] port"), ("cousin.toml", "[chat] tmux_session")])
         self.assertTrue(all(k["line"] for k in rows["wren"]["removedKeys"]))
         self.assertEqual(rows["sam"]["removedKeys"], [])
+
+
+class TestTokensUpkeep(ConsoleCase):
+    """#253: GET /api/tokens/upkeep, the entry behind the Tokens panel."""
+
+    def test_the_split_per_cousin_and_the_day_bounds(self):
+        import sqlite3
+        import time as _time
+        home = self.cousin("wren")
+        (home / "data" / "stream").mkdir(parents=True, exist_ok=True)
+        db = sqlite3.connect(home / "data" / "inbox.db")
+        db.execute("CREATE TABLE inbox (id INTEGER PRIMARY KEY, thread_id TEXT, source TEXT,"
+                   " body TEXT)")
+        db.execute("INSERT INTO inbox VALUES (1, 'loop:daemon', 'loop', 'Context heartbeat. x')")
+        db.execute("INSERT INTO inbox VALUES (2, 'operator:ana', 'chat', 'hi')")
+        db.commit()
+        db.close()
+        now = _time.time()
+        events = [{"ts": now - 60, "kind": "result", "payload": {"inbox_ids": [1]}},
+                  {"ts": now - 60, "kind": "usage", "payload": {"cost_usd": 1.0, "total": 10}},
+                  {"ts": now - 30, "kind": "result", "payload": {"inbox_ids": [2]}},
+                  {"ts": now - 30, "kind": "usage", "payload": {"cost_usd": 3.0, "total": 30}}]
+        (home / "data" / "stream" / "sdk-x.jsonl").write_text(
+            "".join(json.dumps(e) + "\n" for e in events))
+        self.serve()
+        status, body = self.get("/api/tokens/upkeep?days=7")
+        self.assertEqual(status, 200)
+        wren = body["cousins"]["wren"]
+        self.assertEqual(wren["turns"], 2)
+        self.assertAlmostEqual(wren["upkeep_share"], 0.25)
+        for bad in ("0", "91"):
+            self.assertEqual(self.get("/api/tokens/upkeep?days=" + bad)[0], 400)

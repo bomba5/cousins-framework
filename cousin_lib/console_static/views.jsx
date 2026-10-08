@@ -2242,7 +2242,7 @@ function HostView({ onOpen }) {
                         <div className="fleet-sub">{c.runner ? (c.runner.alive ? "" : "(not running)") : c.chat === "ok" ? "chat ok" : c.chat === "down" ? "chat down" : c.chat === "none" ? "no chat server" : (c.chat || "")}</div>
                       </td>
                       <td data-label="model">
-                        <div className="mono">{c.model || "-"}</div>
+                        <div className="mono">{c.model || "lane default"}{c.modelDefault && <span className="muted"> (default)</span>}</div>
                         {c.effort && <div className="fleet-sub">{c.effort}</div>}
                       </td>
                       <td data-label="next flip" title={flip ? (flip.never ? "flip_at = never" : `[lifecycle] flip_at = ${c.flipAt}`) : "no flip_at of its own: the install default applies (config/harness.toml default_flip_at)"}>

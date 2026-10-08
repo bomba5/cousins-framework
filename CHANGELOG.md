@@ -3,6 +3,27 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.36.4 - 2026-10-08
+
+### Fixed
+
+- **A cousin on its lane's default model names it.** The Overview table
+  and the cousin's card showed `-` for a runner cousin with no
+  `[agent] model`. They show the model its session reported at start,
+  marked `(default)` (the sdk lane reports one; an opencode cousin with
+  no model of its own, or one that has not run yet, shows "lane
+  default"); the fleet
+  row carries it with `modelDefault` true.
+- **The dreaming line says "2m ago", not "2m ago ago".**
+- **Tables read on a phone.** A wide table in a chat message scrolls
+  sideways instead of wrapping each cell letter by letter, and the
+  reasoning pane renders a markdown table as a table instead of raw
+  pipes.
+- **Recall links stay home-relative for a home reached through a
+  symlink**, so the pane's link to a recalled file opens it; and the
+  note for a stream from an older runner that did not list its recall
+  hits says so.
+
 ## 3.36.3 - 2026-10-08
 
 ### Fixed

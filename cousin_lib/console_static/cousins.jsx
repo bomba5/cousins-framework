@@ -209,7 +209,7 @@ function CousinCard({ c, onClick, onAct, onChat }) {
         <div>flip at · <b>{c.flipAt || "-"}</b></div>
         {/* model is what the next start renders; pid and uptime are the
             agent process tmux reports, "-" when there is none to ask */}
-        <div>model · <b>{c.model || "-"}</b></div>
+        <div>model · <b>{c.model || "lane default"}</b>{c.modelDefault && <span className="muted"> (default)</span>}</div>
         <div>pid · <b>{c.pid ?? "-"}</b></div>
         <div>uptime · <b>{c.uptime_seconds == null ? "-" : fmtDuration(c.uptime_seconds)}</b></div>
       </div>

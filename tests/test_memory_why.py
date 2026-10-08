@@ -256,6 +256,22 @@ class TestReceipt(HomeCase):
         self.assertEqual((items[1]["name"], items[1]["level"]), ("kestrel nest", "L2_TOOL"))
         self.assertNotIn("level", items[0])
 
+    def test_a_hit_outside_the_resolved_home_is_still_home_relative(self):
+        """A home reached through a symlink resolves elsewhere: the rel the
+        pane links to is still home-relative, never collection-relative."""
+        import os
+        real = self.root / "real-wren"
+        (real / "memory" / "imported" / "auto").mkdir(parents=True)
+        note = real / "memory" / "imported" / "auto" / "x.md"
+        note.write_text("# X\n")
+        link = self.root / "link-wren"
+        os.symlink(real, link)
+        from cousin_lib.memory_search import _home_rel
+        self.assertEqual(_home_rel(link, link / "memory" / "imported" / "auto" / "x.md",
+                                   "memory", "imported/auto/x.md"), "memory/imported/auto/x.md")
+        self.assertEqual(_home_rel(pathlib.Path("/elsewhere"), pathlib.Path("/other/x.md"),
+                                   "memory", "imported/auto/x.md"), "memory/imported/auto/x.md")
+
     def test_returned_and_excluded_hits_are_both_recorded(self):
         hits = [{"path": str(self.home / "memory" / "a.md"), "collection": "memory",
                  "similarity": 0.9},

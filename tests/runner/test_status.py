@@ -25,7 +25,7 @@ class TestNoRunnerYet(HermeticCase):
     def test_a_home_with_no_stream_is_not_alive_and_says_nothing_more(self):
         self.assertEqual(status.status(_fake_home(self)),
                          {"alive": False, "state": None, "since": None, "session": None,
-                          "kind": None, "pid": None, "unsupported": []})
+                          "kind": None, "pid": None, "unsupported": [], "model": None})
 
 
 class TestThroughCousinRunner(HermeticCase):
@@ -68,6 +68,25 @@ class TestAlive(HermeticCase):
         out = status.status(home)
         self.assertTrue(out["alive"])
         self.assertEqual((out["kind"], out["unsupported"]), ("fake", ["midturn_fold"]))
+
+
+class TestReportedModel(HermeticCase):
+    def test_the_model_the_session_reported_is_named(self):
+        """A cousin on its lane's default has no model in its config;
+        the SDK's init names the one it runs on, and the fleet row shows
+        it marked as the default."""
+        from cousin_lib.console.routes_fleet import _with_reported_model
+        home = _fake_home(self)
+        stream = EventStream(home, "sdk-model")
+        stream.append("runner", {"kind": "sdk", "pid": 1, "unsupported": []})
+        stream.append("session_init", {"model": "claude-opus-5-5", "session_id": "s"})
+        out = status.status(home)
+        self.assertEqual((out["kind"], out["model"]), ("sdk", "claude-opus-5-5"))
+        self.assertEqual(_with_reported_model({"model": None, "effort": None}, out),
+                         {"model": "claude-opus-5-5", "effort": None, "modelDefault": True})
+        self.assertEqual(_with_reported_model({"model": "claude-fable-5-1", "effort": None}, out),
+                         {"model": "claude-fable-5-1", "effort": None, "modelDefault": False})
+        self.assertEqual(_with_reported_model({"model": None, "effort": None}, None)["model"], None)
 
 
 class TestLongStreams(HermeticCase):

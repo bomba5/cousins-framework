@@ -312,6 +312,37 @@ process.stdout.write(JSON.stringify(md.map(walk)));
         self.assertIn("rp-json-key", [c[1] for c in got[5][2]])
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_markdown_lite_renders_a_gfm_table(self):
+        """A pipe table is a table, not pipes: a header row, a separator,
+        body rows with inline markdown in the cells, an escaped pipe kept
+        as text; a line with a pipe and no separator under it stays a
+        paragraph."""
+        got = self.run_node(r"""
+const md = renderMarkdownLite("| kHz | ok |\n|---|:--:|\n| **16** | a \\| b |\n| 531 | 2.5 |\nafter\na | b alone");
+const walk = (n) => typeof n === "string" ? n : [n.tag, (n.children || []).map(walk)];
+process.stdout.write(JSON.stringify(md.map(n => [n.tag, n.cls || ""]).concat([walk(md[0])])));
+""")
+        self.assertEqual(got[:3], [["div", "rp-md-table"], ["div", "rp-md-p"], ["div", "rp-md-p"]])
+        table = got[3][1][0]
+        self.assertEqual(table[0], "table")
+        thead, tbody = table[1]
+        self.assertEqual(thead[1][0][1], [["th", ["kHz"]], ["th", ["ok"]]])
+        rows = tbody[1]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0][1][0], ["td", [["strong", ["16"]]]])
+        self.assertEqual(rows[0][1][1], ["td", ["a | b"]])
+        not_tables = self.run_node(r"""
+const kinds = (t) => renderMarkdownLite(t).map(n => n.cls);
+process.stdout.write(JSON.stringify([
+  kinds("pipes a | b in prose\n---\nnext"),
+  kinds("a | b | c\n--- | ---"),
+  kinds("a | b\n--- | ---")]));
+""")
+        self.assertNotIn("rp-md-table", not_tables[0])
+        self.assertNotIn("rp-md-table", not_tables[1])
+        self.assertEqual(not_tables[2], ["rp-md-table"])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_markdown_lite_never_makes_markup_from_its_input(self):
         """Model output is untrusted: `<script>`, `<img onerror>` and a
         javascript: link stay text nodes; the only elements are the

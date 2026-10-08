@@ -833,15 +833,21 @@ select.sel-inline:focus { border-color: var(--accent); }
 .chat-md h2 { font-size: 14px; }
 .chat-md h3 { font-size: 13px; }
 .chat-md a { color: var(--cyan); text-decoration: underline; }
+/* a wide table scrolls sideways on a narrow screen instead of wrapping
+   its cells letter by letter */
 .chat-md table {
   border-collapse: collapse;
   margin: 8px 0;
   font-size: 12px;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
 }
 .chat-md th, .chat-md td {
   border: 1px solid var(--line);
   padding: 4px 8px;
   text-align: left;
+  white-space: nowrap;
 }
 .chat-md th { background: var(--bg-2); font-weight: 600; }
 .chat-md hr { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
@@ -2204,6 +2210,10 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
   white-space: pre-wrap; word-break: break-word;
 }
 .rp-md-bullet { color: var(--fg-3); }
+.rp-md-table { max-width: 100%; overflow-x: auto; margin: 4px 0; }
+.rp-md-table table { border-collapse: collapse; font-size: 12px; }
+.rp-md-table th, .rp-md-table td { border: 1px solid var(--line); padding: 2px 8px; text-align: left; white-space: nowrap; }
+.rp-md-table th { background: var(--bg-2); font-weight: 600; }
 .rp-md-a { color: var(--accent); }
 .rp-md-quote { color: var(--fg-2); border-left: 2px solid var(--line); padding-left: 6px; }
 .rp-md-hr { border-top: 1px solid var(--line); margin: 5px 0; }

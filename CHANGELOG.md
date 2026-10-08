@@ -3,6 +3,30 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.42.1 - 2026-10-08
+
+### Fixed
+
+- **A runner killed mid-rollover finishes that rollover once** (#286,
+  point 4). Killed after the handoff, the restart resumed the old
+  session and asked it for a second handoff, overwriting the first.
+  Killed after the new session existed, the restart started a fresh
+  session with its own boot, then ran the rollover again with an
+  emergency handoff and a second boot. Killed after the generation
+  moved, the restart archived and bumped it again; killed with the
+  digest queued, it put a second digest. `data/rollover.json` now
+  records the rollover's phase until the flip row closes (handed off,
+  bumped, digest queued): the restart takes the ended generation from
+  it and skips what is done, so the handoff stays (`"handoff": "kept"`),
+  the generation moves once, one digest boots the new session, and a
+  start whose old session was already ended makes no boot of its own.
+  A digest put just before a kill (its journal write not yet done) is
+  adopted, not put twice. The start hooks run again on a rerun, so they
+  are assumed idempotent. Shown by real processes killed at
+  `rollover.handed_off`, `rollover.connected`, `rollover.bumped`,
+  `rollover.digest_put` and `rollover.digest_queued`
+  (`tests/runner/test_crash_rollover.py`).
+
 ## 3.42.0 - 2026-10-08
 
 ### Added

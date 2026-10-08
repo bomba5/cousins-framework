@@ -1,6 +1,7 @@
 """opencode_http: the `opencode serve` child, the v1 HTTP client and the
 SSE reader, against the fake server. The real binary is
 opt-in: COUSIN_LIVE_OPENCODE=1 with OPENCODE_BIN=<path>."""
+import itertools
 import json
 import os
 import shutil
@@ -50,6 +51,16 @@ def _gone(pid):
     except ProcessLookupError:
         return True
     return False
+
+
+def _carries(pid, marker):
+    """The process's environment holds this start's marker, as the marker
+    sweep reads it."""
+    entry = ("%s=%s" % (opencode_http.MARKER_ENV, marker)).encode()
+    try:
+        return entry in Path("/proc/%d/environ" % pid).read_bytes().split(b"\0")
+    except OSError:
+        return False
 
 
 class ServerCase(HermeticCase):
@@ -265,6 +276,13 @@ class TestOrphans(ServerCase):
                 pass
         self.addCleanup(kill)
         self.assertNotEqual(os.getpgid(child), srv.pid)        # its own session
+        # The fake writes the pid when Popen returns, once the child's exec
+        # is past its point of no return but before the kernel has set up
+        # the new image's environment: until then /proc/<pid>/environ reads
+        # empty and the sweep cannot see the child. A stalled CPU there
+        # (a loaded runner) left it unseen at the reap.
+        self.assertTrue(_wait(lambda: _carries(child, srv.marker)),
+                        "the detached child never showed its marker")
         return child
 
     def test_stop_kills_what_the_server_started_in_a_session_of_its_own(self):
@@ -301,9 +319,19 @@ class TestOrphans(ServerCase):
                 mock.patch.object(opencode_http.os, "kill") as kill:
             self.assertEqual(opencode_http.kill_marked("m"), [101, 102, 103])
         self.assertEqual([c.args[0] for c in kill.call_args_list], [101, 102, 103])
-        with mock.patch.object(opencode_http, "_marked_pids", lambda entry: [7]), \
+        fresh = itertools.count(200)
+        with mock.patch.object(opencode_http, "_marked_pids", lambda entry: [next(fresh)]), \
                 mock.patch.object(opencode_http.os, "kill"):
             self.assertEqual(len(opencode_http.kill_marked("m")), opencode_http.MARK_PASSES)
+
+    def test_a_process_still_dying_is_killed_once(self):
+        """SIGKILLed but not yet scheduled to exit (a loaded or stalled CPU),
+        a process is still listed in the next pass: it is not killed or
+        counted again, and the sweep ends."""
+        with mock.patch.object(opencode_http, "_marked_pids", lambda entry: [7]), \
+                mock.patch.object(opencode_http.os, "kill") as kill:
+            self.assertEqual(opencode_http.kill_marked("m"), [7])
+        self.assertEqual(kill.call_count, 1)
 
     def test_the_pidfile_checks_the_boot_and_the_command_too(self):
         """A pidfile from another boot, or naming a

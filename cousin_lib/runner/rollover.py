@@ -187,6 +187,19 @@ def write_journal(home, row_id, old_session, generation, handoff):
     tmp.replace(path)
 
 
+def advance_journal(home, phase, **fields):
+    """Move the journal to a later phase ("bumped", "digest_queued"),
+    keeping what it holds. No journal, nothing written."""
+    data = read_journal(home)
+    if data is None:
+        return
+    data.update(fields, phase=phase, ts=time.time())
+    path = journal_path(home)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(path)
+
+
 def clear_journal(home):
     try:
         journal_path(home).unlink()

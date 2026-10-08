@@ -2817,6 +2817,17 @@ class SdkRunner:
         journal = await asyncio.to_thread(rollover.read_journal, self.home)
         if not (journal and journal.get("row") == row["id"]):
             journal = None
+        phase = journal.get("phase", "handed_off") if journal else None
+        if journal and isinstance(journal.get("generation"), int):
+            generation = journal["generation"]       # the one being ended, not a moved file
+        if phase in ("bumped", "digest_queued"):
+            # the new session existed and the generation moved before the
+            # restart: what is left is the start hooks, the digest, the close
+            handoff = "kept"
+            old_sid = journal.get("old_session") or old_sid
+            self.stream.append("rollover", {"phase": "resumed", "reason": reason,
+                                            "from": phase})
+            return await self._rollover_finish(row, reason, handoff, old_sid, journal)
         try:
             if journal:
                 # this row's handoff was written before a restart (the
@@ -2913,23 +2924,51 @@ class SdkRunner:
             generation = boot.bump_generation(self.home)
         except Exception as exc:  # noqa: BLE001 - degraded, named in the detail
             problems.append("generation not moved: %s: %s" % (type(exc).__name__, exc))
+        else:
+            await asyncio.to_thread(rollover.advance_journal, self.home, "bumped",
+                                    new_generation=generation)
+        crashpoint("rollover.bumped")
+        return await self._rollover_finish(row, reason, handoff, old_sid, None,
+                                           generation=generation, problems=problems)
+
+    async def _rollover_finish(self, row, reason, handoff, old_sid, journal, *,
+                               generation=None, problems=None):
+        """The rollover after its generation moved: start hooks, the digest,
+        the row closed. A rerun from the journal (the runner died after the
+        bump) takes the moved generation from it and puts no second digest
+        when the first is still in the inbox."""
+        problems = list(problems or [])
+        if journal is not None:
+            generation = journal.get("new_generation") or boot.read_generation(self.home)
         self.hysteresis.rolled_over()
         try:
             await asyncio.to_thread(session.run_phase, self.home, "start")
         except Exception as exc:  # noqa: BLE001 - degraded, named in the detail
             problems.append("start hooks: %s: %s" % (type(exc).__name__, exc))
-        digest, digest_state = await self._digest(generation)
-        digest_id = None
-        if digest is not None:
-            digest, handed = self._handover(digest)
-            try:
-                digest_id = self.inbox.put(Item(thread_id="system", source="boot", body=digest,
-                                                sender="runner"))
-            except Exception as exc:  # noqa: BLE001 - the session runs on without it
-                digest_state = "none: the digest row could not be stored: %s: %s" \
-                               % (type(exc).__name__, exc)
-            if digest_id is not None and handed:
-                handover.consume(self.home)
+        queued = journal.get("digest_id") if journal and journal.get("phase") == "digest_queued" \
+            else None
+        if queued and self.inbox.get(queued):
+            digest_state = "built (queued before the restart)"
+            row_now = self.inbox.get(queued)
+            # still queued: it is the new session's first message, as below
+            digest_id = queued if row_now["state"] == "queued" else None
+        else:
+            digest, digest_state = await self._digest(generation)
+            digest_id = None
+            if digest is not None:
+                digest, handed = self._handover(digest)
+                try:
+                    digest_id = self.inbox.put(Item(thread_id="system", source="boot",
+                                                    body=digest, sender="runner"))
+                except Exception as exc:  # noqa: BLE001 - the session runs on without it
+                    digest_state = "none: the digest row could not be stored: %s: %s" \
+                                   % (type(exc).__name__, exc)
+                if digest_id is not None and handed:
+                    handover.consume(self.home)
+                if digest_id is not None:
+                    await asyncio.to_thread(rollover.advance_journal, self.home,
+                                            "digest_queued", digest_id=digest_id)
+            crashpoint("rollover.digest_queued")
         detail = {"reason": reason, "handoff": handoff, "generation": generation,
                   "old_session": old_sid, "digest": digest_state}
         if problems:

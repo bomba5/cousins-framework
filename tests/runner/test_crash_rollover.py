@@ -27,7 +27,7 @@ import json, pathlib, sys, time
 from cousin_lib.delivery import Item
 from cousin_lib.runner import tools
 from cousin_lib.runner.sdk import SdkRunner
-from tests.runner.test_sdk import ScriptedClient, assistant, init_msg, result
+from tests.runner.test_sdk import ScriptedClient, asked_resume, assistant, init_msg, result
 
 home, label = pathlib.Path(sys.argv[1]), sys.argv[2]
 holder, clients, turns = {}, [], []
@@ -50,12 +50,15 @@ def plain(sid):
 
 def factory(options):
     n = len(clients)
-    sid = "s-1" if n == 0 else "s-%s-%d" % (label, n + 1)
     if n == 0 and label == "first":
+        sid = "s-1"
         scripts = [plain(sid), handoff(sid)]
-    elif n == 0:          # a resumed old session: whatever it is asked, it says so
+    elif asked_resume(options) == "s-1":
+        # the old session, resumed: a handoff turn here is the second one
+        sid = "s-1"
         scripts = [handoff(sid)] + [plain(sid) for _ in range(4)]
-    else:
+    else:                 # a new session, whichever start made it
+        sid = "s-%s-%d" % (label, n + 1)
         scripts = [plain(sid) for _ in range(6)]
     clients.append(ScriptedClient(options, scripts))
     return clients[-1]
@@ -109,8 +112,19 @@ class TestRolloverCrash(HermeticCase):
         path = self.home / ("turns-%s.json" % label)
         return json.loads(path.read_text()) if path.exists() else []
 
+    def boot_rows(self):
+        conn = sqlite3.connect(self.home / "data" / "inbox.db")
+        try:
+            return conn.execute("SELECT COUNT(*) FROM inbox WHERE source='boot'").fetchone()[0]
+        finally:
+            conn.close()
+
     def assert_one_rollover(self):
         self.assertEqual((self.home / "data" / "generation.txt").read_text().strip(), "1")
+        self.assertEqual(self.boot_rows(), 1)                    # one digest, one boot
+        self.assertEqual(sorted(p.name for p in (self.home / "data" / "generations").iterdir()),
+                         ["gen-0000"])                           # the ended one, archived once
+        self.assertFalse((self.home / "data" / "rollover.json").exists())
         self.assertIn("position first", (self.home / "data" / "handoff.md").read_text())
         self.assertEqual(self.flip_rows(), [("done", "delivered")])
         # no turn of the restart ran on the old session
@@ -129,3 +143,18 @@ class TestRolloverCrash(HermeticCase):
         second = self.child("second")
         self.assertEqual(second.returncode, 0, second.stderr[-3000:])
         self.assert_one_rollover()
+
+    def test_killed_after_the_bump_the_restart_does_not_bump_again(self):
+        first = self.child("first", crash="rollover.bumped")
+        self.assertEqual(first.returncode, -9, first.stderr[-2000:])
+        second = self.child("second")
+        self.assertEqual(second.returncode, 0, second.stderr[-3000:])
+        self.assert_one_rollover()
+
+    def test_killed_with_the_digest_queued_the_restart_puts_no_second_one(self):
+        first = self.child("first", crash="rollover.digest_queued")
+        self.assertEqual(first.returncode, -9, first.stderr[-2000:])
+        second = self.child("second")
+        self.assertEqual(second.returncode, 0, second.stderr[-3000:])
+        self.assert_one_rollover()
+

@@ -12,11 +12,16 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   session and asked it for a second handoff, overwriting the first.
   Killed after the new session existed, the restart started a fresh
   session with its own boot, then ran the rollover again with an
-  emergency handoff and a second boot. `data/rollover.json` now records
-  a written handoff until the flip row closes: the restart skips the
-  handoff (`"handoff": "kept"`) and, when the old session was already
-  ended, makes no boot of its own. Shown by real processes killed at
-  `rollover.handed_off` and `rollover.connected`
+  emergency handoff and a second boot. Killed after the generation
+  moved, the restart archived and bumped it again; killed with the
+  digest queued, it put a second digest. `data/rollover.json` now
+  records the rollover's phase until the flip row closes (handed off,
+  bumped, digest queued): the restart takes the ended generation from
+  it and skips what is done, so the handoff stays (`"handoff": "kept"`),
+  the generation moves once, one digest boots the new session, and a
+  start whose old session was already ended makes no boot of its own.
+  Shown by real processes killed at `rollover.handed_off`,
+  `rollover.connected`, `rollover.bumped` and `rollover.digest_queued`
   (`tests/runner/test_crash_rollover.py`).
 
 ## 3.42.0 - 2026-10-08

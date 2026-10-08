@@ -267,6 +267,28 @@ class CallAssemblyCase(unittest.TestCase):
             resolve=lambda name: name)
         self.assertEqual(argv[-1], "--force")
 
+    def test_a_schema_property_no_command_passes_on_is_refused(self):
+        """A home's registry whose schema grew while a command's options
+        did not (the sync never migrated `options`) must not answer
+        "Remembered" for a call that dropped `scope`: it is an error that
+        says how to bring the registry up to date. A property a sibling
+        command maps is left alone, as the in-process transport does."""
+        import copy
+        tool = copy.deepcopy(self.tool)
+        for cmd in tool["commands"].values():
+            cmd["options"].pop("scope", None)
+        with self.assertRaises(ToolError) as cm:
+            mcp_server.build_call(tool, "remember",
+                                  {"topic": "t", "fact": "f", "scope": "the lab"},
+                                  resolve=lambda name: name)
+        self.assertIn("apply-homes", str(cm.exception))
+        argv, _ = mcp_server.build_call(tool, "remember", {"topic": "t", "fact": "f", "scope": ""},
+                                        resolve=lambda name: name)
+        self.assertNotIn("--scope", argv)
+        argv, _ = mcp_server.build_call(self.tool, "search", {"query": "q", "level": "tool"},
+                                        resolve=lambda name: name)
+        self.assertNotIn("--level", argv)
+
     def test_missing_required_placeholder_is_a_tool_error(self):
         with self.assertRaises(ToolError) as cm:
             mcp_server.build_call(self.tool, "decide", {"topic": "t"},

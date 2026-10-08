@@ -3,6 +3,32 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.36.1 - 2026-10-08
+
+### Fixed
+
+- **A cousin's registry gets the framework's changed text, not only its
+  new keys.** The registry sync corrected only a hand-kept list of old
+  descriptions, so `options` and `argv` a release changed never reached
+  an existing cousin: `remember` still mapped no `scope` or
+  `valid_until`, `why` no `depth`, `obsolete` no `entry`, the operator
+  send no `video`, `job start` had no `--` before its title, and the
+  job `kind` still offered the retired `shell`. On the
+  stdio MCP path (the opencode and tmux lanes) a call with those
+  replied as done and dropped them. The old values now come from the
+  registry's git history, a property's whole table as well as its
+  string fields (`cousin_lib/registry_history.py`, regenerated
+  with `python -m cousin_lib.registry_history --write`; a test fails
+  while one is missing), and `cousin-upgrade --apply-homes` or the next
+  start rewrites each one that is still exactly what a release shipped.
+- **A `#` inside a quoted string no longer hides the rest of a table
+  from the sync.** The 3.36.0 `derived_from` description names
+  `raw:<file>#<line>`; the sync read that `#` as a comment, and every key
+  after it in the shipped table was invisible to it.
+- **The stdio MCP path refuses a property it cannot pass on.** A value
+  the tool's schema offers but no command of the tool maps is an error
+  naming `cousin-upgrade --apply-homes`, never a silent drop.
+
 ## 3.36.0 - 2026-10-08
 
 ### Added

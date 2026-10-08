@@ -112,7 +112,7 @@ marked `lost`, with `[lost: its process is gone]` on its summary, by
 checks every 2 seconds, so a dead job turns `lost` within seconds. The
 stored start time is compared exactly, so a reused pid, a reboot or a
 clock step is never mistaken for the job. A row with a command but no pid
-10 seconds after it started was never forked (whatever started it died
+60 seconds after it started was never forked (whatever started it died
 in between) and is marked `lost` too, with `[lost: its command was never
 started]`. A row with no pid and no command (a `start` with no command, a
 hook-tracked background shell, a media row) has nothing to check and is

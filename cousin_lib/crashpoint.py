@@ -10,9 +10,10 @@ point, then starts again and checks the recovery by reading the stores,
 never log text. A kill proves atomicity between two steps; it says
 nothing about a power loss (the page cache survives a SIGKILL).
 
-Every point is registered in POINTS with what it sits between; a call
-with a name not in POINTS raises, and tests/test_crashpoint.py checks
-that each registered point is exercised by a test."""
+Every point is registered in POINTS with what it sits between; with
+the variable set, a call with a name not in POINTS raises, and
+tests/test_crashpoint.py checks every call is registered and every
+registered point is exercised by a test."""
 import os
 import signal
 
@@ -40,10 +41,15 @@ _hits = {}
 
 
 def crashpoint(name):
-    """SIGKILL this process here when the environment names this point."""
+    """SIGKILL this process here when the environment names this point. A
+    pure no-op otherwise: a name is checked against POINTS only when a
+    test asked for a point (tests/test_crashpoint.py checks every call),
+    so a typo never costs a production path."""
+    if _TARGET is None:
+        return
     if name not in POINTS:
         raise ValueError("unregistered crash point %r (crashpoint.POINTS)" % name)
-    if _TARGET is None or _TARGET[0] != name:
+    if _TARGET[0] != name:
         return
     _hits[name] = _hits.get(name, 0) + 1
     if _hits[name] == _TARGET[1]:

@@ -33,9 +33,12 @@ class TestRegistry(HermeticCase):
                           and "%r" % n not in text and '"%s"' % n not in text.replace(
                               "crashpoint(\"%s\")" % n, "")], [])
 
-    def test_an_unregistered_name_raises(self):
-        with self.assertRaises(ValueError):
-            crashpoint.crashpoint("no.such.point")
+    def test_an_unregistered_name_raises_only_when_a_point_is_asked_for(self):
+        from unittest import mock
+        crashpoint.crashpoint("no.such.point")          # unset: a pure no-op
+        with mock.patch.object(crashpoint, "_TARGET", ("job.exited", 1)):
+            with self.assertRaises(ValueError):
+                crashpoint.crashpoint("no.such.point")
 
     def test_the_target_parses_a_count(self):
         self.assertEqual(crashpoint._target("job.exited:3"), ("job.exited", 3))

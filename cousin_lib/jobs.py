@@ -620,8 +620,10 @@ def _process_gone(job, groups):
 LOST_NOTE = " [lost: its process is gone]"
 # A shell row's pid is recorded right after the fork; one that still has
 # none this long after it started was never forked (its starter died in
-# between), so nothing will ever close it (#286, job.registered).
-SPAWN_GRACE_S = 10
+# between), so nothing will ever close it (#286, job.registered). Well
+# past a live starter's worst case: each of its writes may wait out a 5 s
+# busy timeout before the pid lands.
+SPAWN_GRACE_S = 60
 UNSPAWNED_NOTE = " [lost: its command was never started]"
 
 

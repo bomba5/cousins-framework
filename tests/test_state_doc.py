@@ -8,7 +8,8 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs" / "reference" / "state.md"
-NAME = re.compile(r"""["']([A-Za-z0-9_.-]+\.(?:db|jsonl|json))["']""")
+# a bare name or a path literal ("data/kind-switch.json"): the file name
+NAME = re.compile(r"""["'](?:[\w.-]+/)*([\w.-]+\.(?:db|jsonl|json))["']""")
 # names that are no store of this install: an import source read once,
 # another program's files, config, manifests inside an export or backup
 NOT_STORES = {
@@ -18,6 +19,7 @@ NOT_STORES = {
     ".baseline.json", "embeddings.json", ".mcp.json", "chat-hooks.json",
     "net-allowlist.json", "outbound-filter.json", "shared-reviewers.json",
     "console-users.json", "cousin-policy.json", "cousin-policy.ack.json",
+    ".fts.db",          # a legacy name the export skips; nothing writes it
 }
 
 

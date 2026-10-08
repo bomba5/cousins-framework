@@ -91,6 +91,10 @@ built from it.
 | `run/held` | transactional | a stop | holds the cousin down across a [supervisor](../glossary.md#supervisor) restart until its next start |
 | `data/runner-restart.json` | transactional | `restart_note` | a stop cut a live turn: the next resume says so first, then it is cleared |
 | `data/login-required.json` | transactional | `runner/auth` | the account needs a login; cleared when it has one |
+| `data/cost-cap.json` | transactional | `runner/cost_cap` | the daily cost cap's notice, said once a day |
+| `data/previous-transcript.json` | transactional | `handover` | the transcript a migration left behind, read once by the next session |
+| `data/kind-switch.json`, `data/migration.json` | transactional | `migrate` | a kind switch or a migration in progress, so a rollback knows what to undo |
+| `data/template-sync.json` | transactional | `template_sync`, `cousin-upgrade` | the release whose registry and template this home was last brought to |
 | `data/mcp-client.json` | transactional | `mcp_server` | the MCP client versions seen |
 | `data/run/mcp-config.json` | context | `runner/sdk`, at every connect | the MCP servers handed to the CLI |
 | `data/opencode.runner.json` | config | `runner/opencode` | the opencode kind's own settings |
@@ -113,6 +117,8 @@ built from it.
 | `data/health.json` | transactional | `health` | the last health pass |
 | `data/lifecycle/audit.jsonl`, `data/system/audit.jsonl`, `data/accounts/audit.jsonl` | raw event | `lifecycle`, the console | what was done to cousins, the system and accounts |
 | `data/tool-surface.md` | projection | `tool_surface` | from the installed entry points |
+| `data/upgrade.json` | transactional | `upgrade_switch` | a release switch in progress and its restarts |
+| `run/supervisor.json` | runtime | the supervisor | its `status` body, rewritten while it runs |
 | `data/console-sessions.json`, `config/console-users.json`, `data/console-prefs/` | transactional | the console | the only state the console owns; everything else it shows is a view |
 | `shared/*.md` | authored | promotion through `shared_tier` | the canonical [shared tier](../glossary.md#shared-tier) |
 | `shared/proposed/`, `shared/audit.jsonl` | transactional + raw event | `shared_tier` | proposals and their history |

@@ -107,7 +107,7 @@ def finish_job(job_id, *, status="done", summary="", exit_code=None):
         conn.close()
     if before is not None and before["status"] in ("running", "lost") and row:
         record_job_result(dict(row))
-        notify_owner(dict(row))
+        notify_owner(dict(row), was_lost=before["status"] == "lost")
 
 
 # What a finished job leaves in its cousin's raw memory. The topic
@@ -153,7 +153,7 @@ def record_job_result(job):
         return False
 
 
-def notify_owner(job):
+def notify_owner(job, *, was_lost=False):
     """One inbox row to the owning cousin for a job that asked for it
     (`notify`) and ended: what it was, how it ended, where its log is.
     The cousin waiting on it needs no polling (#282). A job whose
@@ -173,6 +173,9 @@ def notify_owner(job):
         head = "[cousin-job] job #%s %s" % (job.get("id"), job.get("status"))
         if job.get("exit_code") is not None:
             head += " (exit %s)" % job["exit_code"]
+        if was_lost:
+            # the second notice for this job: the first said lost
+            head += " (it was marked lost; this is how it really ended)"
         body = "%s: %s" % (head, title or "(untitled)")
         summary = " ".join(str(job.get("result_summary") or "").split())
         if summary:
@@ -1077,6 +1080,7 @@ def _reparse_start_remainder(args):
             args.json = args.json or known.json
             args.artifact = (args.artifact or []) + (known.artifact or []) or None
             args.artifact_commit = args.artifact_commit or known.artifact_commit
+            args.notify = getattr(args, "notify", False) or known.notify
             cl = rest
         except SystemExit:
             pass

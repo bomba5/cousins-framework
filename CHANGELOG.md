@@ -13,7 +13,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   and log path: source `job`, on the `system` thread, ranked with a
   schedule. A meeting with a facilitator tells the facilitator when the
   floor comes back after a round, so a meeting the user only listens to
-  needs no polling. `cousin-upkeep` counts a `job` notice as self, like
+  needs no polling. A job marked lost and closed later by its runner
+  notifies again, saying it was marked lost and how it really ended.
+  `cousin-upkeep` counts a `job` notice as self, like
   a schedule. The registry's job tool gains `notify`; `cousin-upgrade
   --apply-homes` adds it to existing homes.
 

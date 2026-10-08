@@ -702,6 +702,20 @@ class TestCloseNotice(JobsCase):
         self.assertIn("job #%d failed (exit 2): build the image - disk full" % job_id, item.body)
         self.assertIn("log: /tmp/build.log", item.body)
 
+    def test_a_lost_job_closed_later_says_it_was_marked_lost(self):
+        from cousin_lib import jobs
+        job_id = register_job(kind="shell", title="slow", notify=True)
+        conn = jobs._db()
+        conn.execute("UPDATE jobs SET status='lost' WHERE id=?", (job_id,))
+        conn.commit(); conn.close()
+        finish_job(job_id, status="done", exit_code=0)
+        self.assertIn("it was marked lost", self.sent[-1][1].body)
+
+    def test_the_title_first_shape_keeps_notify(self):
+        rc, out, _ = self._main(["start", "shell", "flagged", "--notify", "--json", "--", "true"])
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(get_job(json.loads(out)["job_id"])["notify"], 1)
+
     def test_a_job_without_notify_tells_nobody(self):
         job_id = register_job(kind="shell", title="quiet")
         finish_job(job_id, status="done")

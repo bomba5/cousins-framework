@@ -641,7 +641,7 @@ cousin-job start shell --artifact out/image.bin --artifact-commit 3f2a9c1 -- "im
 ```
 
 A cousin's `job` tool does the same with `run` (`title`, `argv` as an array,
-optional `desc`, `log`, `artifacts` and `commit`); see [MCP tools](mcp.md#what-a-cousin-gets).
+optional `desc`, `log`, `artifacts`, `commit` and `notify`); see [MCP tools](mcp.md#what-a-cousin-gets).
 
 `cousin-loops` is the loops daemon and its controls. Subcommands: `run
 [--interval S] [--ticks N]` (the daemon), `status`, `requests`, `flips` (each
@@ -868,7 +868,8 @@ Four classes:
 
 - **upkeep**: every row the turn answered is the context heartbeat, a
   boot or flip digest, or a memory proposal;
-- **self**: a prompt the cousin scheduled for itself (`cousin-schedule`).
+- **self**: a prompt the cousin scheduled for itself (`cousin-schedule`),
+  or a job's end notice it asked for (`cousin-job start --notify`).
   The tool can't tell a cousin's self-set heartbeat from a real reminder,
   so this is shown apart: read upkeep as a floor and upkeep plus self as a
   ceiling;

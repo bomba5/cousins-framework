@@ -17,8 +17,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   changes under `.git/hooks`. A policy.toml cannot turn them off. It is a
   speed bump against an honest mistake, not a wall (an alias or a script
   spells the same thing); the gate that holds is the remote's, required
-  CI and branch protection, which the fleet repository now has with its
-  own pre-push hook.
+  CI and branch protection.
 
 ## 3.40.1 - 2026-10-08
 

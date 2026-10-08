@@ -1807,9 +1807,14 @@ const RP_SYSTEM_LINES = {
   pane_reopened: p => ["rp-roll", "pane reopened" + (p.source ? " · " + p.source : "")],
   pane_unreachable: p => ["rp-err", "pane unreachable" + (p.detail ? " · " + rpCut(p.detail, 140) : "")],
   session_changed: p => ["rp-dim", "new session · " + rpCut(p.new_session_id || "", 60)],
+  // a removed config key found at start (runner/main.py): a boot line
+  config: p => ["rp-warn", "config · " + (p.key && p.key !== p.where ? (p.where || "") + " " + p.key : (p.key || p.where || "?"))
+                           + " is no longer read (2.0.0); cousin-migrate tidy removes it"],
   typing_blocked: p => ["rp-warn", "typing blocked · " + (p.what || "?") + (p.screen ? " (" + p.screen + ")" : "")],
 };
 const RP_SYSTEM_BOOT = { session: 1 };
+// lines a start writes, kept under its boot group (rpBootGroup)
+const RP_SYSTEM_BOOT_LINES = { config: 1 };
 // The framework's own kinds that are not turn content, as a line.
 const RP_KIND_LINES = {
   memory_update: p => ["rp-dim", "memory updated · " + (p.entries || 0) + " entr" + (p.entries === 1 ? "y" : "ies")],
@@ -1965,7 +1970,7 @@ function rpModel(events) {
         rows.push({ t: "line", key, ev, cls: "rp-dim", text: "new session · " + rpCut(p.session_id || "", 60) });
       else if (RP_SYSTEM_LINES[p.subtype]) {
         const [cls, text] = RP_SYSTEM_LINES[p.subtype](p);
-        rows.push({ t: "line", key, ev, cls, text });
+        rows.push({ t: "line", key, ev, cls, text, ...(RP_SYSTEM_BOOT_LINES[p.subtype] ? { boot: true } : {}) });
       }
       else if (!RP_SKIP_SYSTEM[p.subtype] && Object.keys(p).some(f => f !== "subtype")) rows.push({ t: "meta", key, ev });
       return;

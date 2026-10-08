@@ -773,6 +773,7 @@ const oc = rpModel([
 ]);
 const sdk = rpModel([
   E(1, "runner", {kind: "sdk"}), E(2, "harness", {kind: "sdk", ok: false, level: "warning", message: "cli drift"}),
+  S(2, {subtype: "config", where: "cousin.toml", key: "runtime.tmux_session", line: 4}),
   E(3, "policy", {describe: "x"}), S(4, {subtype: "resumed", session_id: "s"}),
 ]);
 process.stdout.write(JSON.stringify([shape(oc), shape(sdk)]));""")
@@ -782,7 +783,8 @@ process.stdout.write(JSON.stringify([shape(oc), shape(sdk)]));""")
              ["line", "perimeter · no perimeter on this lane"],
              ["turn", None]],
             [["boot", ["runner", "policy", "system:resumed"]],
-             ["line", "harness · cli drift"]],
+             ["line", "harness · cli drift"],
+             ["line", "config · cousin.toml runtime.tmux_session is no longer read (2.0.0); cousin-migrate tidy removes it"]],
         ])
 
     def test_every_subtype_and_kind_a_runner_emits_has_a_reading(self):
@@ -792,7 +794,11 @@ process.stdout.write(JSON.stringify([shape(oc), shape(sdk)]));""")
         import re
         runner = pathlib.Path(__file__).resolve().parents[2] / "cousin_lib"
         src = "".join(p.read_text() for p in runner.rglob("*.py"))
-        subtypes = set(re.findall(r'"subtype": "([a-z_]+)"', src)) | {"connect_failed"}
+        # literal subtypes and the kwarg form; the variable forms are
+        # sdk.py's connect event (connect_failed, resume_failed) and the
+        # SDK's own subtypes passed through, which the pane names by hand
+        subtypes = set(re.findall(r'"subtype": "([a-z_]+)"', src)) \
+            | set(re.findall(r'subtype="([a-z_]+)"', src)) | {"connect_failed"}
         kinds = set(re.findall(r'stream\.append\("([a-z_]+)"', src))
         missing = sorted(n for n in subtypes | kinds
                          if not re.search(r'(\b%s:|"%s"|case "%s")' % (n, n, n), self.chat))

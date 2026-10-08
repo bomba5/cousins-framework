@@ -55,6 +55,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -338,7 +339,8 @@ class Checkin:
 def normalize_chat_user(name):
     if not name:
         return "unknown"
-    return name.lower().replace(" ", "_")
+    # NFC first: "Totò" typed composed or decomposed is one person, one thread
+    return unicodedata.normalize("NFC", name).lower().replace(" ", "_")
 
 
 class ChatStore:

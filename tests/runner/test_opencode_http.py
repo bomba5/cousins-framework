@@ -312,17 +312,33 @@ class TestOrphans(ServerCase):
 
     def test_the_marker_sweep_repeats_until_a_pass_kills_nothing_bounded(self):
         """A marked process can start another while
-        the pass runs; the sweep repeats until a pass kills nothing, at most
-        MARK_PASSES times."""
-        passes = iter([[101], [102, 103], [], [104]])
+        the pass runs; the sweep repeats until a pass kills nothing and the
+        one after it (a settle later) kills nothing either, at most
+        MARK_PASSES killing passes."""
+        passes = iter([[101], [102, 103], [], [], [104]])
         with mock.patch.object(opencode_http, "_marked_pids", lambda entry: next(passes)), \
+                mock.patch.object(opencode_http.time, "sleep"), \
                 mock.patch.object(opencode_http.os, "kill") as kill:
             self.assertEqual(opencode_http.kill_marked("m"), [101, 102, 103])
         self.assertEqual([c.args[0] for c in kill.call_args_list], [101, 102, 103])
         fresh = itertools.count(200)
         with mock.patch.object(opencode_http, "_marked_pids", lambda entry: [next(fresh)]), \
+                mock.patch.object(opencode_http.time, "sleep"), \
                 mock.patch.object(opencode_http.os, "kill"):
             self.assertEqual(len(opencode_http.kill_marked("m")), opencode_http.MARK_PASSES)
+
+    def test_an_empty_pass_is_confirmed_once_more(self):
+        """A child mid-exec reads an empty environment for a moment: the
+        pass that sees nothing is followed by one more after a settle, so
+        the child turning up then is killed too; two empty passes end it."""
+        seen = iter([[], [9], [], []])
+        calls = []
+        with mock.patch.object(opencode_http, "_marked_pids", lambda entry: calls.append(1) or next(seen)), \
+                mock.patch.object(opencode_http.os, "kill"), \
+                mock.patch.object(opencode_http.time, "sleep") as sleep:
+            self.assertEqual(opencode_http.kill_marked("m"), [9])
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(sleep.call_count, 2)
 
     def test_a_process_still_dying_is_killed_once(self):
         """SIGKILLed but not yet scheduled to exit (a loaded or stalled CPU),

@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.9 - 2026-10-08
+
+### Fixed
+
+- **A tmux runner that starts while the CLI writes reads that line
+  whole.** It started reading the transcript at its size, which can
+  fall in the middle of a line the CLI is still writing; the rest of
+  that line then read as an unparsed fragment. It starts just past the
+  last complete line now.
+
 ## 3.37.8 - 2026-10-08
 
 ### Fixed

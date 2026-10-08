@@ -975,7 +975,9 @@ class TmuxRunner:
         try:
             self._turn_file(None)                # a file a dead runner left names no live turn
             how = self._open_session()
-            self._cursor = self._size() if how != "fresh" else 0
+            # past the last complete line, not the size: a line the CLI is
+            # half-way through writing is _pump's to read whole
+            self._cursor = transcript.last_line_end(self._path) if how != "fresh" else 0
             self._recover(how)
             if self._live is not None:
                 self._to("running", "adopted mid-turn")

@@ -185,6 +185,28 @@ def turn_nonce(entry, known):
     return found[-1] if found else None
 
 
+def last_line_end(path, *, chunk=65536):
+    """The offset just past the file's last complete line (0 for none, or
+    a missing file): where a reader that starts now begins, so a line the
+    CLI is half-way through writing is read whole later, never as a
+    fragment."""
+    try:
+        with open(path, "rb") as fh:
+            end = fh.seek(0, 2)
+            pos = end
+            while pos > 0:
+                start = max(0, pos - chunk)
+                fh.seek(start)
+                data = fh.read(pos - start)
+                nl = data.rfind(b"\n")
+                if nl >= 0:
+                    return start + nl + 1
+                pos = start
+    except OSError:
+        return 0
+    return 0
+
+
 def read_from(path, offset):
     """(entries, new_offset): every COMPLETE line from `offset` on. A
     partial last line is left for the next read; new_offset is just past

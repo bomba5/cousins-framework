@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.39.0 - 2026-10-08
+
+### Added
+
+- **Push instead of polling** (#282). A job started with `--notify`
+  (the job tool's `run` with `notify`) puts one row in its owner's
+  inbox when it ends, done, failed or lost, with its status, exit code
+  and log path: source `job`, on the `system` thread, ranked with a
+  schedule. A meeting with a facilitator tells the facilitator when the
+  floor comes back after a round, so a meeting the user only listens to
+  needs no polling. `cousin-upkeep` counts a `job` notice as self, like
+  a schedule. The registry's job tool gains `notify`; `cousin-upgrade
+  --apply-homes` adds it to existing homes.
+
 ## 3.38.0 - 2026-10-08
 
 ### Changed

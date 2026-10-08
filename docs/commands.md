@@ -629,7 +629,10 @@ refused). `--artifact PATH` (repeatable) names a file the command builds,
 relative to where `start` runs (where the command runs and builds), and `--artifact-commit SHA` the commit it
 was built from: on exit 0 each one is recorded as an artifact of the job
 (`cousin-artifact`), and one that is not there fails the job with the
-reason, though the command exited 0.
+reason, though the command exited 0. `--notify` puts one row in the
+starting cousin's inbox when the job ends (done, failed, or lost when its
+process is gone), with the status, the exit code and the log path; the row's
+source is `job`, on the `system` [thread](glossary.md#thread).
 
 ```
 cousin-job start shell "rebuild the index" -- cousin-memory reindex

@@ -57,7 +57,11 @@ with `title` and `argv` (the command as an array, never a shell string),
 and optionally `desc`, `log` (relative to its home, passed as
 `--home-log`), and `artifacts` with `commit`: the files the command
 builds, relative to its home, recorded as artifacts of the job when it
-exits 0 (passed as `--artifact` and `--artifact-commit`). It's this same launcher, run from the cousin's home, and it answers at once with the
+exits 0 (passed as `--artifact` and `--artifact-commit`), and `notify`: when
+the job ends (done, failed or lost) one row lands in the cousin's
+[inbox](glossary.md#inbox) with
+its status, exit code and log path, so it waits for the job instead of
+polling it (passed as `--notify`). It's this same launcher, run from the cousin's home, and it answers at once with the
 job id and the log path ([MCP tools](mcp.md#what-a-cousin-gets)). The
 tool's `start` refuses `shell`, since it takes no command and the row
 would never close. The row keeps the command line as given, secrets

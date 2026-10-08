@@ -101,6 +101,7 @@ SHIPPED_BEFORE = {
         ['start', 'shell', '{title}', '--json', '--', '{argv}'],
     ),
     ('tools.job.commands.run', 'options'): (
+        {'desc': '--desc', 'log': '--home-log', 'artifacts': '--artifact', 'commit': '--artifact-commit'},
         {'desc': '--desc', 'log': '--home-log'},
         {'desc': '--desc', 'log': '--log'},
     ),

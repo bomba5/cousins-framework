@@ -177,8 +177,10 @@ def kill_marked(marker, *, exclude=()):
     exit, or in an uninterruptible sleep) is dying, not new: it is not
     killed or counted again. It misses what dropped the marker (env -i,
     exec -c), what made its environment unreadable (PR_SET_DUMPABLE 0),
-    and what another manager started for it (tmux, systemd-run, at): a
-    Known gap."""
+    what another manager started for it (tmux, systemd-run, at), and a
+    child mid-exec at the instant of a pass that kills nothing (its
+    environment reads empty until the kernel sets it up, microseconds):
+    a Known gap."""
     if not marker:
         return []
     entry = ("%s=%s" % (MARKER_ENV, marker)).encode()

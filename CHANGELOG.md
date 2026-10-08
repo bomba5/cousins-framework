@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.36.2 - 2026-10-08
+
+### Fixed
+
+- **A stale registry refuses a `depth` of 0 too.** The 3.36.1 check
+  skipped every value equal to `False`, and `0` is: `why` with `depth`
+  0 on a copy that maps no `depth` was still dropped. Only an unset
+  value (none, false, an empty string or list) is skipped now.
+- **Correction to 3.36.1's notes.** The values it migrated were dropped
+  only on the `tmux` kind, the one that reaches tools through the stdio
+  server; the `sdk` and `opencode` kinds call the library in process
+  and never lost them. And nothing syncs a registry at a start: a home's
+  copy is updated by `cousin-upgrade --apply-homes` or `cousin-spawn
+  SLUG --sync-template --apply`.
+
 ## 3.36.1 - 2026-10-08
 
 ### Fixed

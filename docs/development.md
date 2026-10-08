@@ -439,6 +439,12 @@ input properties, and how each subcommand maps to argv. The registry's
    operator-only verbs (spawn, [flip](glossary.md#flip), lifecycle, loop control, shared
    memory review) out.
 3. Document it in [MCP](mcp.md).
+4. When you change a value already shipped (a description, an `options`
+   table, an `argv`, a property's enum), run
+   `python -m cousin_lib.registry_history --write` from a full clone after
+   changing the registry, and commit what it writes. It records every
+   value a past release shipped, so the sync can bring existing cousins'
+   copies up to date; `tests/test_registry_history.py` fails until you do.
 
 `tests/test_mcp_server.py` loads the shipped registry and builds every
 schema, so a broken entry fails. Nothing forces the docs page here; do

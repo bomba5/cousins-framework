@@ -282,6 +282,11 @@ class CallAssemblyCase(unittest.TestCase):
                                   {"topic": "t", "fact": "f", "scope": "the lab"},
                                   resolve=lambda name: name)
         self.assertIn("apply-homes", str(cm.exception))
+        for cmd in tool["commands"].values():
+            cmd["options"].pop("depth", None)
+        with self.assertRaises(ToolError):                  # 0 is a value, not unset
+            mcp_server.build_call(tool, "why", {"id": "0123456789ab", "depth": 0},
+                                  resolve=lambda name: name)
         argv, _ = mcp_server.build_call(tool, "remember", {"topic": "t", "fact": "f", "scope": ""},
                                         resolve=lambda name: name)
         self.assertNotIn("--scope", argv)

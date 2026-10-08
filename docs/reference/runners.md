@@ -23,7 +23,9 @@ runner's process against the live turn, whatever the kind.
 ## States and outcomes
 
 A runner is always in one of seven states. Every change is a `state` event
-in the cousin's stream, which the console shows.
+in the cousin's stream, which the console shows, plus one at start with
+`from` null and `detail` `started`, so a runner that waits idle reads as
+idle.
 
 | state | what it means for you | can move to |
 |---|---|---|

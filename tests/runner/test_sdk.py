@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import threading
 import time
 import unittest
 
@@ -759,26 +760,68 @@ class TestSdkRunner(HermeticCase):
                             and e["payload"].get("subtype") == "interrupt_dropped"
                             for e in r.events()))
 
+    def _hold_after_result(self, r):
+        """Hold the turn in its first _after_turn: the result is read and
+        recorded, the turn not yet ended. Returns (held, release)."""
+        held, release = threading.Event(), threading.Event()
+        real = r._after_turn
+
+        async def spy(msg):
+            if not held.is_set():
+                held.set()
+                await asyncio.to_thread(release.wait, 10)
+            return await real(msg)
+        r._after_turn = spy
+        self.addCleanup(release.set)    # runs before the runner's stop
+        return held, release
+
+    def _dropped(self, r):
+        return any(e["kind"] == "system" and e["payload"].get("subtype") == "interrupt_dropped"
+                   for e in r.events())
+
     def test_an_interrupt_after_the_result_never_reaches_the_cli(self):
-        # turn 1's result is read; the carried row's CLI turn has not shown
-        # its echo yet (delay), so the CLI is between turns: not live
+        # the result is read, nothing is carried: the turn is still
+        # `running` but the CLI is between turns, so the interrupt is dropped
+        r, made = self._runner([[init_msg(), assistant(text="one"), result()]])
+        held, release = self._hold_after_result(r)
+        r.start()
+        r.enqueue(self._op("first"))
+        self.assertTrue(held.wait(5))
+        self.assertEqual(r.state(), "running")
+        went = asyncio.run_coroutine_threadsafe(r._interrupt_turn(r._turn_seq),
+                                                r._loop).result(timeout=2)
+        self.assertFalse(went)
+        self.assertEqual(made["client"].interrupts, 0)
+        self.assertTrue(self._dropped(r))
+        release.set()
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        self.assertFalse(_results(r)[0]["interrupted"])
+
+    def test_an_interrupt_right_after_the_result_reaches_a_carried_row(self):
+        # the second row was written while turn 1 was finishing, and its
+        # echo had not come when the result did: it is carried from the
+        # result on, so an interrupt in the after-result work goes to the
+        # CLI, on the writer behind that row, as one during the carried
+        # read does (test_carried_read)
         r, made = self._runner([[init_msg(), assistant(text="one"), "PAUSE", result()],
-                                [assistant(text="two"), result()]], delay=0.6)
+                                [assistant(text="two"), result()]])
+        held, release = self._hold_after_result(r)
         r.start()
         r.enqueue(self._op("first"))
         self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused, timeout=8))
-        r.enqueue(self._op("second"))
+        b = r.enqueue(self._op("second"))
         self.assertTrue(_wait(lambda: len(made["client"].queries) == 2))
         made["client"].resume()
-        self.assertTrue(_wait(lambda: len(_results(r)) == 1, timeout=4))
-        seq = r._turn_seq
-        asyncio.run_coroutine_threadsafe(r._interrupt_turn(seq), r._loop).result(timeout=2)
-        self.assertEqual(made["client"].interrupts, 0)
+        self.assertTrue(held.wait(5))
+        self.assertEqual(len(_results(r)), 1)
+        went = asyncio.run_coroutine_threadsafe(r._interrupt_turn(r._turn_seq),
+                                                r._loop).result(timeout=2)
+        self.assertTrue(went)
+        self.assertEqual(made["client"].interrupts, 1)
+        self.assertFalse(self._dropped(r))
+        release.set()
         self.assertTrue(_wait(lambda: len(_results(r)) == 2, timeout=6))
-        self.assertFalse(_results(r)[1]["interrupted"])
-        self.assertTrue(any(e["kind"] == "system"
-                            and e["payload"].get("subtype") == "interrupt_dropped"
-                            for e in r.events()))
+        self.assertEqual(_results(r)[1]["inbox_ids"], [b.inbox_id])
 
     # -- failures ------------------------------------------------------------------
     def test_a_client_exception_goes_to_errored_then_back_to_idle_and_fails_the_row(self):

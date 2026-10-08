@@ -2232,9 +2232,6 @@ class SdkRunner:
 
             while open_rows:
                 echoed = set()
-                if results:
-                    # rows written, their echo not come when the result did
-                    self._carrying = True
                 responses = self._client.receive_response()
                 it = responses.__aiter__()
                 try:
@@ -2283,6 +2280,11 @@ class SdkRunner:
                             cut = self._interrupt_sent      # _close clears it
                             ok = self._close(msg, open_rows, echoed, closing) and ok
                             self._interrupt_idle = self._reinterrupting = False
+                            # rows written, their echo not come when the result
+                            # did: carried from here, not from the next read, so
+                            # an interrupt during _after_turn is taken as one a
+                            # moment later would be
+                            self._carrying = bool(open_rows)
                             if cut and open_rows:
                                 # an interrupt ended this CLI turn with rows still
                                 # carried: the CLI may have dropped them, so the

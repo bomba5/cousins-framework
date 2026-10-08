@@ -369,7 +369,9 @@ def build_call(tool, cmd_name, args, extra_argv=(), resolve=resolve_command):
     # call that did not do what it said. One a sibling command maps is
     # left alone, as the in-process transport does.
     for name, value in args.items():
-        if name in props and value not in (None, False, "", []) and not _uses(tool, name):
+        # `is`, not equality: 0 == False, and a depth of 0 is a value
+        unset = value is None or value is False or value in ("", [])
+        if name in props and not unset and not _uses(tool, name):
             raise ToolError("%s: %r is in this tool's schema but no command passes it on:"
                             " this home's mcp-registry.toml is older than the framework"
                             " (`cousin-upgrade --apply-homes` brings it up to date)"

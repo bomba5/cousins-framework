@@ -3,6 +3,15 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.36.2 - 2026-10-08
+
+### Fixed
+
+- **A stale registry refuses a `depth` of 0 too.** The 3.36.1 check
+  skipped every value equal to `False`, and `0` is: `why` with `depth`
+  0 on a copy that maps no `depth` was still dropped. Only an unset
+  value (none, false, an empty string or list) is skipped now.
+
 ## 3.36.1 - 2026-10-08
 
 ### Fixed

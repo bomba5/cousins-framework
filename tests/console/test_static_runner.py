@@ -725,7 +725,11 @@ const m = rpModel([
   E(12, "config_change", {files: ["cousin.toml"]}),
   E(13, "hook", {event: "PreToolUse", error: "recorder over its budget"}),
   E(14, "permission", {event: "PermissionRequest", tool_name: "mcp__cousin__send"}),
-  S(15, {subtype: "something_new", detail: 1}),
+  E(15, "permission", {event: "Notification", message: "Claude is waiting for your input"}),
+  E(16, "policy", {tool: "Bash", decision: "deny", reason: "rm -rf is denied", agent_id: "a1"}),
+  E(17, "policy", {tool: "Write", decision: "ask", reason: "outside the home"}),
+  S(18, {subtype: "something_new", detail: 1}),
+  E(19, "runner", {kind: "sdk"}), E(20, "policy", {describe: "policy.toml: 2 rules"}),
 ]);
 process.stdout.write(JSON.stringify(m.rows.map(r => r.t === "line" ? [r.cls, r.text] : [r.t])));""")
         self.assertEqual(got, [
@@ -739,7 +743,11 @@ process.stdout.write(JSON.stringify(m.rows.map(r => r.t === "line" ? [r.cls, r.t
             ["rp-dim", "config changed · cousin.toml"],
             ["rp-warn", "hook PreToolUse · recorder over its budget"],
             ["rp-warn", "permission asked · mcp__cousin__send"],
+            ["rp-warn", "notification · Claude is waiting for your input"],
+            ["rp-err", "policy · deny Bash (subagent) · rm -rf is denied"],
+            ["rp-warn", "policy · ask Write · outside the home"],
             ["meta"],
+            ["boot"],
         ])
 
     TASKS = """

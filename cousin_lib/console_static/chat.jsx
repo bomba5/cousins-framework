@@ -1797,7 +1797,8 @@ const RP_KIND_LINES = {
   memory_update: p => ["rp-dim", "memory updated · " + (p.entries || 0) + " entr" + (p.entries === 1 ? "y" : "ies")],
   config_change: p => ["rp-dim", "config changed · " + (p.files || []).join(", ")],
   hook: p => [p.error ? "rp-warn" : "rp-dim", "hook " + (p.event || "") + (p.error ? " · " + rpCut(p.error, 140) : "")],
-  permission: p => ["rp-warn", "permission asked · " + (p.tool_name || "a tool")],
+  permission: p => ["rp-warn", p.tool_name ? "permission asked · " + p.tool_name
+                                            : "notification · " + rpCut(p.message || p.event || "", 140)],
 };
 
 // A gate that sent a turn back (hooks.gate_events; the opencode lane's
@@ -1954,6 +1955,14 @@ function rpModel(events) {
     if (k === "harness" && !p.ok) {
       rows.push({ t: "line", key, ev, cls: p.level === "error" ? "rp-err" : "rp-warn",
                   text: "harness · " + String(p.message || (p.problems || []).join("; ") || "version check failed") });
+      return;
+    }
+    // a policy decision on one call (hooks.on_policy) is turn content;
+    // only the policy the runner started on (`describe`) is boot
+    if (k === "policy" && !("describe" in p)) {
+      rows.push({ t: "line", key, ev, cls: p.decision === "deny" ? "rp-err" : "rp-warn",
+                  text: "policy · " + (p.decision || "?") + " " + (p.tool || "a tool")
+                        + (p.agent_id ? " (subagent)" : "") + (p.reason ? " · " + rpCut(p.reason, 140) : "") });
       return;
     }
     if (RP_BOOT_KINDS[k] || k === "harness") { rpBoot(rows, key, ev); return; }

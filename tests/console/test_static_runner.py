@@ -754,6 +754,37 @@ process.stdout.write(JSON.stringify(m.rows.map(r => r.t === "line" ? [r.cls, r.t
             ["rp-dim", "new session · ses_b"],
         ])
 
+    def test_one_start_is_one_boot_group_around_its_warnings(self):
+        """The opencode lane's real boot order puts the perimeter warning
+        between the harness check and the rest of the boot report: still
+        one boot group, the warning a line under it, the boot session in
+        the group. A failed harness check splits nothing either."""
+        got = self.run_node("""
+const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
+const S = (seq, payload) => E(seq, "system", payload);
+const shape = m => m.rows.map(r => r.t === "boot" ? ["boot", r.events.map(e => e.kind + (e.payload.subtype ? ":" + e.payload.subtype : ""))] : [r.t, r.text || null]);
+const oc = rpModel([
+  E(1, "runner", {kind: "opencode"}), E(2, "harness", {kind: "opencode", ok: true}),
+  S(3, {subtype: "perimeter", kind: "opencode", level: "warning", line: "no perimeter on this lane"}),
+  E(4, "policy", {describe: "x"}), S(5, {subtype: "mcp", status: "connected"}),
+  S(6, {subtype: "policy_plugin", errors: []}), S(7, {subtype: "session", session_id: "ses_a"}),
+  S(8, {subtype: "resumed", session_id: "ses_a"}),
+  E(9, "turn_start", {bodies: ["a"]}),
+]);
+const sdk = rpModel([
+  E(1, "runner", {kind: "sdk"}), E(2, "harness", {kind: "sdk", ok: false, level: "warning", message: "cli drift"}),
+  E(3, "policy", {describe: "x"}), S(4, {subtype: "resumed", session_id: "s"}),
+]);
+process.stdout.write(JSON.stringify([shape(oc), shape(sdk)]));""")
+        self.assertEqual(got, [
+            [["boot", ["runner", "harness", "policy", "system:mcp", "system:policy_plugin",
+                       "system:session", "system:resumed"]],
+             ["line", "perimeter · no perimeter on this lane"],
+             ["turn", None]],
+            [["boot", ["runner", "policy", "system:resumed"]],
+             ["line", "harness · cli drift"]],
+        ])
+
     TASKS = """
 const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
 const S = (seq, payload) => E(seq, "system", payload);

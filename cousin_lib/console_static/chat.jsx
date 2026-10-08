@@ -1911,12 +1911,12 @@ function rpModel(events) {
       // no producer sends a failed one today (the runner raises instead):
       // a guard, so a lane that does is a line, not raw JSON
       else if (p.subtype === "mcp")
-        rows.push({ t: "line", key, ev, cls: "rp-err", text: "mcp · " + String(p.status || "not connected") + (p.error ? " · " + rpCut(p.error, 120) : "") });
+        rows.push({ t: "line", boot: true, key, ev, cls: "rp-err", text: "mcp · " + String(p.status || "not connected") + (p.error ? " · " + rpCut(p.error, 120) : "") });
       else if (p.subtype === "policy_plugin")
-        rows.push({ t: "line", key, ev, cls: "rp-err", text: "policy plugin · " + rpCut((p.errors || []).map(e =>
+        rows.push({ t: "line", boot: true, key, ev, cls: "rp-err", text: "policy plugin · " + rpCut((p.errors || []).map(e =>
           e && typeof e === "object" ? (e.source != null ? e.source + ": " : "") + String(e.error || "") : String(e)).join("; "), 160) });
       else if (p.subtype === "perimeter")
-        rows.push({ t: "line", key, ev, cls: p.level === "warning" ? "rp-warn" : "rp-dim", text: "perimeter · " + rpCut(p.line || "", 160), detail: p.line || null });
+        rows.push({ t: "line", boot: true, key, ev, cls: p.level === "warning" ? "rp-warn" : "rp-dim", text: "perimeter · " + rpCut(p.line || "", 160), detail: p.line || null });
       // a CLI turn of its own between turns (a task notification)
       else if (p.subtype === "background_turn" && p.phase === "start") {
         turn = { t: "turn", key, ev, thread: "background", bodies: [], user: null, recall: null, meta: newMeta() };
@@ -1937,7 +1937,7 @@ function rpModel(events) {
       }
       // the opencode lane names its session at boot and again when it
       // opens a new one mid-stream: the boot group's only at boot
-      else if (RP_SYSTEM_BOOT[p.subtype] && rows.length && rows[rows.length - 1].t === "boot") rpBoot(rows, key, ev);
+      else if (RP_SYSTEM_BOOT[p.subtype] && rpBootGroup(rows)) rpBoot(rows, key, ev);
       else if (RP_SYSTEM_BOOT[p.subtype])
         rows.push({ t: "line", key, ev, cls: "rp-dim", text: "new session · " + rpCut(p.session_id || "", 60) });
       else if (RP_SYSTEM_LINES[p.subtype]) {
@@ -1957,7 +1957,7 @@ function rpModel(events) {
     // the runner's SDK and CLI version check: part of the boot when it
     // holds, a line of its own when it does not
     if (k === "harness" && !p.ok) {
-      rows.push({ t: "line", key, ev, cls: p.level === "error" ? "rp-err" : "rp-warn",
+      rows.push({ t: "line", boot: true, key, ev, cls: p.level === "error" ? "rp-err" : "rp-warn",
                   text: "harness · " + String(p.message || (p.problems || []).join("; ") || "version check failed") });
       return;
     }
@@ -2070,9 +2070,20 @@ function rpModel(events) {
   return { strip, rows };
 }
 
+// The boot group a boot event joins: the last row, or the group just
+// above the boot-phase lines under it (a perimeter warning, a failed
+// check), so one start is one group however its warnings interleave.
+function rpBootGroup(rows) {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].t === "boot") return rows[i];
+    if (!rows[i].boot) return null;
+  }
+  return null;
+}
+
 function rpBoot(rows, key, ev) {
-  const last = rows[rows.length - 1];
-  if (last && last.t === "boot") last.events.push(ev);
+  const group = rpBootGroup(rows);
+  if (group) group.events.push(ev);
   else rows.push({ t: "boot", key, events: [ev] });
 }
 

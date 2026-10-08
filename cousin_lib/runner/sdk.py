@@ -345,7 +345,7 @@ from cousin_lib.runner.blocks import THINKING_CHARS  # noqa: E402,F401 - re-expo
 from cousin_lib.runner.blocks import thinking_payload as _thinking_payload  # noqa: E402
 from cousin_lib.runner.blocks import tool_result_text as _tool_result_text  # noqa: E402
 
-_UNSET = object()   # no resume waiting for its tools check
+_UNSET = object()   # no resume waiting for its snapshot check
 
 
 # A turn's fold, interrupt-row control or query write that runs
@@ -500,7 +500,7 @@ class SdkRunner:
         # and kept for the runner's life: a reconnect or a rollover offers
         # the same set, and an edit lands at the next start.
         self._user_mcp = None
-        self._tools_on_file = _UNSET  # a resume's recorded tools, checked at its first init
+        self._snapshot_on_file = _UNSET  # a resume's recorded snapshot, checked at its first init
         # Restart with resume (data/runner-session.json): the id on file
         # (cached), a write the loop owes the file, and the id the first
         # init after a resume must name.
@@ -755,29 +755,34 @@ class SdkRunner:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         lane = self._lane
-        # the tools the session's snapshot recorded: its first request's,
-        # so a save for the same session (a lane move) keeps the old value
+        # what the session's snapshot recorded: its first request's, so a
+        # save for the same session (a lane move) keeps the old value
         on_file = self._read_session_file()
-        tools_seen = (on_file.get("tools") if session_id and on_file.get("session_id") == session_id
-                      else self._tool_fingerprint())
+        seen = (on_file.get("snapshot") if session_id and on_file.get("session_id") == session_id
+                else self._snapshot_fingerprint())
         tmp.write_text(json.dumps({"session_id": session_id, "lane": lane,
                                    "generation": self._session_generation(),
-                                   "tools": tools_seen, "updated": time.time()}))
+                                   "snapshot": seen, "updated": time.time()}))
         tmp.replace(path)
         self._saved, self._saved_lane = session_id, lane
 
-    def _tool_fingerprint(self):
-        """A hash of the tool list this process serves: the registry's
-        tools and the cousin's own MCP servers. The CLI's snapshot
-        (prompt.system_prompt_option) records the tools with the prompt on
-        a session's first request and sends that record on every resume,
-        so a session started before a registry or .mcp.json change keeps
-        the old schemas. None when it cannot be built: never a failed start."""
+    def _snapshot_fingerprint(self):
+        """A hash of what the CLI's snapshot freezes (prompt.system_prompt_option):
+        the composed system prompt (law, contract, identity, the operator's
+        rules), the registry's tools and the cousin's own MCP servers. The
+        snapshot is recorded on a session's first request and sent on every
+        resume, so a session started before an edit to any of them keeps the
+        old text and schemas. The prompt is hashed with the version held
+        fixed: a release alone moves only the contract's header line. None
+        when it cannot be built: never a failed start."""
         try:
+            from cousin_lib.runner import prompt
             servers = self._user_mcp.servers if self._user_mcp is not None else {}
             registry = (self.tool_context.registry
                         or tools.resolve_registry(self.home, self.root)[0])
-            text = json.dumps({"tools": tools.tool_definitions(registry),
+            text = json.dumps({"prompt": prompt.compose_system_prompt(
+                                   self.home, root=self.root, registry=registry, version="0"),
+                               "tools": tools.tool_definitions(registry),
                                "mcp": servers}, sort_keys=True, default=str)
         except Exception:  # noqa: BLE001 - a fingerprint must never fail a start
             return None
@@ -818,7 +823,7 @@ class SdkRunner:
                                               "got": session_id,
                                               "error": "the CLI started a new session"})
             else:
-                self._roll_if_tools_changed()
+                self._roll_if_snapshot_changed()
         # a new id, or the same id on another lane than the file says: a
         # stale lane would pick the wrong resume path at the next start
         lane_moved = self._lane != "unknown" and self._lane != self._saved_lane
@@ -1053,17 +1058,19 @@ class SdkRunner:
         return rollover.request(self.inbox, self.home, reason, alive=self.worker_alive,
                                 timeout=self.handoff_deadline_s + rollover.WAIT_SLACK_S)
 
-    def _roll_if_tools_changed(self):
-        """A resume, proven by its first init, whose recorded tools are not
-        the ones served now (or are unknown: a file from before the record)
-        gets a rollover: a handoff, then a fresh session that records the
-        tools it is given. A lost resume starts fresh anyway."""
-        recorded, self._tools_on_file = self._tools_on_file, _UNSET
+    def _roll_if_snapshot_changed(self):
+        """A resume, proven by its first init, whose recorded snapshot is
+        not what this runner serves now (or is unknown: a file from before
+        the record) gets a rollover: a handoff, then a fresh session that
+        records the prompt and tools it is given. A lost resume starts
+        fresh anyway."""
+        recorded, self._snapshot_on_file = self._snapshot_on_file, _UNSET
         if recorded is _UNSET:
             return
-        now = self._tool_fingerprint()
+        now = self._snapshot_fingerprint()
         if now is not None and recorded != now:
-            self._request_rollover("the tool list changed since this session started")
+            self._request_rollover("the system prompt or the tools changed since this"
+                                   " session started")
 
     def _request_rollover(self, why):
         """Ask without waiting (pressure, PreCompact): the loop claims it next."""
@@ -1431,7 +1438,7 @@ class SdkRunner:
                     # session: the login retry resumes it (_login_retry)
                     self._resume_id = saved
                     self._expect_session = saved    # the first init must name it
-                    self._tools_on_file = on_file.get("tools")   # checked at that init
+                    self._snapshot_on_file = on_file.get("snapshot")   # checked at that init
                 if resumed:
                     self.stream.append("system", {"subtype": "resumed", "session_id": saved})
             await asyncio.to_thread(self._restart_line, resumed)

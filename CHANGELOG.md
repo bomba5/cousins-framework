@@ -7,21 +7,29 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Fixed
 
-- **A resumed sdk session no longer keeps an old tool list.** The CLI's
-  prompt snapshot records the tools with the system prompt on a
-  session's first request and sends that record on every resume. A
-  session started before a registry or `.mcp.json` change kept the old
-  schemas across restarts, so a cousin could not set `scope`,
-  `valid_until` or `depth` though the registry had them and the handler
-  took them. `data/runner-session.json` now records a hash of the tools
-  the session started with (`tools`). When the first init proves a
-  resume and the tools served now differ, or the file has no record,
-  the runner asks for a rollover: a handoff, then a fresh session that
-  records the new tools. A lost resume starts fresh as before. The
-  first turn after such a resume still runs with the old list; the
-  rollover follows it. After this upgrade every sdk cousin rolls over
-  once, after its first turn. A switch from `tmux` to `sdk` does too:
-  the tmux session's recorded tools are the tmux kind's.
+- **A resumed sdk session no longer keeps an old system prompt or tool
+  list.** The CLI's prompt snapshot records the system prompt and the
+  tools on a session's first request and sends that record on every
+  resume. A session started before an edit kept the old text and
+  schemas across restarts: a cousin could not set `scope`,
+  `valid_until` or `depth` though the registry had them and the
+  handler took them, and a new law line or operator rule did not reach
+  it until its next rollover, though 3.21.0 called rules effective at
+  the next start. `data/runner-session.json` now records a hash of
+  what the session started with (`snapshot`: the composed system
+  prompt with the version held fixed, the registry's tools and the
+  cousin's own MCP servers). When the first init proves a resume and
+  what the runner serves now differs, or the file has no record, the
+  runner asks for a rollover: a handoff, then a fresh session that
+  records the new snapshot. A lost resume starts fresh as before. The
+  first turn after such a resume still runs with the old snapshot; the
+  rollover follows it. A release alone moves no snapshot.
+- **The upgrade to this version rolls every sdk session over once.** No
+  session file on file has a record yet, so each sdk cousin (side
+  sessions included) hands off and boots fresh after its first turn: on
+  a fleet of 13, 13 handoffs and 13 boots. A switch from `tmux` to `sdk`
+  rolls over once too: the tmux session's file has no record, and its
+  recorded tools were the tmux kind's.
 
 ## 3.37.10 - 2026-10-08
 

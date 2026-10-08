@@ -227,7 +227,7 @@ class TestReset(SideCase):
         r = self.side([[_turn("s-old")]])
         (self.home / "data" / "runner-session-peer.json").write_text(json.dumps(
             {"session_id": "s-old", "lane": "unknown", "generation": 0,
-             "tools": r._tool_fingerprint()}))
+             "snapshot": r._snapshot_fingerprint()}))
         r.start()
         a = r.enqueue(_peer("hello again"))
         self.assertTrue(self.done(r, a))

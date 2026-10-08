@@ -334,7 +334,7 @@ class TestRunnerWaitsForALogin(HermeticCase):
         r = self.build(fail_connects=1)
         (self.home / "data" / "runner-session.json").write_text(
             json.dumps({"session_id": "s-1", "lane": "login", "generation": 0, "updated": 0,
-                        "tools": r._tool_fingerprint()}))
+                        "snapshot": r._snapshot_fingerprint()}))
         r.start()
         rec = self.op(r)
         self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None))

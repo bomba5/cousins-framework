@@ -174,7 +174,7 @@ class TestResume(HermeticCase):
         r = self.runner(account=host)
         (self.home / "data" / "runner-session.json").write_text(
             json.dumps({"session_id": "s-live", "lane": "key", "generation": 0, "updated": 0,
-                        "tools": r._tool_fingerprint()}))
+                        "snapshot": r._snapshot_fingerprint()}))
         r.start(); self.one_turn(r)
         self.assertIsNone(self.options[0].resume)                   # the kind, not the file's "key"
         self.assertEqual(self.options[0].extra_args["resume"], "s-live")
@@ -348,7 +348,7 @@ class TestRestartNote(HermeticCase):
         r1 = self.runner([init_msg(session="s-live"), "HANG", result(session="s-live")])
         (self.home / "data" / "runner-session.json").write_text(
             json.dumps({"session_id": "s-live", "lane": "login",
-                        "tools": r1._tool_fingerprint()}))
+                        "snapshot": r1._snapshot_fingerprint()}))
         r1.start()
         r1.enqueue(Item("operator:priya", "chat", "start the long job", sender="Priya"))
         self.assertTrue(_wait(lambda: r1.state() == "running"))
@@ -376,7 +376,7 @@ class TestRestartNote(HermeticCase):
         r1 = self.runner([init_msg(session="s-live"), "HANG", result(session="s-live")])
         (self.home / "data" / "runner-session.json").write_text(
             json.dumps({"session_id": "s-live", "lane": "login",
-                        "tools": r1._tool_fingerprint()}))
+                        "snapshot": r1._snapshot_fingerprint()}))
         r1.start()
         r1.enqueue(Item("operator:priya", "chat", "start the long job", sender="Priya"))
         self.assertTrue(_wait(lambda: r1.state() == "running"))
@@ -405,7 +405,7 @@ class TestRestartNote(HermeticCase):
         r1 = self.runner([init_msg(session="s-live"), "HANG", result(session="s-live")])
         (self.home / "data" / "runner-session.json").write_text(
             json.dumps({"session_id": "s-live", "lane": "login",
-                        "tools": r1._tool_fingerprint()}))
+                        "snapshot": r1._snapshot_fingerprint()}))
         r1.start()
         r1.enqueue(Item("operator:priya", "chat", "start the long job", sender="Priya"))
         self.assertTrue(_wait(lambda: r1.state() == "running"))
@@ -477,7 +477,7 @@ class TestToolLedgerOnRestart(TestRestartNote):
                           result(session="s-live")])
         (self.home / "data" / "runner-session.json").write_text(
             json.dumps({"session_id": "s-live", "lane": "login",
-                        "tools": r1._tool_fingerprint()}))
+                        "snapshot": r1._snapshot_fingerprint()}))
         r1.start()
         r1.enqueue(Item("operator:priya", "chat", "push and tell kestrel", sender="Priya"))
         self.assertTrue(_wait(lambda: self.ledger().exists()

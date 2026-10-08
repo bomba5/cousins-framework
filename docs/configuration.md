@@ -962,8 +962,9 @@ SQLite). Who owns it goes by the account's kind: an `anthropic-key` or
 only mirrors its transcript. There is no retention on it yet. `data/usage.db` is the per-turn usage and cost table
 `usage.record` writes (an `opencode` cousin's too, from the tokens its provider
 reported and the cost opencode reported for them). `data/runner-session.json` is the session id (and
-lane) to resume at the next start, with a hash of the tools that session
-started with (`tools`): a resume whose tools changed rolls over. `data/extract-cursor.json` is continuous
+lane) to resume at the next start, with a hash of the system prompt and the
+tools that session started with (`snapshot`): a resume whose prompt or tools
+changed rolls over. `data/extract-cursor.json` is continuous
 extraction's per-session cursor into the transcript. `data/generations/` is
 one directory per past generation (`gen-0001`, ...), each a copy of
 `STATUS.md`, `data/handoff.md` and `data/active-threads.md` as they stood at

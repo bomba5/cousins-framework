@@ -193,11 +193,12 @@ cousin's `runner:<slug>` child; with no supervisor up the start fails. A stop
 holds the cousin down (`<home>/run/held`) across a supervisor restart until
 the next start. A restart resumes the same session
 (`data/runner-session.json`), so the conversation carries over; a flip
-(below) is how a cousin starts fresh. A resumed sdk session keeps the tool
-list it started with (the CLI's prompt snapshot), so when the tools changed
-since then (the registry or `.mcp.json`), the runner rolls it over after
-its first [turn](glossary.md#turn) (which still runs with the old list), and
-the next session gets the new tools. The console's card and inspector have
+(below) is how a cousin starts fresh. A resumed sdk session keeps the system
+prompt and the tool list it started with (the CLI's prompt snapshot), so when
+either changed since then (the law, its identity files, your rules, the
+registry or `.mcp.json`), the runner rolls it over after its first
+[turn](glossary.md#turn) (which still runs with the old ones), and the next
+session gets the new ones. A new release alone does not. The console's card and inspector have
 the same buttons. See [commands](commands.md#running-cousins) and
 [runners](reference/runners.md).
 

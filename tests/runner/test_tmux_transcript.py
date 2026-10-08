@@ -262,3 +262,29 @@ class TestTranscriptStore(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLastLineEnd(unittest.TestCase):
+    """Where a runner that starts now begins reading: just past the last
+    complete line, so a line still being written is never a fragment."""
+
+    def test_the_offset_is_past_the_last_newline(self):
+        import tempfile
+        from cousin_lib.runner import transcript
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "t.jsonl"
+            self.assertEqual(transcript.last_line_end(path), 0)              # missing
+            path.write_bytes(b"")
+            self.assertEqual(transcript.last_line_end(path), 0)
+            path.write_bytes(b'{"a": 1}\n{"b": 2}\n')
+            self.assertEqual(transcript.last_line_end(path), path.stat().st_size)
+            path.write_bytes(b'{"a": 1}\n{"b": 2}\n{"c": half')
+            self.assertEqual(transcript.last_line_end(path), len(b'{"a": 1}\n{"b": 2}\n'))
+            path.write_bytes(b'no newline at all')
+            self.assertEqual(transcript.last_line_end(path), 0)
+            big = b"x" * 70000 + b"\n" + b"y" * 70000                    # across chunks
+            path.write_bytes(big)
+            self.assertEqual(transcript.last_line_end(path, chunk=4096), 70001)
+            entries, _ = transcript.read_from(path, transcript.last_line_end(path))
+            self.assertEqual(entries, [])                                  # no fragment
+

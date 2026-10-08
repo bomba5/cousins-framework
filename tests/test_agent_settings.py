@@ -85,7 +85,7 @@ class Describe(_Case):
         d = agent_settings.describe(self.cousin('runner = "fake"\n'), self.root)
         self.assertEqual(set(d["settings"]), {"runner", "account", "auto_start",
                                               "commit_attribution", "dreaming", "dreaming_at",
-                                              "daily_cost_cap_usd"})
+                                              "daily_cost_cap_usd", "upkeep_alarm_percent"})
 
     def test_a_tmux_cousin_is_the_legacy_lane_with_no_agent_settings(self):
         d = agent_settings.describe(self.cousin(None), self.root)

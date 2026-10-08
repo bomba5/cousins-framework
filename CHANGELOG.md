@@ -3,6 +3,109 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.42.1 - 2026-10-08
+
+### Fixed
+
+- **A runner killed mid-rollover finishes that rollover once** (#286,
+  point 4). Killed after the handoff, the restart resumed the old
+  session and asked it for a second handoff, overwriting the first.
+  Killed after the new session existed, the restart started a fresh
+  session with its own boot, then ran the rollover again with an
+  emergency handoff and a second boot. Killed after the generation
+  moved, the restart archived and bumped it again; killed with the
+  digest queued, it put a second digest. `data/rollover.json` now
+  records the rollover's phase until the flip row closes (handed off,
+  bumped, digest queued): the restart takes the ended generation from
+  it and skips what is done, so the handoff stays (`"handoff": "kept"`),
+  the generation moves once, one digest boots the new session, and a
+  start whose old session was already ended makes no boot of its own.
+  A digest put just before a kill (its journal write not yet done) is
+  adopted, not put twice. The start hooks run again on a rerun, so they
+  are assumed idempotent. Shown by real processes killed at
+  `rollover.handed_off`, `rollover.connected`, `rollover.bumped`,
+  `rollover.digest_put` and `rollover.digest_queued`
+  (`tests/runner/test_crash_rollover.py`).
+
+## 3.42.0 - 2026-10-08
+
+### Added
+
+- **The upkeep headline counts a cousin's own schedules, and has an
+  alarm** (#288). `cousin-upkeep` and the console's Tokens page lead
+  with upkeep plus self (`headline_share`): heartbeats, boots and
+  memory proposals plus the prompts a cousin scheduled for itself and
+  the job notices it asked for, with the framework's share alone after
+  it, because the framework's share alone hid a cousin's polling. A new
+  `[agent] upkeep_alarm_percent` (0 is off; the console's agent
+  settings edit it): hourly, the loops daemon measures the last 7 days,
+  and over the alarm (on a spend of at least $1) the `upkeep:<slug>`
+  health row fails with the numbers; the Tokens page marks the cousin
+  on its 7-day view.
+
+## 3.41.2 - 2026-10-08
+
+### Docs
+
+- **The README says what a cousin is for** (#289): an AI session is
+  disposable, the cousin is not; and the boundary table's three
+  conclusions in plain words (reads are never stopped, the primary
+  session's writes are never gated, on `opencode` and `tmux` every
+  write is policy).
+
+## 3.41.1 - 2026-10-08
+
+### Fixed
+
+- **A job whose starter died before the fork no longer stays running
+  forever** (#286). Its row had no pid, which the lost-job check skips,
+  so it stayed `running` until the 24-hour reap. A row `cousin-job
+  start` forks itself (a new `launched` column) with no pid 60 seconds
+  after it started is now marked `lost` (`[lost: its command was never
+  started]`), and a `notify` job tells its owner. A hook-tracked
+  background shell, which never records a pid, is not such a row.
+
+### Added
+
+- **Crash points** (#286): `crashpoint("name")` SIGKILLs the process
+  when `COUSIN_CRASH_AT` names the point (`name:n` for the nth hit),
+  read once at import. Tests run a real `cousin-job` killed after the
+  row is registered, after the command exited and after its artifacts
+  are recorded, and check the stores: no row stays `running`, the lost
+  notice comes once, a lost job's artifacts still name it.
+- **`test (tmpfs)` in CI**: the suite's three shards with every
+  temporary file on `/dev/shm`, so a race that needs a fast disk shows
+  by design.
+
+## 3.41.0 - 2026-10-08
+
+### Added
+
+- **The tool gate refuses the usual ways around a repository's git
+  hooks** (#287). Before any policy.toml pattern, and with no policy.toml
+  at all, on the `sdk` kind and the `opencode` kind (the opencode plugin
+  gets the same rules first; the `tmux` pane does not), the framework
+  denies `git commit`/`push` with `--no-verify` or a prefix of it, `git
+  commit -n` alone or bundled, setting `core.hooksPath` in any case or
+  quoting, `GIT_CONFIG_*` in the environment, `SKIP=` and `HUSKY=`, and
+  changes under `.git/hooks`. A policy.toml cannot turn them off. It is a
+  speed bump against an honest mistake, not a wall (an alias or a script
+  spells the same thing); the gate that holds is the remote's, required
+  CI and branch protection.
+
+## 3.40.1 - 2026-10-08
+
+### Docs
+
+- **What is authoritative** (#285): `docs/reference/state.md` lists
+  every store the framework writes (a cousin's memory, its active
+  state, its runner and transport, the install), its level (raw event,
+  transactional, projection, context, authored, config), its writer,
+  what it is rebuilt from and which one wins on conflict.
+  `tests/test_state_doc.py` fails for a `.db`, `.jsonl` or `.json` name
+  in `cousin_lib` the page does not name and its not-a-store list (config,
+  another program's files) does not list.
+
 ## 3.40.0 - 2026-10-08
 
 ### Added

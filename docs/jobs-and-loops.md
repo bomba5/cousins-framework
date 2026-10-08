@@ -111,8 +111,11 @@ marked `lost`, with `[lost: its process is gone]` on its summary, by
 `show`, and by the console: while the console runs, its event [stream](glossary.md#stream)
 checks every 2 seconds, so a dead job turns `lost` within seconds. The
 stored start time is compared exactly, so a reused pid, a reboot or a
-clock step is never mistaken for the job. A row with no pid (a `start`
-with no command, a hook-tracked background shell, a media row) has
+clock step is never mistaken for the job. A row `cousin-job start` forks
+itself that still has no pid 60 seconds after it started was never forked
+(whatever started it died in between) and is marked `lost` too, with
+`[lost: its command was never started]`. Any other row with no pid (a
+`start` with no command, a hook-tracked background shell, a media row) has
 nothing to check and is never marked lost.
 
 `lost` isn't final: if the runner was in fact alive and finishes later,

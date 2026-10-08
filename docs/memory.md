@@ -384,8 +384,9 @@ Three things follow. **Reads are never stopped**: a cousin can read
 another cousin's home, a private one included, and only policy keeps it
 from doing so; closing that needs a separate OS user per cousin (designed,
 not built). **The primary session is never gated**, only its subagents
-are; a `policy.toml` `deny_bash_patterns` rule or `deny_tools` is the one
-way to narrow the primary session. **On `opencode` and `tmux` everything is
+are; a `policy.toml` `deny_bash_patterns` rule or `deny_tools`, and the
+framework's own command rules (the git hook bypasses, on the `sdk` and
+`opencode` kinds), are what narrow the primary session. **On `opencode` and `tmux` everything is
 policy**, and their runner says so at every start. What keeps other users
 on the host out is real: homes are created 0700 and the [supervisor](glossary.md#supervisor) runs
 everything under umask 077.

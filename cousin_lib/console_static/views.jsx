@@ -1079,19 +1079,24 @@ function UpkeepPanel() {
   const usd = (v) => "$" + (Number(v) || 0).toFixed(2);
   const pct = (v) => v == null ? "-" : Math.round(v * 100) + "%";
   const cls = (m, k) => (m.classes && m.classes[k]) || { turns: 0, cost_usd: 0 };
+  // upkeep.alarm's rule: over the alarm, once the spend is worth one ($1),
+  // on the alarm's own 7-day window only
+  const over = (m) => d.days === 7 && !!m.alarm_percent && m.headline_share != null
+    && m.cost_usd >= 1 && m.headline_share * 100 > m.alarm_percent;
   return (
     <div className="panel" data-upkeep style={{ marginTop: 16, padding: "12px 16px" }}>
       <div className="eyebrow">upkeep vs work, last {d.days} days</div>
       <div className="muted" style={{ fontSize: 11, margin: "4px 0 8px" }}>
-        upkeep = turns that only answered the heartbeat, a boot digest or a memory proposal (a floor); self = prompts a cousin scheduled for itself, its own heartbeat included (upkeep + self is a ceiling); dollars on a login are estimates (cousin-upkeep)
+        upkeep = turns that only answered the heartbeat, a boot digest or a memory proposal; self = prompts a cousin scheduled for itself and job notices it asked for; the headline is upkeep + self, red over the cousin's upkeep_alarm_percent (agent settings); dollars on a login are estimates (cousin-upkeep)
       </div>
       <div className="table-scroll">
         <table className="data">
-          <thead><tr><th>cousin</th><th className="num">upkeep share</th><th className="num">with self</th><th className="num">upkeep</th><th className="num">self</th><th className="num">work</th><th className="num">other</th><th className="num">turns</th></tr></thead>
-          <tbody>{rows.map(([slug, m]) => <tr key={slug}>
+          <thead><tr><th>cousin</th><th className="num">upkeep + self</th><th className="num">framework only</th><th className="num">alarm</th><th className="num">upkeep</th><th className="num">self</th><th className="num">work</th><th className="num">other</th><th className="num">turns</th></tr></thead>
+          <tbody>{rows.map(([slug, m]) => <tr key={slug} data-upkeep-over={over(m) ? "1" : undefined}>
             <td className="mono">{slug}</td>
-            <td className="num"><b>{pct(m.upkeep_share)}</b></td>
-            <td className="num">{pct(m.upkeep_or_self_share)}</td>
+            <td className="num" style={over(m) ? { color: "var(--bad)" } : undefined}><b>{pct(m.headline_share)}</b></td>
+            <td className="num">{pct(m.upkeep_share)}</td>
+            <td className="num">{m.alarm_percent ? Math.round(m.alarm_percent) + "%" : "off"}</td>
             <td className="num">{usd(cls(m, "upkeep").cost_usd)}</td>
             <td className="num">{usd(cls(m, "self").cost_usd)}</td>
             <td className="num">{usd(cls(m, "work").cost_usd)}</td>

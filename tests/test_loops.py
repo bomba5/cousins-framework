@@ -480,6 +480,83 @@ class TestFlipDrivers(LoopsCase):
         self._tick_f(now=self._at(23) + 60)
         self.assertEqual(sorted(self.flips), ["toki", "wren"])
 
+    def _seed_inbox(self, home, source, body, at):
+        import sqlite3
+        from cousin_lib.delivery import Item
+        from cousin_lib.runner.inbox import Inbox
+        inbox = Inbox(home)
+        rec = inbox.put(Item("loop:daemon" if source == "loop" else "operator:priya",
+                             source, body, sender="x"))
+        conn = sqlite3.connect(inbox.path)
+        conn.execute("UPDATE inbox SET created_at=? WHERE id=?", (at, rec))
+        conn.commit()
+        conn.close()
+
+    def test_an_idle_generation_keeps_its_session(self):
+        # #280: nothing but heartbeats since it started; the flip would buy
+        # a handoff and a boot and carry nothing. Its day is done.
+        from datetime import date
+        home = self._flip_cousin("wren")
+        self._seed_inbox(home, "loop", "Context heartbeat. nothing new", self._at(1))
+        report = self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, [])
+        self.assertEqual(report["idle_flips"], ["wren"])
+        self.assertEqual(self._flipped_on("wren"), str(date.today()))
+
+    def test_an_idle_generation_whose_snapshot_moved_is_flipped(self):
+        # a new rule since the session started: the flip is how it reaches it
+        import json as _json
+        home = self._flip_cousin("wren")
+        self._seed_inbox(home, "loop", "Context heartbeat. nothing new", self._at(1))
+        (home / "data" / "runner-session.json").write_text(
+            _json.dumps({"session_id": "s-1", "snapshot": "0123456789abcdef"}))
+        report = self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, ["wren"])
+        self.assertEqual(report["idle_flips"], [])
+
+    def test_an_idle_generation_whose_snapshot_holds_keeps_its_session(self):
+        import json as _json
+        from cousin_lib.runner import snapshot
+        home = self._flip_cousin("wren")
+        self._seed_inbox(home, "loop", "Context heartbeat. nothing new", self._at(1))
+        current = snapshot.fingerprint(home, home.parent.parent)
+        self.assertIsNotNone(current)
+        (home / "data" / "runner-session.json").write_text(
+            _json.dumps({"session_id": "s-1", "snapshot": current}))
+        report = self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, [])
+        self.assertEqual(report["idle_flips"], ["wren"])
+
+    def test_the_fingerprint_does_not_depend_on_the_callers_environment(self):
+        # a .mcp.json server whose ${VAR} one process lacks: the runner and
+        # the daemon still hash the same thing
+        import json as _json
+        import os as _os
+        from unittest import mock as _mock
+        from cousin_lib.runner import snapshot
+        home = self._flip_cousin("wren")
+        (home / ".mcp.json").write_text(_json.dumps({"mcpServers": {"x": {
+            "command": "srv", "env": {"TOKEN": "${ONLY_IN_THE_RUNNER}"}}}}))
+        with _mock.patch.dict(_os.environ, {"ONLY_IN_THE_RUNNER": "1"}):
+            runner_side = snapshot.fingerprint(home, home.parent.parent)
+        _os.environ.pop("ONLY_IN_THE_RUNNER", None)
+        self.assertEqual(snapshot.fingerprint(home, home.parent.parent), runner_side)
+
+    def test_a_generation_that_worked_is_flipped(self):
+        home = self._flip_cousin("wren")
+        self._seed_inbox(home, "loop", "Context heartbeat. nothing new", self._at(1))
+        self._seed_inbox(home, "chat", "can you check the NAS", self._at(2))
+        report = self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, ["wren"])
+        self.assertEqual(report["idle_flips"], [])
+
+    def test_an_idle_generation_does_not_spend_the_ticks_flip(self):
+        idle = self._flip_cousin("aaidle")
+        self._seed_inbox(idle, "loop", "Context heartbeat. nothing new", self._at(1))
+        self._flip_cousin("wren")
+        self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, ["wren"])
+
     def test_daily_flip_fires_late_once(self):
         self._flip_cousin("wren")
         from datetime import datetime
@@ -814,6 +891,16 @@ class TestMaxAgeOnTheRunnerLane(HermeticCase):
             yesterday = dt.datetime.now().replace(hour=0, minute=0, second=0,
                                                   microsecond=0).timestamp() - 86400
             boot.mark_generation_start(home, now=yesterday)
+            # the generation worked (#280: an idle one keeps its session)
+            import sqlite3
+            from cousin_lib.delivery import Item
+            from cousin_lib.runner.inbox import Inbox
+            inbox = Inbox(home)
+            done = inbox.put(Item("operator:priya", "chat", "check the NAS", sender="Priya"))
+            conn = sqlite3.connect(inbox.path)
+            conn.execute("UPDATE inbox SET state='done', outcome='delivered' WHERE id=?", (done,))
+            conn.commit()
+            conn.close()
             homes.append(home)
         p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}); p.start(); self.addCleanup(p.stop)
         with contextlib.ExitStack() as stack:
@@ -931,3 +1018,35 @@ class TestNeverFiresLate(LoopsCase):
         self._tick(now=base + 3600)
         self.assertFalse([t for _, t in self.delivered if "manual fire" in t], self.delivered)
         self.assertEqual(list_requests()[0]["status"], "expired")
+
+
+class TestUpkeepAlarm(LoopsCase):
+    """#288: hourly, a cousin with an alarm gets an `upkeep:<slug>` health row."""
+
+    def test_the_alarm_is_a_health_row_checked_hourly(self):
+        from unittest import mock as _mock
+        from cousin_lib import loops, upkeep
+        self._cousin("wren", extra="[agent]\nupkeep_alarm_percent = 50\n")
+        calls = []
+        def fake(home, now=None):
+            calls.append(now)
+            return False, "upkeep and its own schedules took 63%"
+        with _mock.patch.object(upkeep, "alarm", side_effect=fake):
+            report = self._tick(now=10_000.0)
+            self.assertIn(("upkeep:wren", False, "upkeep and its own schedules took 63%"),
+                          [tuple(h) for h in report["health"]])
+            self._tick(now=10_060.0)                       # within the hour: no second check
+            self._tick(now=10_000.0 + loops.UPKEEP_CHECK_SECONDS)
+        self.assertEqual(len(calls), 2)
+
+    def test_an_alarm_switched_off_clears_its_failing_row(self):
+        from unittest import mock as _mock
+        from cousin_lib import health, loops, upkeep
+        home = self._cousin("wren", extra="[agent]\nupkeep_alarm_percent = 50\n")
+        with _mock.patch.object(upkeep, "alarm", return_value=(False, "over")):
+            report = self._tick(now=20_000.0)
+        health.record(loops.FrameworkConfig.from_env().root, report["health"])
+        (home / "cousin.toml").write_text((home / "cousin.toml").read_text().replace(
+            "upkeep_alarm_percent = 50", "upkeep_alarm_percent = 0"))
+        report = self._tick(now=20_000.0 + loops.UPKEEP_CHECK_SECONDS)
+        self.assertIn(("upkeep:wren", True, None), [tuple(h) for h in report["health"]])

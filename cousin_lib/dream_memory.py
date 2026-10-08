@@ -68,6 +68,7 @@ from datetime import date, timedelta
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from cousin_lib import jsonl
 from cousin_lib import memory, memory_lock, perimeter
 
 # memory/.dream-ledger.json
@@ -303,10 +304,7 @@ def _note(home, pass_id, record):
     path = perimeter.assert_writable(journal_path(home, pass_id),
                                      writer="dream_memory._note")
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-        fh.flush()
-        os.fsync(fh.fileno())
+    jsonl.append_line(path, json.dumps(record, ensure_ascii=False), fsync=True)
 
 
 # ---- the attempt token -------------------------------------------------------

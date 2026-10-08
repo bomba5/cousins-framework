@@ -106,6 +106,21 @@ def generate_tracked(kind, prompt, *, home=None, **params):
         path = generate(kind, prompt, home=home, **params)
         job.log("saved %s (%d bytes)" % (path, Path(path).stat().st_size))
         job.summary = str(path)
+        # the render as an artifact of its job (#284): a claim can name
+        # artifact:<id>, and `why` reaches the job and its prompt. A
+        # private row: its path stays with its owner (the id, sha256 and
+        # job are what provenance needs), never a shared row naming a home
+        try:
+            from cousin_lib import artifacts
+            from cousin_lib.config import CousinConfig
+            from cousin_lib.jobs import get_job
+            owner = (get_job(job.job_id) or {}).get("spawned_by") or ""
+            owner_home = Path(home) if home else CousinConfig.from_env().home
+            row = artifacts.add(str(path), created_by=owner, job_id=job.job_id,
+                                private=True, label="%s render" % kind, home=owner_home)
+            job.log("artifact #%s" % row["id"])
+        except Exception as err:  # noqa: BLE001 - the render stands without its row
+            job.log("artifact not recorded: %s" % err)
     return path
 
 

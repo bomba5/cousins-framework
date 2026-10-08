@@ -58,6 +58,7 @@ from cousin_lib import reinforce
 from cousin_lib.config import (FrameworkConfig, MissingConfigError,
                                expand_harness_path, harness_config)
 from cousin_lib.sqlite_util import wal
+from cousin_lib import jsonl
 
 _EMBED_CAP_CHARS = 6000
 _RRF_K = 60
@@ -1255,8 +1256,7 @@ def _receipt(home, text, *, gate=None, returned=(), excluded=()):
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists() and path.stat().st_size > RECEIPT_BYTES:
             os.replace(path, path.with_name(path.name + ".1"))
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        jsonl.append_line(path, json.dumps(record, ensure_ascii=False))
     except OSError:
         pass
 

@@ -57,7 +57,11 @@ with `title` and `argv` (the command as an array, never a shell string),
 and optionally `desc`, `log` (relative to its home, passed as
 `--home-log`), and `artifacts` with `commit`: the files the command
 builds, relative to its home, recorded as artifacts of the job when it
-exits 0 (passed as `--artifact` and `--artifact-commit`). It's this same launcher, run from the cousin's home, and it answers at once with the
+exits 0 (passed as `--artifact` and `--artifact-commit`), and `notify`: when
+the job ends (done, failed or lost) one row lands in the cousin's
+[inbox](glossary.md#inbox) with
+its status, exit code and log path, so it waits for the job instead of
+polling it (passed as `--notify`). It's this same launcher, run from the cousin's home, and it answers at once with the
 job id and the log path ([MCP tools](mcp.md#what-a-cousin-gets)). The
 tool's `start` refuses `shell`, since it takes no command and the row
 would never close. The row keeps the command line as given, secrets
@@ -107,8 +111,11 @@ marked `lost`, with `[lost: its process is gone]` on its summary, by
 `show`, and by the console: while the console runs, its event [stream](glossary.md#stream)
 checks every 2 seconds, so a dead job turns `lost` within seconds. The
 stored start time is compared exactly, so a reused pid, a reboot or a
-clock step is never mistaken for the job. A row with no pid (a `start`
-with no command, a hook-tracked background shell, a media row) has
+clock step is never mistaken for the job. A row `cousin-job start` forks
+itself that still has no pid 60 seconds after it started was never forked
+(whatever started it died in between) and is marked `lost` too, with
+`[lost: its command was never started]`. Any other row with no pid (a
+`start` with no command, a hook-tracked background shell, a media row) has
 nothing to check and is never marked lost.
 
 `lost` isn't final: if the runner was in fact alive and finishes later,

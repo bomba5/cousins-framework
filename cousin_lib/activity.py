@@ -22,6 +22,8 @@ import pathlib
 import time
 from datetime import datetime
 
+from cousin_lib import jsonl
+
 ACTIVITY_DIR = "activity"
 LINE_CHARS = 240
 RESULT_LINES = 4
@@ -119,8 +121,7 @@ def record(home, payload, *, now=None):
     """Append the payload's line to today's activity log."""
     path = activity_path(home, now=now)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(activity_line(payload, now=now) + "\n")
+    jsonl.append_line(path, activity_line(payload, now=now))
     return path
 
 

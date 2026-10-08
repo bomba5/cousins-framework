@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from cousin_lib import memory_lock, perimeter
 from cousin_lib.trace import traced_cli
+from cousin_lib import jsonl
 
 # decisions.jsonl grows monotonically; past the threshold the older
 # entries move to a dated sibling archive and the newest tail stays
@@ -206,8 +207,8 @@ def _append_raw(home, entry):
     # reach by convention. `mark_obsolete` and `record_event` land here, so
     # one check covers the three producers. See perimeter.py.
     perimeter.assert_writable(path, writer="memory._append_raw")
-    with memory_lock.write_lock(home), open(path, "a") as fh:
-        fh.write(json.dumps(entry) + "\n")
+    with memory_lock.write_lock(home):
+        jsonl.append_line(path, json.dumps(entry))
     return entry
 
 
@@ -518,6 +519,17 @@ def why(home, eid, *, depth=None):
         return e.get("derived_from") or []
 
     def walk_back(i, level, path):
+        if _TYPED_REF.match(str(i)):
+            node = typed_node(i)
+            if node.get("missing") or i in path:
+                return node if node.get("missing") else {"id": i, "cycle": True,
+                                                         "topic": node.get("topic")}
+            nxt = node.pop("_from", [])
+            if level < limit and nxt:
+                node["built_from"] = [walk_back(d, level + 1, path | {i}) for d in nxt]
+            elif nxt:
+                node["more"] = True
+            return node
         if i not in by_id:
             return {"id": i, "missing": True}
         node = dict(by_id[i], id=i)
@@ -551,11 +563,58 @@ def why(home, eid, *, depth=None):
             "depth": limit}
 
 
+def typed_node(ref):
+    """A `job:<id>` or `artifact:<id>` on a provenance chain, shaped like
+    an entry so every view of `why` shows it (#284): an L2 node (a tool
+    recorded it), its topic naming the row, its content what the row
+    says. An artifact leads to the job that built it (`_from`), a job to
+    nothing (its artifacts are listed in its content). A private
+    artifact's path is never shown. `missing` when the row is gone."""
+    kind, _, num = str(ref).partition(":")
+    try:
+        if kind == "job":
+            from cousin_lib import artifacts, jobs
+            row = jobs.get_job(int(num))
+            if not row:
+                return {"id": ref, "missing": True}
+            head = "job #%s %s" % (num, row.get("status"))
+            if row.get("exit_code") is not None:
+                head += " (exit %s)" % row["exit_code"]
+            text = " ".join(str(row.get("title") or "").split())
+            if row.get("result_summary"):
+                text += " - " + " ".join(str(row["result_summary"]).split())
+            built = artifacts.list_rows(job_id=int(num))
+            if built:
+                text += "; artifacts %s" % ", ".join("artifact:%s" % a["id"] for a in built)
+            return {"id": ref, "kind": "job", "truth_level": "L2_TOOL", "topic": head,
+                    "content": text, "status": row.get("status"),
+                    "exit_code": row.get("exit_code"), "spawned_by": row.get("spawned_by")}
+        from cousin_lib import artifacts
+        row = artifacts.get(int(num))
+        if not row:
+            return {"id": ref, "missing": True}
+        where = "(private)" if row.get("private") else (
+            "%s:%s" % (row["host"], row["path"]) if row.get("host") else row.get("path"))
+        text = "%s sha256 %s" % (where, str(row.get("sha256") or "")[:16])
+        if row.get("git_commit"):
+            text += " commit %s" % row["git_commit"]
+        node = {"id": ref, "kind": "artifact", "truth_level": "L2_TOOL",
+                "topic": "artifact #%s" % num, "content": text,
+                "sha256": row.get("sha256"), "git_commit": row.get("git_commit"),
+                "job_id": row.get("job_id")}
+        if row.get("job_id"):
+            node["_from"] = ["job:%s" % row["job_id"]]
+        return node
+    except Exception:  # noqa: BLE001 - a store that will not open is a gap, not a crash
+        return {"id": ref, "missing": True}
+
+
 def format_why(out):
     def line(e, indent):
         pad = "  " * indent
         if e.get("missing"):
-            return [pad + "%s (not in raw memory)" % e["id"]]
+            return [pad + "%s (%s)" % (e["id"], "not found" if _TYPED_REF.match(e["id"])
+                                         else "not in raw memory")]
         if e.get("cycle"):
             return [pad + "%s (already on this chain: a cycle)" % e["id"]]
         text = " ".join(str(e.get("content") or "").split())
@@ -664,6 +723,9 @@ _DECIDE_USAGE = (
 # ------------------------------------------------ library (the one implementation)
 
 _ENTRY_ID = re.compile(r"^[0-9a-f]{12}$")
+# a job or an artifact a claim was built from (#284): checked to exist
+_TYPED_REF = re.compile(r"^(job|artifact):([0-9]+)$")
+_TYPED_TOKEN = re.compile(r"(?<![\w:/-])(job|artifact):([0-9]+)(?![\w])")
 # A raw entry the way recall and search name it: `raw:<file>#<line>`
 # (a recall line) or `.../memory/raw/<file>#<line>` (a search hit), the
 # file a day, a digest or a monthly archive under raw/ or raw/archive/.
@@ -714,8 +776,10 @@ def resolve_ref(home, ref):
 
 def check_derived(derived_from, home=None):
     """`derived_from` as a list of entry ids, or ValueError. Each value
-    is an entry id (12 hex characters, entry_id's shape) or, with `home`,
-    a raw ref (resolve_ref) turned into the id of the entry it names.
+    is an entry id (12 hex characters, entry_id's shape), a `job:<id>` or
+    `artifact:<id>` that exists (kept as written: `why` walks it to the
+    build), or, with `home`, a raw ref (resolve_ref) turned into the id
+    of the entry it names.
     None and [] mean none. One hop only: what this entry was built from,
     never a chain or a confidence inherited along it."""
     if derived_from in (None, "", []):
@@ -727,7 +791,11 @@ def check_derived(derived_from, home=None):
     out = []
     for value in derived_from:
         value = str(value or "").strip()
-        if not _ENTRY_ID.match(value):
+        if _TYPED_REF.match(value):
+            if typed_node(value).get("missing"):
+                raise ValueError("derived_from: %r names no %s that exists"
+                                 % (value, value.partition(":")[0]))
+        elif not _ENTRY_ID.match(value):
             resolved = resolve_ref(home, value) if home is not None else None
             if resolved is None:
                 raise ValueError("derived_from: %r is not an entry id (12 hex characters,"
@@ -748,6 +816,10 @@ def refs_in(home, text):
     derived_from without a separate step."""
     text = str(text or "")
     out = []
+    for m in _TYPED_TOKEN.finditer(text):
+        ref = "%s:%s" % (m.group(1), m.group(2))
+        if ref not in out and not typed_node(ref).get("missing"):
+            out.append(ref)
     for m in _RAW_REF.finditer(text):
         eid = resolve_ref(home, m.group(0))
         if eid and eid not in out:
@@ -794,8 +866,7 @@ def decide(home, topic, decision, reasoning, *, level=None, cite=None, derived_f
     # replace) and the raw bridge. A decision appended by another session
     # between the rotation's read and its replace would be lost.
     with memory_lock.write_lock(home):
-        with open(decisions, "a") as fh:
-            fh.write(json.dumps(entry) + "\n")
+        jsonl.append_line(decisions, json.dumps(entry))
         lines = ["Decision logged: [%s] %s" % (topic, decision)]
         note = demotion(level, cite)
         if note:

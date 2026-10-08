@@ -37,6 +37,9 @@ POLICY_TOML = ('deny_tools = ["WebFetch", "mcp__cousin__send*"]\n'
                'deny_bash_patterns = ["rm\\\\s+-rf", "^sudo "]\n'
                'ask = ["Edit"]\n')
 RM_REASON = "policy.toml: deny_bash_patterns 'rm\\\\s+-rf' matches"
+# the framework's own command rules go first, policy.toml or none (#287)
+FRAMEWORK_RENDERED = [{"source": rx.pattern, "reason": reason}
+                      for rx, reason in policy_mod.FRAMEWORK_BASH_DENY]
 
 
 def _policy_home(case, text=POLICY_TOML, **kw):
@@ -73,7 +76,7 @@ class TestRenderedPolicy(OpencodeCase):
         self.assertEqual(rendered["version"], 1)
         self.assertEqual(rendered["file"], policy_mod.FILE)
         self.assertEqual(rendered["deny_tools"], ["WebFetch", "mcp__cousin__send*"])
-        self.assertEqual(rendered["deny_bash_patterns"], [
+        self.assertEqual(rendered["deny_bash_patterns"], FRAMEWORK_RENDERED + [
             {"source": "rm\\s+-rf", "reason": RM_REASON},
             {"source": "^sudo ", "reason": "policy.toml: deny_bash_patterns '^sudo ' matches"}])
         self.assertEqual(rendered["ask"], ["Edit"])
@@ -86,7 +89,8 @@ class TestRenderedPolicy(OpencodeCase):
         self.assertEqual(ack["nonce"], rendered["nonce"])
         loaded = [p for p in self.payloads(r, "system") if p.get("subtype") == "policy_plugin"]
         self.assertEqual(loaded, [{"subtype": "policy_plugin", "plugin": opencode.PLUGIN.as_uri(),
-                                   "deny_tools": 2, "deny_bash_patterns": 2, "ask": 1,
+                                   "deny_tools": 2,
+                               "deny_bash_patterns": 2 + len(FRAMEWORK_RENDERED), "ask": 1,
                                    "errors": []}])
         first = rendered["nonce"]
         r.stop(timeout=5)
@@ -134,7 +138,7 @@ class TestRenderedPolicy(OpencodeCase):
         r = self.started(self.runner())
         rendered = json.loads((r.account.data_dir / "cousin-policy.json").read_text())
         self.assertEqual((rendered["deny_tools"], rendered["deny_bash_patterns"],
-                          rendered["ask"], rendered["source"]), ([], [], [], "none"))
+                          rendered["ask"], rendered["source"]), ([], FRAMEWORK_RENDERED, [], "none"))
 
     def test_the_runner_refuses_to_start_when_the_plugin_is_not_loaded(self):
         """opencode lists a configured plugin in GET /config
@@ -444,7 +448,8 @@ class TestPluginUnderNode(HermeticCase):
         self.assertEqual([o[0] for o in out].count("threw"), 8)       # the table is not all-allow
         ack = json.loads((self.dir / "ack.json").read_text())
         self.assertEqual((ack["nonce"], ack["fatal"], ack["deny_tools"], ack["deny_bash_patterns"],
-                          ack["ask"], ack["errors"]), ("n-1", None, 2, 2, 1, []))
+                          ack["ask"], ack["errors"]),
+                         ("n-1", None, 2, 2 + len(FRAMEWORK_RENDERED), 1, []))
         self.assertEqual(stat.S_IMODE((self.dir / "ack.json").stat().st_mode), 0o600)
 
     def test_a_pattern_javascript_cannot_compile_denies_every_command(self):

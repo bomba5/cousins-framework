@@ -23,6 +23,8 @@ import json
 import os
 from pathlib import Path
 
+from cousin_lib import jsonl
+
 FILE = ("data", "turn-tools.jsonl")
 # Calls that change nothing: never worth a line in the restart note.
 READ_ONLY = frozenset({"Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch",
@@ -54,8 +56,7 @@ def _summary(name, tool_input):
 def _append(home, record):
     path = _path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    jsonl.append_line(path, json.dumps(record, ensure_ascii=False))
 
 
 def begin(home, rows):

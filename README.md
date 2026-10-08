@@ -33,8 +33,12 @@ end of its session and wake up as itself.
 
 ## What a cousin is
 
-A cousin is an agent session (the Claude Agent SDK, or opencode on other
-models), plus:
+An AI session is disposable. The cousin is not.
+
+A cousin keeps a durable identity, memory, work queue, relationships,
+evidence and history, and treats the LLM session as replaceable execution.
+Concretely, a cousin is an agent session (the Claude Agent SDK, or opencode
+on other models), plus:
 
 - a home directory with its identity (`CLAUDE.md`), memory and notes
 - a chat store, so you (through the console) and the other cousins can talk to it
@@ -98,8 +102,18 @@ and `tmux` lanes have no gate and say so at every start. Homes are created
 users on the host and other uids out, not one cousin from another: a
 cousin's own shell can still read another cousin's files. One table
 shows what is refused and what is only policy, per lane and path:
-[boundary or policy, at a glance](docs/memory.md#boundary-or-policy-at-a-glance). See
-[the perimeter](docs/memory.md#the-perimeter) and
+[boundary or policy, at a glance](docs/memory.md#boundary-or-policy-at-a-glance).
+It comes down to three things:
+
+- **Reads are never stopped.** A cousin can read another cousin's home, a
+  private one included; only policy keeps it from doing so.
+- **The primary session's writes are never gated**, only its subagents'
+  are. It has no hard boundary, only guardrails: a `policy.toml` and the
+  framework's own command rules narrow its commands.
+- **On `opencode` and `tmux` every write is policy**, and their [runner](docs/glossary.md#runner)
+  says so at every start.
+
+See [the perimeter](docs/memory.md#the-perimeter) and
 [`cousin-doctor homes`](docs/commands.md#maintenance).
 
 ## Claude logins and Anthropic's terms
@@ -214,6 +228,8 @@ Nothing in this group is needed to run a cousin. Each page says so at the top.
 - [Claude logins and Anthropic's terms](docs/terms-risk.md) - the risk of
   running a cousin on a subscription
 - [Glossary](docs/glossary.md) - the words these docs use in a sense of their own
+- [What is authoritative](docs/reference/state.md) - every store the framework
+  writes, its level, its writer, and which one wins when two disagree
 - [docs/reference](docs/reference/) - the dense stuff: every API route, the
   loop model, the boot sequence
 - [Development](docs/development.md) - hacking on the framework

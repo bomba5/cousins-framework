@@ -36,6 +36,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
+from cousin_lib import jsonl
 from cousin_lib import activity
 
 SUBAGENT_TOOLS = ("Agent", "Task")
@@ -100,9 +101,8 @@ def log(home, text):
     try:
         path = pathlib.Path(home) / "data" / LOG_NAME
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a") as fh:
-            fh.write("%s %s\n" % (datetime.now(timezone.utc).isoformat(
-                timespec="seconds"), text))
+        jsonl.append_line(path, "%s %s" % (datetime.now(timezone.utc).isoformat(
+            timespec="seconds"), text))
     except OSError:
         pass
 

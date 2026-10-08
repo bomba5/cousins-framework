@@ -16,6 +16,7 @@ from pathlib import Path
 from cousin_lib import perimeter
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
+from cousin_lib import jsonl
 
 SHAREABLE_PREFIXES = ("project_", "project-", "reference_", "reference-")
 
@@ -79,8 +80,7 @@ def _audit(kind, actor, file, extra=None, root=None):
     }
     if extra:
         entry.update(extra)
-    with open(path, "a") as fh:
-        fh.write(json.dumps(entry) + "\n")
+    jsonl.append_line(path, json.dumps(entry))
 
 
 def _seeded(root):

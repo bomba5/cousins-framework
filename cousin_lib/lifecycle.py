@@ -38,6 +38,7 @@ from pathlib import Path
 from cousin_lib.backup import MEMORY_SKIP
 from cousin_lib.config import FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
+from cousin_lib import jsonl
 
 MODES = ("soul-donation", "body-swap", "merge")
 # The continuity files a snapshot preserves; memory/ travels whole
@@ -80,8 +81,7 @@ def _audit(root, record):
     path.parent.mkdir(parents=True, exist_ok=True)
     row = {"ts": _now().isoformat()}
     row.update(record)
-    with open(path, "a") as fh:
-        fh.write(json.dumps(row, default=str) + "\n")
+    jsonl.append_line(path, json.dumps(row, default=str))
     return row
 
 

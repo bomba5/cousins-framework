@@ -37,6 +37,7 @@ import threading
 import tomllib
 from pathlib import Path
 
+from cousin_lib import jsonl
 from cousin_lib import accounts
 from cousin_lib.console import longop, router
 from cousin_lib.console.app import HttpError
@@ -141,8 +142,7 @@ def _audit(req, kind, account, **extra):
     row.update({k: v for k, v in extra.items() if v is not None})
     path = audit_path(_root(req))
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with open(path, "a") as fh:
-        fh.write(json.dumps(row) + "\n")
+    jsonl.append_line(path, json.dumps(row))
 
 
 def _under_rel(root, path, rel):

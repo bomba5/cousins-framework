@@ -101,6 +101,13 @@ SCHEMA = {
                            "restart": False,
                            "hint": "US dollars a UTC day (usage.db's cost_usd); over it only"
                                    " chat from a person runs. 0 is off"},
+    # upkeep.alarm: the loops daemon measures the last 7 days hourly; over
+    # this share of the spend on upkeep plus the cousin's own schedules and
+    # job notices, a `upkeep:<slug>` health row fails. Lanes that write usage.
+    "upkeep_alarm_percent": {"type": "percent", "lanes": ("sdk", "opencode", "fake"),
+                             "default": 0, "min": 0, "max": 100, "restart": False,
+                             "hint": "share of the last 7 days' spend on upkeep plus its own"
+                                     " schedules over which health fails. 0 is off"},
     # The tmux kind's own key: its pane's environment allowlist.
     "env_allow": {"type": "env_list", "lanes": ("tmux",), "default": [],
                   "hint": "variables the agent may inherit; the hard deny still wins"},

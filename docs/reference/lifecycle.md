@@ -113,7 +113,7 @@ A clean stop is the runner's own SIGTERM path. The console asks the [supervisor]
 
 ### When a flip dies halfway
 
-The `flip` row is durable. A runner that stops or dies before or during the rollover leaves the row in its inbox and finishes the rollover at its next start; a `cousin-flip` that was waiting answers `runner not running; rollover queued as inbox row N`. A handoff the model never writes doesn't hold anything up: after the 300-second deadline the runner writes the emergency handoff and the generation ends. A rollover that failed before the new session existed kept the old one; its row says where it stopped, so fix that and flip again.
+The `flip` row is durable. A runner that stops or dies before or during the rollover leaves the row in its inbox and finishes the rollover at its next start; a `cousin-flip` that was waiting answers `runner not running; rollover queued as inbox row N`. Once the handoff is written, the `sdk` kind records the rollover's phase in `data/rollover.json` until the row closes (handed off, then the generation moved, then the digest queued), so a runner killed after it goes on from there: the old session gets no second handoff turn (the row's answer says `"handoff": "kept"`), the generation moves once, one digest boots the new session, and a start whose new session already existed makes no boot of its own before the rollover's. A handoff the model never writes doesn't hold anything up: after the 300-second deadline the runner writes the emergency handoff and the generation ends. A rollover that failed before the new session existed kept the old one; its row says where it stopped, so fix that and flip again.
 
 ## Reincarnate
 

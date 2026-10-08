@@ -470,8 +470,10 @@ none is a contract item:
   run an opencode cousin as a user that can read nothing it should not.
 - **What the model starts is found by a marker it can drop.** A stop, and
   the next start after a hard kill, kill every process carrying the start's
-  `COUSIN_OPENCODE_START`, repeating until a pass kills nothing (at most five
-  passes). A process escapes if it drops the variable (`env -i`, `exec -c`),
+  `COUSIN_OPENCODE_START`, pass after pass until two passes 50 ms apart kill
+  nothing (at most five passes that kill something; the second empty pass
+  catches a child caught mid-exec, whose environment reads empty for a
+  moment). A process escapes if it drops the variable (`env -i`, `exec -c`),
   makes its environment unreadable (`PR_SET_DUMPABLE` 0), or is started by
   another manager on its behalf (`tmux`, `systemd-run`, `at`).
 - **`node_modules` in opencode's config dir is checked by name only.** The

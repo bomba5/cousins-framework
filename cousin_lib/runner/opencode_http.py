@@ -172,8 +172,9 @@ def _marked_pids(entry):
 def kill_marked(marker, *, exclude=()):
     """SIGKILL every process of this user whose environment carries this
     start's marker (what a server started, in whatever session), pass
-    after pass until one kills nothing (one may start another while a
-    pass runs), at most MARK_PASSES; the pids, each once. A pid this
+    after pass (one may start another while a pass runs) until two in a
+    row kill nothing, at most MARK_PASSES passes that kill something;
+    the pids, each once. A pid this
     sweep already signalled that is still listed (not yet scheduled to
     exit, or in an uninterruptible sleep) is dying, not new: it is not
     killed or counted again. A pass that kills nothing is confirmed by

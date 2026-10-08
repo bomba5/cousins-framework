@@ -10,8 +10,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 - **The README says what a cousin is for** (#289): an AI session is
   disposable, the cousin is not; and the boundary table's three
   conclusions in plain words (reads are never stopped, the primary
-  session is never gated, on `opencode` and `tmux` everything is
-  policy).
+  session's writes are never gated, on `opencode` and `tmux` every
+  write is policy).
 
 ## 3.41.1 - 2026-10-08
 

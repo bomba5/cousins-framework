@@ -107,13 +107,13 @@ It comes down to three things:
 
 - **Reads are never stopped.** A cousin can read another cousin's home, a
   private one included; only policy keeps it from doing so.
-- **The primary session is never gated**, only its subagents are. A
-  `policy.toml` and the framework's own command rules narrow it; they are
-  guardrails on a command line, not a sandbox.
-- **On `opencode` and `tmux` everything is policy**, and their [runner](docs/glossary.md#runner) says
-  so at every start.
- See
-[the perimeter](docs/memory.md#the-perimeter) and
+- **The primary session's writes are never gated**, only its subagents'
+  are. It has no hard boundary, only guardrails: a `policy.toml` and the
+  framework's own command rules narrow its commands.
+- **On `opencode` and `tmux` every write is policy**, and their [runner](docs/glossary.md#runner)
+  says so at every start.
+
+See [the perimeter](docs/memory.md#the-perimeter) and
 [`cousin-doctor homes`](docs/commands.md#maintenance).
 
 ## Claude logins and Anthropic's terms

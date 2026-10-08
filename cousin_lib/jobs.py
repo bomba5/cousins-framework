@@ -16,6 +16,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
+from cousin_lib.crashpoint import crashpoint
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
 from cousin_lib.sqlite_util import add_column, wal
@@ -56,6 +57,10 @@ def _db():
     add_column(conn, "jobs", "boot_id", "TEXT")
     # 1: the owner asked to be told when the row closes (notify_owner)
     add_column(conn, "jobs", "notify", "INTEGER NOT NULL DEFAULT 0")
+    # 1: cousin-job forks this row's command itself, so a row of its with no
+    # pid past SPAWN_GRACE_S was never forked; a hook-tracked background
+    # shell has a command and never a pid, and is not one (#286)
+    add_column(conn, "jobs", "launched", "INTEGER NOT NULL DEFAULT 0")
     conn.commit()
     return conn
 
@@ -65,7 +70,7 @@ def _now():
 
 
 def register_job(*, kind, title, description="", spawned_by=None,
-                 log_path=None, command=None, notify=False):
+                 log_path=None, command=None, notify=False, launched=False):
     """Insert a running job row and return its id. `notify`: the owner
     gets one inbox row when the job closes (notify_owner)."""
     slug = spawned_by or CousinConfig.from_env().slug
@@ -73,10 +78,10 @@ def register_job(*, kind, title, description="", spawned_by=None,
     try:
         cur = conn.execute(
             "INSERT INTO jobs (spawned_by, kind, title, description,"
-            " started_at, log_path, command, notify)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " started_at, log_path, command, notify, launched)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (slug, kind, title[:200], description[:500], _now(),
-             log_path, command, 1 if notify else 0),
+             log_path, command, 1 if notify else 0, 1 if launched else 0),
         )
         conn.commit()
         return cur.lastrowid
@@ -617,6 +622,14 @@ def _process_gone(job, groups):
 
 
 LOST_NOTE = " [lost: its process is gone]"
+# A row cousin-job forks itself (`launched`) records its pid right after
+# the fork; one that still has none this long after it started was never
+# forked (its starter died in between), so nothing will ever close it
+# (#286, job.registered). Well
+# past a live starter's worst case: each of its writes may wait out a 5 s
+# busy timeout before the pid lands.
+SPAWN_GRACE_S = 60
+UNSPAWNED_NOTE = " [lost: its command was never started]"
 
 
 def reap_lost():
@@ -631,12 +644,29 @@ def reap_lost():
         return []
     conn = _db()
     try:
+        unspawned = [dict(r) for r in conn.execute(
+            "SELECT * FROM jobs WHERE status='running' AND pid IS NULL"
+            " AND launched=1")]
         rows = [dict(r) for r in conn.execute(
             "SELECT * FROM jobs WHERE status='running' AND pid IS NOT NULL")]
-        if not rows:
-            return []
-        groups = _groups()
         marked, lost = [], []
+        now = datetime.now(timezone.utc)
+        for job in unspawned:
+            try:
+                age = (now - datetime.fromisoformat(job["started_at"])).total_seconds()
+            except (TypeError, ValueError):
+                continue
+            if age < SPAWN_GRACE_S:
+                continue
+            cur = conn.execute(
+                "UPDATE jobs SET status='lost', finished_at=?,"
+                " result_summary=COALESCE(result_summary, '') || ?"
+                " WHERE id=? AND status='running' AND pid IS NULL",
+                (_now(), UNSPAWNED_NOTE, job["id"]))
+            if cur.rowcount:
+                marked.append(job["id"])
+                lost.append(dict(job, result_summary=UNSPAWNED_NOTE.strip()))
+        groups = _groups() if rows else None
         for job in rows:
             if not _process_gone(job, groups):
                 continue
@@ -652,7 +682,8 @@ def reap_lost():
     finally:
         conn.close()
     for job in lost:
-        notify_owner(dict(job, status="lost", result_summary=LOST_NOTE.strip()))
+        notify_owner(dict(job, status="lost",
+                          result_summary=job.get("result_summary") or LOST_NOTE.strip()))
     return marked
 
 
@@ -732,10 +763,12 @@ def _spawn_tracked(cmd, log_path, job_id, *, artifacts=(), commit=None, owner=No
         # The rc lands in the store directly - if this write is what
         # fails, the row stays 'running' and `list --active` shows it,
         # which is the loud version of that failure.
+        crashpoint("job.exited")
         status = "done" if rc == 0 else "failed"
         summary = ""
         if rc == 0 and artifacts:
             missing = _record_artifacts(job_id, artifacts, commit, owner)
+            crashpoint("job.artifacts_recorded")
             if missing:
                 # exit 0 without the output it named is not a build to show
                 status = "failed"
@@ -829,8 +862,9 @@ def _cmd_start(args):
         kind=args.kind, title=args.title, description=args.desc or "",
         spawned_by=slug, log_path=args.log,
         command=" ".join(cmd) if cmd else None,
-        notify=bool(getattr(args, "notify", False)),
+        notify=bool(getattr(args, "notify", False)), launched=bool(cmd),
     )
+    crashpoint("job.registered")
     log_path = args.log
     if cmd:
         # Absolute in the row, so the console finds a relative --log

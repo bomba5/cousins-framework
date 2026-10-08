@@ -1037,6 +1037,12 @@ writes `data/dream.request`, and the next tick runs a pass when that
 request is newer than the last pass. The console's **dreaming** view runs a
 pass on demand whatever the setting.
 
+### [agent] upkeep_alarm_percent
+
+| key | default | meaning |
+|---|---|---|
+| `upkeep_alarm_percent` | `0` | `0` is off. A percent, 0-100: once an hour the loops daemon measures the cousin's last 7 days (`cousin-upkeep`), and when upkeep plus its own schedules and job notices is more than this share of a spend of at least $1, the `upkeep:<slug>` health row fails with the numbers. The `sdk`, `opencode` and `fake` lanes (the ones that write `usage.db`). Read from `cousin.toml` at each check, so a change needs no restart. Between two checks a failing row shows "not seen since" in `cousin-health`: that is the hourly cadence, not a check that stopped. The console's Tokens page marks a cousin over its alarm on its 7-day view (the alarm's own window). |
+
 ### [agent] daily_cost_cap_usd
 
 A cap on what a cousin spends in a UTC day, in US dollars, off unless you
@@ -1367,6 +1373,22 @@ present but malformed (bad TOML, an unknown key, a non-list value, an
 uncompilable regex) stops the runner at start, exit 2, naming the key. See
 `templates/policy.toml.example` for a documented starting point.
 
+Before any of the file's patterns, the framework applies its own command
+rules, with or without a policy.toml, on the `sdk` kind (both sessions) and
+the `opencode` kind; the `tmux` pane does not get them (its gaps are in
+[runners](reference/runners.md)). A repository's git hooks are its gate, so
+these are denied, the reason starting `framework:`: `git commit` or `git
+push` with `--no-verify` or a prefix of it, `git commit -n` alone or bundled
+(`-an`), setting `core.hooksPath` in any case or quoting (`git config
+--get` reads it fine), `GIT_CONFIG_*` in the environment, `SKIP=` and
+`HUSKY=`, and changing a file under `.git/hooks`. A policy.toml cannot turn
+them off. A commit message that only mentions a flag is refused too; write
+it to a file and use `git commit -F`.
+
+They are a speed bump against an honest mistake, not a wall: an alias, a
+variable holding the flag or a script spells the same thing. The gate that
+holds is the remote's: required CI checks and branch protection.
+
 What it is and is not:
 
 - The patterns are a guardrail, not a sandbox. They stop a command line you
@@ -1459,7 +1481,7 @@ recall, and the stream gets a `config_change` event naming the files:
 - **`cousin.toml` and `.mcp.json`.** Read at start only: the note says a
   restart applies them. The exception is a `cousin.toml` change that only
   touches keys that apply without a restart (`[agent] dreaming`,
-  `dreaming_at` and `daily_cost_cap_usd`): the note names them and says
+  `dreaming_at`, `daily_cost_cap_usd` and `upkeep_alarm_percent`): the note names them and says
   they already apply.
 
 Each change is said once per runner: the next prompt, and the next session

@@ -166,9 +166,11 @@ SHIPPED_BEFORE = {
         'hops to walk each way; default the whole chain (why)',
     ),
     ('tools.memory.properties', 'derived_from'): (
+        {'type': 'array', 'items': 'string', 'optional': True, 'description': 'entry ids or raw refs (raw:<file>#<line>) this was built from, one hop (decide, remember); a ref named in the reasoning or cite is added for you; `why` walks it'},
         {'type': 'array', 'items': 'string', 'optional': True, 'description': 'entry ids this was built from, one hop (decide, remember); `why` walks it'},
     ),
     ('tools.memory.properties', 'derived_from.description'): (
+        'entry ids or raw refs (raw:<file>#<line>) this was built from, one hop (decide, remember); a ref named in the reasoning or cite is added for you; `why` walks it',
         'entry ids this was built from, one hop (decide, remember); `why` walks it',
     ),
     ('tools.memory.properties', 'keyword'): (

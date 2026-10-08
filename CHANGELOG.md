@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.7 - 2026-10-08
+
+### Fixed
+
+- **An interrupt right after a result reaches a carried message every
+  time.** When a message was written to the CLI before a turn's result
+  but its turn had not started yet, an interrupt is meant to reach it.
+  The runner marked the message carried only on its next read, after
+  the turn's bookkeeping (usage, the result's memory), so an interrupt
+  that arrived during that bookkeeping was dropped, and the same one a
+  moment later went through: which one won depended on how fast the
+  disk wrote. It is marked carried at the result now.
+
 ## 3.37.6 - 2026-10-08
 
 ### Fixed

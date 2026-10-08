@@ -194,14 +194,23 @@ value is an entry id, the 12 hex characters `history`, `why` and a
 recall line show, or a raw ref the way recall and search name an entry
 (`raw:2026-10-03.jsonl#56`, or a `memory/raw/<file>#<line>` path in the
 cousin's own home), which is stored as the id of the entry it names: a
-ref is a position, and folding a month into its archive moves it.
-Anything else, or a ref to a line that is not there, is refused.
+ref is a position, and folding a month into its archive moves it. A
+value can also name the job or the artifact a claim was built from,
+`job:<id>` or `artifact:<id>` (as `cousin-job` and `cousin-artifact`
+number them), kept as written. Anything else, or a ref to a line, a job
+or an artifact that is not there, is refused.
+
+A job's `done` means its command exited 0, nothing more: a claim built
+from a job is only as good as what the job checked. A watcher that
+exits 0 when it sees its first line is done, not proof that what it
+watched succeeded.
 
 The cousin does not have to remember the flag: every raw ref, and every
 12-hex token that is the id of an entry in its raw memory, named in a
 decision's reasoning or cite or in a fact's cite, joins `derived_from`
 on its own (a commit sha of the same length is not an entry id, so it
-is not linked). `why ID` walks the whole chain each way, indented by
+is not linked), and so does every `job:<id>` or `artifact:<id>` named
+there that exists. `why ID` walks the whole chain each way, indented by
 hop:
 
 ```
@@ -213,12 +222,20 @@ cousin-memory why 5e0b9d2a71c4
 #      built on by: nothing
 ```
 
+A job or an artifact on the chain is an L2 node (a tool recorded it):
+an artifact shows its path (never a private one's), its sha256 and the
+commit it was built from, and leads to the job that built it; a job
+shows its status, exit code, title and summary, and lists its artifacts.
+A media render is a private artifact of its job (its path stays with its
+owner; the chain shows its sha256 and job), so a claim about a picture can
+name `artifact:<id>`.
+
 It also names the mark that retired the entry, if one did. `--depth N`
 stops after N hops each way (N is held to 1-12: 0 or less walks one hop,
 and the answer's `depth` says what was used); without it the walk goes
 to the end of the chain, at most 12 hops. An entry cut by either limit
 says `(and further)`. An id no raw entry has is shown `(not in raw
-memory)`. An entry already on the same path is shown as a cycle, never
+memory)`, a job or an artifact that is gone `(not found)`. An entry already on the same path is shown as a cycle, never
 walked again; an entry two routes reach is shown under both. Nothing is inherited along the chain: each entry keeps its
 own truth level, so a conclusion built from a tool fact is still a
 conclusion. `--json` prints the same as one object: the top level's
@@ -367,8 +384,9 @@ Three things follow. **Reads are never stopped**: a cousin can read
 another cousin's home, a private one included, and only policy keeps it
 from doing so; closing that needs a separate OS user per cousin (designed,
 not built). **The primary session is never gated**, only its subagents
-are; a `policy.toml` `deny_bash_patterns` rule or `deny_tools` is the one
-way to narrow the primary session. **On `opencode` and `tmux` everything is
+are; a `policy.toml` `deny_bash_patterns` rule or `deny_tools`, and the
+framework's own command rules (the git hook bypasses, on the `sdk` and
+`opencode` kinds), are what narrow the primary session. **On `opencode` and `tmux` everything is
 policy**, and their runner says so at every start. What keeps other users
 on the host out is real: homes are created 0700 and the [supervisor](glossary.md#supervisor) runs
 everything under umask 077.

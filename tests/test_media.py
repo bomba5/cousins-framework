@@ -210,6 +210,18 @@ class TestJobTracking(MediaCase):
         self.assertIn("a cat on a mat", job["title"])
         self.assertIn(out.strip(), job["result_summary"])
 
+    def test_a_render_is_an_artifact_of_its_job(self):
+        # #284: a claim can name artifact:<id>, and `why` reaches the job
+        from cousin_lib import artifacts
+        self._configure(self._serve())
+        rc, out, _ = self._main(["gen", "a cat on a mat"])
+        self.assertEqual(rc, 0)
+        job = self._jobs()[0]
+        (row,) = artifacts.list_rows(job_id=job["id"])
+        # private: the shared row names no path in the owner's home
+        self.assertEqual((row["private"], row["path"], row["created_by"]), (1, None, "wren"))
+        self.assertEqual(row["label"], "image render")
+
     def test_a_provider_error_finishes_the_job_failed(self):
         self._configure("http://127.0.0.1:9/nothing-here")
         rc, _, _ = self._main(["gen", "a cat"])

@@ -300,10 +300,12 @@ def render_policy(policy, *, nonce, ack, shell_env=None):
         "version": 1, "nonce": nonce, "ack": str(ack), "file": _policy.FILE,
         "source": policy.source,
         "deny_tools": list(policy.deny_tools),
-        "deny_bash_patterns": [{"source": rx.pattern,
-                                "reason": "%s: deny_bash_patterns %r matches"
-                                          % (_policy.FILE, rx.pattern)}
-                               for rx in policy.deny_bash_patterns],
+        "deny_bash_patterns": [{"source": rx.pattern, "reason": reason}
+                               for rx, reason in _policy.FRAMEWORK_BASH_DENY]
+                              + [{"source": rx.pattern,
+                                  "reason": "%s: deny_bash_patterns %r matches"
+                                            % (_policy.FILE, rx.pattern)}
+                                 for rx in policy.deny_bash_patterns],
         "ask": list(policy.ask),
         "own_tool_prefix": _policy.OWN_TOOL_PREFIX,
         "names": dict(SDK_NAMES),

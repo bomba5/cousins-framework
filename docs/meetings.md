@@ -46,6 +46,11 @@ sequenceDiagram
   and the whole order, with the current speaker marked; the opening line
   says where you speak in every round. The console shows the same
   numbered order above the [thread](glossary.md#thread).
+- **The floor comes back.** When a round ends (or a direct question is
+  answered) and the meeting has a facilitator, the facilitator gets one
+  line: the round is done and the floor is back, with how to post the next
+  round (`cousin-meeting post <id> --user <its slug>`) or close. That lets
+  a cousin run a meeting you only listen to without polling it.
 - **Closing.** Without a facilitator the meeting closes at once. With one,
   the facilitator gets the whole transcript, writes the minutes (decisions,
   open questions, actions with an owner), adds each action to the tracker

@@ -1084,6 +1084,37 @@ def _keep_distilled(slug, home, report):
     _health(report, "distill:" + slug, True)
 
 
+UPKEEP_CHECK_SECONDS = 3600
+
+
+def _check_upkeep(slug, home, state, now, report):
+    """A cousin with [agent] upkeep_alarm_percent set: hourly, its last 7
+    days' upkeep plus own schedules against the alarm, as the health row
+    `upkeep:<slug>` (#288). Off (0) checks nothing and keeps no row."""
+    last = state.setdefault("last_upkeep", {}).get(slug, 0)
+    if now - last < UPKEEP_CHECK_SECONDS:
+        return
+    state["last_upkeep"][slug] = now
+    try:
+        from cousin_lib import upkeep
+        result = upkeep.alarm(home, now=now)
+    except Exception as err:  # noqa: BLE001 - never costs the tick
+        report["errors"].append("upkeep check failed for %s: %s" % (slug, err))
+        return
+    if result is not None:
+        _health(report, "upkeep:" + slug, result[0], result[1])
+        return
+    # the alarm is off: a row it left failing says ok once, or it would
+    # read failing for the week health keeps a row
+    try:
+        from cousin_lib import health
+        row = health.read(FrameworkConfig.from_env().root).get("upkeep:" + slug)
+    except Exception:  # noqa: BLE001 - never costs the tick
+        return
+    if row and row.get("state") == "failing":
+        _health(report, "upkeep:" + slug, True, None)
+
+
 def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
          index_refresh=False, dreams=False):
     """One scheduler tick, per docs/reference/loops.md: per-cousin
@@ -1118,6 +1149,7 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
                 continue
             home = FrameworkConfig.from_env().root / "cousins" / slug
             _keep_distilled(slug, home, report)
+            _check_upkeep(slug, home, state, now, report)
             if not is_alive(slug):
                 continue
             loops, errors = load_cousin_loops(home)

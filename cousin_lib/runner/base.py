@@ -36,6 +36,7 @@ SOURCE_PRIORITY = {
     "boot": 1,
     "meeting": 2,
     "schedule": 4,
+    "job": 4,         # a job's close notice the cousin asked for (jobs.notify_owner)
     "loop": 5,
     "propose": 6,     # a memory proposal (extract.propose_turn) waits behind everything
 }

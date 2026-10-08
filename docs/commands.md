@@ -629,7 +629,10 @@ refused). `--artifact PATH` (repeatable) names a file the command builds,
 relative to where `start` runs (where the command runs and builds), and `--artifact-commit SHA` the commit it
 was built from: on exit 0 each one is recorded as an artifact of the job
 (`cousin-artifact`), and one that is not there fails the job with the
-reason, though the command exited 0.
+reason, though the command exited 0. `--notify` puts one row in the
+starting cousin's inbox when the job ends (done, failed, or lost when its
+process is gone), with the status, the exit code and the log path; the row's
+source is `job`, on the `system` [thread](glossary.md#thread).
 
 ```
 cousin-job start shell "rebuild the index" -- cousin-memory reindex
@@ -638,7 +641,7 @@ cousin-job start shell --artifact out/image.bin --artifact-commit 3f2a9c1 -- "im
 ```
 
 A cousin's `job` tool does the same with `run` (`title`, `argv` as an array,
-optional `desc`, `log`, `artifacts` and `commit`); see [MCP tools](mcp.md#what-a-cousin-gets).
+optional `desc`, `log`, `artifacts`, `commit` and `notify`); see [MCP tools](mcp.md#what-a-cousin-gets).
 
 `cousin-loops` is the loops daemon and its controls. Subcommands: `run
 [--interval S] [--ticks N]` (the daemon), `status`, `requests`, `flips` (each
@@ -865,7 +868,8 @@ Four classes:
 
 - **upkeep**: every row the turn answered is the context heartbeat, a
   boot or flip digest, or a memory proposal;
-- **self**: a prompt the cousin scheduled for itself (`cousin-schedule`).
+- **self**: a prompt the cousin scheduled for itself (`cousin-schedule`),
+  or a job's end notice it asked for (`cousin-job start --notify`).
   The tool can't tell a cousin's self-set heartbeat from a real reminder,
   so this is shown apart: read upkeep as a floor and upkeep plus self as a
   ceiling;
@@ -876,8 +880,12 @@ Four classes:
 - **other**: a row gone from the inbox, a source in no list (an `outbox`
   report), or a turn with no row that isn't a `task`.
 
-It prints one line per cousin and a row per kind; `--json` prints the
-numbers (`{"<slug>": {...}}`); name cousins to report only those. Tokens
+It prints one line per cousin and a row per kind. The headline is upkeep
+plus self (`headline_share`): what keeps the cousin going, its own polling
+included, with the framework's share alone after it; a cousin's
+`upkeep_alarm_percent` ([configuration](configuration.md)) turns that into
+a health row. `--json` prints the numbers (`{"<slug>": {...}}`); name
+cousins to report only those. Tokens
 are usage totals, cache reads included, so a heartbeat in a long session
 shows a large count. On a login lane the dollars are the API-equivalent
 estimate the tokens page shows: read them as a share. The console's Tokens

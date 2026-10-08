@@ -47,6 +47,11 @@ OPEN_NOTICE = ('(Meeting {id} "{topic}" opened by {user}): you are a '
                'answer this one.')
 CLOSE_NOTICE = ('(Meeting {id} "{topic}" closed): the meeting is over; '
                 'nothing to answer.')
+FLOOR_NOTICE = ('(Meeting {id} "{topic}" round {round} is done, the floor is '
+                'back; you facilitate): post the next round with cousin-meeting '
+                'post {id} --user {slug} "<text>", or close it with '
+                'cousin-meeting close {id} --user {slug}. Not a turn: do not '
+                'answer it with say.')
 
 
 def _order(participants, current=None):
@@ -416,13 +421,17 @@ def _speak(meeting_id, slug, text, kind, *, deliver, root):
 
 
 def say(meeting_id, slug, text, *, deliver=None, root=None):
-    return _speak(meeting_id, slug, _text(text), "cousin",
-                  deliver=deliver, root=root)
+    m = _speak(meeting_id, slug, _text(text), "cousin",
+               deliver=deliver, root=root)
+    _notify_floor(m, deliver)
+    return m
 
 
 def pass_turn(meeting_id, slug, *, deliver=None, root=None):
-    return _speak(meeting_id, slug, "(pass)", "pass",
-                  deliver=deliver, root=root)
+    m = _speak(meeting_id, slug, "(pass)", "pass",
+               deliver=deliver, root=root)
+    _notify_floor(m, deliver)
+    return m
 
 
 def minutes(meeting_id, slug, text, *, deliver=None, root=None):
@@ -430,6 +439,15 @@ def minutes(meeting_id, slug, text, *, deliver=None, root=None):
                deliver=deliver, root=root)
     _notify_closed(m, deliver)
     return m
+
+
+def _notify_floor(m, deliver):
+    """The facilitator is told when the floor comes back (#282): it drives
+    a meeting the user only listens to, and would otherwise poll."""
+    if m and m["facilitator"] and m["state"] == "open" and m["mode"] == "floor":
+        _notify([m["facilitator"]], lambda s: FLOOR_NOTICE.format(
+            id=m["id"], topic=m["topic"], round=m["round"], slug=s),
+            deliver or default_deliver)
 
 
 def _notify_closed(m, deliver):
@@ -451,7 +469,9 @@ def skip(meeting_id, user, *, reason="skipped by the user", deliver=None,
         _advance(conn, m)
         _try_deliver(conn, m, deliver)
         return m
-    return _tx(root, run)
+    m = _tx(root, run)
+    _notify_floor(m, deliver)
+    return m
 
 
 def close(meeting_id, user, *, deliver=None, root=None):
@@ -504,6 +524,7 @@ def tick(*, deliver=None, is_alive=None, now=None, root=None):
     alive = is_alive or default_is_alive
     now = now or time.time()
     report = []
+    floors = []    # meetings a skip handed back to the floor
     for m in list_meetings(root=root):
         if m["state"] == "closed" or not m["turn_slug"]:
             continue
@@ -524,6 +545,7 @@ def tick(*, deliver=None, is_alive=None, now=None, root=None):
                 report.append("meeting #%d: %s skipped (%s)"
                               % (mid, slug, reason))
                 _advance(conn, cur)
+                floors.append(cur)
             if _try_deliver(conn, cur, deliver):
                 report.append("meeting #%d: turn delivered to %s"
                               % (mid, cur["turn_slug"]))
@@ -531,6 +553,8 @@ def tick(*, deliver=None, is_alive=None, now=None, root=None):
             _tx(root, run)
         except Exception as err:  # noqa: BLE001 - one meeting never costs the rest
             report.append("meeting #%d: tick failed: %s" % (m["id"], err))
+    for m in floors:
+        _notify_floor(m, deliver)
     return report
 
 

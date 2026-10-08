@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.36.3 - 2026-10-08
+
+### Fixed
+
+- **A cousin whose own name has an accent can send under it.** The
+  check on `--from` ran the plain-name pattern, which is ASCII only,
+  before it compared the name with the cousin's own, so Totò was
+  refused its own name and the opencode send tool, which always passes
+  `--from`, could not send at all. The cousin's own name and slug pass
+  whatever their letters; any other name is checked as before: refused
+  to a local cousin, and to an external peer allowed only as a plain
+  ASCII display name.
+
 ## 3.36.2 - 2026-10-08
 
 ### Fixed

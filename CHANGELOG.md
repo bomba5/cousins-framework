@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.5 - 2026-10-08
+
+### Fixed
+
+- **A cousin with an accented name reaches an external peer.** 3.36.3
+  let Totò send under its own name, but the receiving install's
+  display-name check was ASCII only, so the message was refused there.
+  A display name may now carry accented Latin letters, on both sides.
+  Letters from another script are still refused, since a Cyrillic "А"
+  passes for a Latin "A"; and the receiver compares a name with its
+  operator's, its cousins' and the framework's own with the accents
+  dropped, so an accent alone never passes for one of them.
+
 ## 3.37.4 - 2026-10-08
 
 ### Fixed

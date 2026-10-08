@@ -40,6 +40,7 @@ import socket
 import sqlite3
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 WINDOW_S = 300.0          # how far a send time may be from this host's clock
@@ -92,6 +93,28 @@ def _target(root, to, allowed):
     return target
 
 
+def _plain(display):
+    """A plain name: _DISPLAY's shape, where a letter may also be a Latin
+    letter with a diacritic (Totò, Nicolò, Søren), compared composed (NFC).
+    No other script: a Cyrillic "А" would pass for a Latin "A"."""
+    if not isinstance(display, str):
+        return False
+    name = unicodedata.normalize("NFC", display)
+    ascii_shape = "".join(c if c.isascii() else
+                          ("a" if unicodedata.category(c).startswith("L")
+                           and unicodedata.name(c, "").startswith("LATIN ") else "\0")
+                          for c in name)
+    return bool(_DISPLAY.match(ascii_shape))
+
+
+def skeleton(name):
+    """The name a reader would take it for: composed, its accents dropped,
+    case-folded, spaces as underscores. "Àna" and "Ana" are one skeleton."""
+    folded = "".join(c for c in unicodedata.normalize("NFKD", str(name or ""))
+                     if not unicodedata.combining(c))
+    return folded.casefold().replace(" ", "_")
+
+
 def check_display(root, target, display):
     """Refuse a display name that is not a plain name, that the framework
     writes itself (delivery.FRAMEWORK_SENDERS: "fw-hook" would be threaded
@@ -100,15 +123,17 @@ def check_display(root, target, display):
     from cousin_lib.config import FrameworkConfig
     from cousin_lib.delivery import FRAMEWORK_SENDERS
     from cousin_lib.server.storage import is_operator, normalize_chat_user
-    if not isinstance(display, str) or not _DISPLAY.match(display):
+    if not _plain(display):
         raise Refused(403, "the sender's configured name is not a plain name")
-    if normalize_chat_user(display) in {normalize_chat_user(n) for n in FRAMEWORK_SENDERS}:
+    # compared by skeleton: an accent is not enough to pass for another name
+    wanted = skeleton(display)
+    if wanted in {skeleton(n) for n in FRAMEWORK_SENDERS}:
         raise Refused(403, "the sender's configured name is reserved by the framework")
-    if is_operator(target, display):
+    operator = getattr(target, "operator_name", None)
+    if is_operator(target, display) or (operator and wanted == skeleton(operator)):
         raise Refused(403, "the sender's configured name is the operator's")
-    wanted = normalize_chat_user(display)
     for cousin in FrameworkConfig(root).list_cousins():
-        if wanted in (normalize_chat_user(cousin.slug), normalize_chat_user(cousin.name)):
+        if wanted in (skeleton(cousin.slug), skeleton(cousin.name)):
             raise Refused(403, "the sender's configured name is a local cousin's")
 
 

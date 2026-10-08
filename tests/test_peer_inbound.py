@@ -50,6 +50,25 @@ class InboundCase(HermeticCase):
 
 
 class TestAccept(InboundCase):
+    def test_an_accented_latin_name_lands_and_a_look_alike_is_refused(self):
+        """Totò is a plain name; a letter from another script (Cyrillic
+        "Т") is not, and an accent is not enough to pass for the
+        operator or a local cousin: those compare by skeleton."""
+        home = self.root / "cousins" / "wren"
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\n\n[operator]\nname = "Ana"\n\n'
+            '[agent]\nrunner = "sdk"\n')
+        self.accept(display="Totò", msg_id="m-accent-01")
+        self.assertEqual(_messages(home)[-1], ("Totò", "the tins moved"))
+        for n, (display, why) in enumerate((("\u0422oto", "plain"), ("Àna", "operator"),
+                                            ("ANÁ", "operator"), ("Wrén", "cousin"),
+                                            ("Tèsta", "cousin"))):
+            with self.subTest(display=display):
+                with self.assertRaises(peer_inbound.Refused) as cm:
+                    self.accept(display=display, msg_id="m-accent-%02d" % n)
+                self.assertEqual(cm.exception.status, 403)
+                self.assertIn(why, str(cm.exception))
+
     def test_a_message_lands_under_the_identitys_display_name(self):
         out = self.accept()
         self.assertTrue(out["ok"])

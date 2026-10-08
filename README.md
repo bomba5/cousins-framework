@@ -214,6 +214,8 @@ Nothing in this group is needed to run a cousin. Each page says so at the top.
 - [Claude logins and Anthropic's terms](docs/terms-risk.md) - the risk of
   running a cousin on a subscription
 - [Glossary](docs/glossary.md) - the words these docs use in a sense of their own
+- [What is authoritative](docs/reference/state.md) - every store the framework
+  writes, its level, its writer, and which one wins when two disagree
 - [docs/reference](docs/reference/) - the dense stuff: every API route, the
   loop model, the boot sequence
 - [Development](docs/development.md) - hacking on the framework

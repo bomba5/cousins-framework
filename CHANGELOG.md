@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.40.1 - 2026-10-08
+
+### Docs
+
+- **What is authoritative** (#285): `docs/reference/state.md` lists
+  every store the framework writes (a cousin's memory, its active
+  state, its runner and transport, the install), its level (raw event,
+  transactional, projection, context, authored, config), its writer,
+  what it is rebuilt from and which one wins on conflict.
+  `tests/test_state_doc.py` fails for a `.db` or `.jsonl` name in
+  `cousin_lib` the page does not name.
+
 ## 3.40.0 - 2026-10-08
 
 ### Added

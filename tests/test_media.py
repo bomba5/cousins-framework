@@ -218,8 +218,9 @@ class TestJobTracking(MediaCase):
         self.assertEqual(rc, 0)
         job = self._jobs()[0]
         (row,) = artifacts.list_rows(job_id=job["id"])
-        self.assertEqual((row["path"], row["created_by"]), (out.strip(), "wren"))
-        self.assertEqual(row["note"], "image render")
+        # private: the shared row names no path in the owner's home
+        self.assertEqual((row["private"], row["path"], row["created_by"]), (1, None, "wren"))
+        self.assertEqual(row["label"], "image render")
 
     def test_a_provider_error_finishes_the_job_failed(self):
         self._configure("http://127.0.0.1:9/nothing-here")

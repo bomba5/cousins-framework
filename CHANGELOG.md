@@ -14,7 +14,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   why tree show each as an L2 node: an artifact with its path (never a
   private one's), sha256 and commit, leading to the job that built it;
   a job with its status, exit code, title, summary and artifacts. A
-  media render is now an artifact of its job. The memory tool's
+  media render is now a private artifact of its job: its path stays
+  with its owner, the chain shows its sha256 and job. The memory tool's
   `derived_from` description says so; `--apply-homes` updates it.
 
 ## 3.39.0 - 2026-10-08

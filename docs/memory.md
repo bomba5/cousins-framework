@@ -226,7 +226,8 @@ A job or an artifact on the chain is an L2 node (a tool recorded it):
 an artifact shows its path (never a private one's), its sha256 and the
 commit it was built from, and leads to the job that built it; a job
 shows its status, exit code, title and summary, and lists its artifacts.
-A media render is an artifact of its job, so a claim about a picture can
+A media render is a private artifact of its job (its path stays with its
+owner; the chain shows its sha256 and job), so a claim about a picture can
 name `artifact:<id>`.
 
 It also names the mark that retired the entry, if one did. `--depth N`

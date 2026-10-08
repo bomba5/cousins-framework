@@ -376,7 +376,7 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `memoryScope` | `private` or `shared` (an older `both` in cousin.toml reads as `shared`) |
 | `heartbeat` | context heartbeat in seconds (default 3600) |
 | `flipAt` | `[lifecycle] flip_at`, or null |
-| `model`, `effort` | what the next start will use: a runner cousin's `[agent] model` and `effort`, else null (the CLI's own default); on `tmux-legacy`, the `[runtime]` value, else `config/harness.toml [agent]` default, else null. A runner cousin with no model of its own gets the one its latest session reported instead (a stopped cousin's last one), and `modelDefault` true |
+| `model`, `effort` | what the next start will use: a runner cousin's `[agent] model` and `effort`, else null (the CLI's own default); on `tmux-legacy`, the `[runtime]` value, else `config/harness.toml [agent]` default, else null. A runner cousin with no model of its own gets the one its latest session reported instead (a stopped cousin's last one), and `modelDefault` true. Only the `sdk` lane reports one (its init); an `opencode` cousin with no model of its own stays null |
 | `modelDefault` | true when `model` is the lane's default as its latest session reported it, not a configured value |
 | `hidden` | `[cousin] hidden` |
 | `status` | `running` or `stopped`. Runner cousin (`[agent] runner`): a runner holds its lock (`run/runner.lock`). [Worker](../glossary.md#worker): always `running`. A cousin on `tmux-legacy` (which 2.0.0 refuses to start): its tmux session exists, or with `[chat] host` its chat server answers. |

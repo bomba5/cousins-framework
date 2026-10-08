@@ -1619,7 +1619,11 @@ function renderMarkdownLite(text) {
       continue;
     }
     // a GFM table: a pipe row, a separator row (|---|:--:|), then rows
-    if (/\|/.test(line) && i + 1 < lines.length && RP_MD_TABLE_SEP.test(lines[i + 1])) {
+    // (the separator needs a pipe and as many cells as the header, as in
+    // GFM: prose with a pipe above a rule or a setext "---" stays prose)
+    if (/\|/.test(line) && i + 1 < lines.length && /\|/.test(lines[i + 1])
+        && RP_MD_TABLE_SEP.test(lines[i + 1])
+        && rpMdCells(lines[i + 1]).length === rpMdCells(line).length) {
       const head = rpMdCells(line), body = [];
       for (i += 2; i < lines.length && /\|/.test(lines[i]) && lines[i].trim(); i++) body.push(rpMdCells(lines[i]));
       const row = (cells, tag) => ({ tag: "tr", children: cells.map(c => ({ tag, children: mdInline(c) })) });

@@ -331,6 +331,16 @@ process.stdout.write(JSON.stringify(md.map(n => [n.tag, n.cls || ""]).concat([wa
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0][1][0], ["td", [["strong", ["16"]]]])
         self.assertEqual(rows[0][1][1], ["td", ["a | b"]])
+        not_tables = self.run_node(r"""
+const kinds = (t) => renderMarkdownLite(t).map(n => n.cls);
+process.stdout.write(JSON.stringify([
+  kinds("pipes a | b in prose\n---\nnext"),
+  kinds("a | b | c\n--- | ---"),
+  kinds("a | b\n--- | ---")]));
+""")
+        self.assertNotIn("rp-md-table", not_tables[0])
+        self.assertNotIn("rp-md-table", not_tables[1])
+        self.assertEqual(not_tables[2], ["rp-md-table"])
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_markdown_lite_never_makes_markup_from_its_input(self):

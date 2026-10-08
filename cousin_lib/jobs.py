@@ -57,6 +57,10 @@ def _db():
     add_column(conn, "jobs", "boot_id", "TEXT")
     # 1: the owner asked to be told when the row closes (notify_owner)
     add_column(conn, "jobs", "notify", "INTEGER NOT NULL DEFAULT 0")
+    # 1: cousin-job forks this row's command itself, so a row of its with no
+    # pid past SPAWN_GRACE_S was never forked; a hook-tracked background
+    # shell has a command and never a pid, and is not one (#286)
+    add_column(conn, "jobs", "launched", "INTEGER NOT NULL DEFAULT 0")
     conn.commit()
     return conn
 
@@ -66,7 +70,7 @@ def _now():
 
 
 def register_job(*, kind, title, description="", spawned_by=None,
-                 log_path=None, command=None, notify=False):
+                 log_path=None, command=None, notify=False, launched=False):
     """Insert a running job row and return its id. `notify`: the owner
     gets one inbox row when the job closes (notify_owner)."""
     slug = spawned_by or CousinConfig.from_env().slug
@@ -74,10 +78,10 @@ def register_job(*, kind, title, description="", spawned_by=None,
     try:
         cur = conn.execute(
             "INSERT INTO jobs (spawned_by, kind, title, description,"
-            " started_at, log_path, command, notify)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " started_at, log_path, command, notify, launched)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (slug, kind, title[:200], description[:500], _now(),
-             log_path, command, 1 if notify else 0),
+             log_path, command, 1 if notify else 0, 1 if launched else 0),
         )
         conn.commit()
         return cur.lastrowid
@@ -618,9 +622,10 @@ def _process_gone(job, groups):
 
 
 LOST_NOTE = " [lost: its process is gone]"
-# A shell row's pid is recorded right after the fork; one that still has
-# none this long after it started was never forked (its starter died in
-# between), so nothing will ever close it (#286, job.registered). Well
+# A row cousin-job forks itself (`launched`) records its pid right after
+# the fork; one that still has none this long after it started was never
+# forked (its starter died in between), so nothing will ever close it
+# (#286, job.registered). Well
 # past a live starter's worst case: each of its writes may wait out a 5 s
 # busy timeout before the pid lands.
 SPAWN_GRACE_S = 60
@@ -641,7 +646,7 @@ def reap_lost():
     try:
         unspawned = [dict(r) for r in conn.execute(
             "SELECT * FROM jobs WHERE status='running' AND pid IS NULL"
-            " AND command IS NOT NULL")]
+            " AND launched=1")]
         rows = [dict(r) for r in conn.execute(
             "SELECT * FROM jobs WHERE status='running' AND pid IS NOT NULL")]
         marked, lost = [], []
@@ -857,7 +862,7 @@ def _cmd_start(args):
         kind=args.kind, title=args.title, description=args.desc or "",
         spawned_by=slug, log_path=args.log,
         command=" ".join(cmd) if cmd else None,
-        notify=bool(getattr(args, "notify", False)),
+        notify=bool(getattr(args, "notify", False)), launched=bool(cmd),
     )
     crashpoint("job.registered")
     log_path = args.log

@@ -136,14 +136,16 @@ requires on `main` are `test (3.11)`, `test (3.12)`, `test (3.13)`,
 block a merge, however red, so a new required job is added there too.
 `test (tmpfs)` runs the same three shards (with the extras) with every
 temporary file on `/dev/shm`: a race that needs a fast disk to show is
-then caught by design rather than by luck.
+then caught by design rather than by luck. It is not on the required
+list: it blocks no merge until it is added there.
 
 ### Crash points
 
-`cousin_lib/crashpoint.py` names points where a test kills the process:
-`crashpoint("job.exited")` does nothing unless `COUSIN_CRASH_AT=job.exited`
-(or `job.exited:3`, the third hit) is in the environment, read once at
-import; then the process SIGKILLs itself there. A test runs a real process
+`cousin_lib/crashpoint.py` names points where a process can be killed on
+purpose: `crashpoint("job.exited")` does nothing unless
+`COUSIN_CRASH_AT=job.exited` (or `job.exited:3`, the third hit) is set in
+that process's environment, read once at import, in any process; then the
+process SIGKILLs itself there. A test runs a real process
 with it, lets it die, starts again and checks the stores
 (`tests/test_crashpoint.py`). A new point goes into `crashpoint.POINTS`
 with what it sits between, and a test names it; the registry's own tests

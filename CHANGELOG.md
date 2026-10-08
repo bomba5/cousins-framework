@@ -8,11 +8,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 ### Fixed
 
 - **A job whose starter died before the fork no longer stays running
-  forever** (#286). Its row had a command and no pid, which the
-  lost-job check skips, so it stayed `running` until the 24-hour reap.
-  A row with a command and no pid 60 seconds after it started is now
-  marked `lost` (`[lost: its command was never started]`), and a
-  `notify` job tells its owner.
+  forever** (#286). Its row had no pid, which the lost-job check skips,
+  so it stayed `running` until the 24-hour reap. A row `cousin-job
+  start` forks itself (a new `launched` column) with no pid 60 seconds
+  after it started is now marked `lost` (`[lost: its command was never
+  started]`), and a `notify` job tells its owner. A hook-tracked
+  background shell, which never records a pid, is not such a row.
 
 ### Added
 

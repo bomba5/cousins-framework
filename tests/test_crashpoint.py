@@ -143,3 +143,16 @@ class TestJobCrashes(JobCrashCase):
         (row,) = self.rows()
         self.assertEqual(row["status"], "lost")
         self.assertEqual(len(self.notices()), 1)
+
+    def test_a_hook_tracked_background_shell_is_never_taken_for_unforked(self):
+        # recording registers a run_in_background Bash with its command and
+        # no pid: it runs, and only its exit closes it
+        code = ("from cousin_lib import jobs; i = jobs.register_job(kind='shell', title='bg',"
+                " description='background shell', spawned_by='wren', command='sleep 300');"
+                " c = jobs._db(); c.execute(\"UPDATE jobs SET started_at='2026-01-01T00:00:00+00:00'\");"
+                " c.commit(); print(jobs.reap_lost())")
+        out = subprocess.run([sys.executable, "-c", code], env=self.env, capture_output=True,
+                             text=True, timeout=60)
+        self.assertEqual(out.stdout.strip(), "[]", out.stderr)
+        self.assertEqual(self.rows()[0]["status"], "running")
+

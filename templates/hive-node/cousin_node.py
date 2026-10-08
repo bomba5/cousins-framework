@@ -50,6 +50,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import threading
@@ -922,13 +923,19 @@ class Node:
         self.httpd.server_close()
         if self._thread:
             self._thread.join(timeout=5)
-        # no new sends now: wait for the replies already being written
+        # no new sends now: wait for the replies being written, again and
+        # again until none is left, since a send still in its handler when
+        # the server stopped can start one after a first look
         deadline = time.time() + self.TURN_JOIN_S
+        while time.time() < deadline:
+            with self._turns_lock:
+                turns = [t for t in self._turns if t.is_alive()]
+            if not turns:
+                break
+            for thread in turns:
+                thread.join(timeout=max(0.0, deadline - time.time()))
         with self._turns_lock:
-            turns = list(self._turns)
-        for thread in turns:
-            thread.join(timeout=max(0.0, deadline - time.time()))
-        left = [t for t in turns if t.is_alive()]
+            left = [t for t in self._turns if t.is_alive()]
         if left:
             self.log("cousin_node: stopped with %d reply turn(s) still running" % len(left))
 
@@ -947,7 +954,12 @@ def main(argv=None):
     except OSError as err:
         print("cousin_node: cannot bind: %s" % err, file=sys.stderr)
         return 2
-    node.poller.start()
+    # SIGTERM (a restart, systemctl stop) and Ctrl-C both end in node.stop(),
+    # which waits for the replies in flight
+    stopping = threading.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: stopping.set())
+    node.start()
     print("%s (%s) listening on %s:%d [brain=%s]" % (
         node.config.name, node.config.slug, node.config.host, node.port,
         node.config.brain), flush=True)
@@ -955,15 +967,11 @@ def main(argv=None):
         print("cousin_node: HOME_CHAT_URL is ignored since 2.0.0 (no home chat"
               " server); set TELL_HOME=1 to reach the home cousin through the"
               " queen", file=sys.stderr, flush=True)
-    node.checkin.start()
     try:
-        node.httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        while not stopping.wait(1.0):
+            pass
     finally:
-        node.checkin.stop()
-        node.poller.stop()
-        node.httpd.server_close()
+        node.stop()
     return 0
 
 

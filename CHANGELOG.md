@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.10 - 2026-10-08
+
+### Fixed
+
+- **A hive node's check-in and inbox poller stop together.** `stop()`
+  stopped them one after the other, each given up to 5 s, and either
+  can be inside a call to the queen when it is asked, so a slow queen
+  could make a SIGTERM take the sum of both. Both are told first and
+  joined after, so they wind down together; the server, the replies in
+  flight and the retrier still stop in turn after them.
+
 ## 3.37.9 - 2026-10-08
 
 ### Fixed

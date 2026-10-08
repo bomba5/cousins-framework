@@ -738,8 +738,11 @@ class TestNodeProcess(NodeCase):
         self.addCleanup(lambda: proc.poll() is None and proc.kill())
         self.assertIn("listening on", proc.stdout.readline())
         proc.send_signal(_signal.SIGTERM)
-        self.assertEqual(proc.wait(timeout=15), 0)
-        self.assertNotIn("Traceback", proc.stderr.read())
+        # communicate, not wait: it drains both pipes while the node stops,
+        # so a node that logs more than a pipe holds never blocks on a write
+        _out, err = proc.communicate(timeout=30)
+        self.assertEqual(proc.returncode, 0, err[-2000:])
+        self.assertNotIn("Traceback", err)
 
 
 class TestRetryReviewFixes(NodeCase):

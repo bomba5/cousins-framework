@@ -1049,7 +1049,9 @@ class TestTurns(OpencodeCase):
         self.assertTrue(cut[0]["is_error"])
         self.assertIn("the turn ended while the call was running", cut[0]["text"])
         log = r.home / "data" / "activity" / ("%s.log" % datetime.now().strftime("%Y-%m-%d"))
-        self.assertTrue(_wait(log.exists))
+        # the line, not the file: activity.record opens the log (which
+        # creates it) and writes after, and a read between saw it empty
+        self.assertTrue(_wait(lambda: log.exists() and log.read_text().splitlines()))
         lines = log.read_text().splitlines()
         self.assertEqual(len(lines), 1, lines)
         self.assertIn("sleep 120", lines[0])

@@ -328,8 +328,11 @@ class Checkin:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
-    def stop(self):
+    def signal_stop(self):
         self._stop.set()
+
+    def stop(self):
+        self.signal_stop()
         if self._thread:
             self._thread.join(timeout=5)
 
@@ -602,8 +605,11 @@ class Retrier:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
-    def stop(self):
+    def signal_stop(self):
         self._stop.set()
+
+    def stop(self):
+        self.signal_stop()
         if self._thread:
             self._thread.join(timeout=5)
         left = self.pending()
@@ -666,8 +672,11 @@ class InboxPoller:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
-    def stop(self):
+    def signal_stop(self):
         self._stop.set()
+
+    def stop(self):
+        self.signal_stop()
         if self._thread:
             self._thread.join(timeout=5)
 
@@ -918,6 +927,12 @@ class Node:
         self.retrier.start()
 
     def stop(self):
+        # every part told first, then each joined: a part blocked in a
+        # Hive call winds down while the others do, so the stop takes the
+        # slowest part's time, not the sum of their caps. The retrier is
+        # told last, after the turns (a late tell-home still goes out).
+        self.checkin.signal_stop()
+        self.poller.signal_stop()
         self.checkin.stop()
         self.poller.stop()
         self.httpd.shutdown()

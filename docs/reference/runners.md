@@ -567,7 +567,8 @@ above. Each is stated, none is hidden, and none is a contract item except
   `permissions.deny`, still holds (`harness_settings.py`,
   `_policy_deny`/`apply_project_settings`). A rule `policy.toml` can express
   in bash patterns or `ask` is silently absent on this kind, not enforced a
-  different way.
+  different way. The framework's own command rules (the git hook bypasses,
+  [configuration](../configuration.md)) are absent the same way.
 - **`deny_tools`' prefix syntax is not the CLI's own.** `Policy._named`
   treats a name ending in `*` as a prefix match (`policy.py`): `Web*` denies
   any tool whose name starts with `Web`. The CLI's `permissions.deny` rule

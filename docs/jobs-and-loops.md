@@ -119,6 +119,61 @@ More housekeeping happens when the console lists jobs: anything still
 still runs (a long `ssh ... tail -F` included), and only the newest 1000
 finished rows are kept, together with their logs in `data/job-logs/`.
 
+### Artifacts
+
+A job that builds something (an image, a binary, a report) can record
+what it built as a row instead of a note in `STATUS.md`:
+
+```
+cousin-artifact add out/image.bin --job 15 --commit 3f2a9c1 --note "rev A image"
+cousin-artifact add /srv/out/image.bin --host buildbox --sha256 9f86d0... --size 1048576
+cousin-artifact add out/image.bin --private --label "board A image"
+cousin-artifact list --mine --verify
+cousin-artifact verify 4
+cousin-artifact rm 4
+```
+
+`add` records a local file's resolved absolute path (a symlink is stored
+as its target, so a rebuild behind `latest.bin` later reads `missing`),
+its sha256, size and mtime, measured then, with the producing job (it
+must exist in the jobs store), the commit it was built from and a
+one-line note. A file still being written while it is hashed is refused;
+record it when the build is done. Outside a cousin (no `COUSIN_HOME`)
+the row's owner is `$USER`, so `--mine` won't find it later.
+
+A file on another machine is recorded with `--host` and the checksum and
+size measured there (`sha256sum`, `stat -c %s`); its path must be
+absolute on that host. It reads `unverified` until you ask: `verify ID
+--remote` or `list --verify --remote` runs `sha256sum` on the host over
+ssh (batch mode, no prompts, `LC_ALL=C`) and answers `ok`, `changed`, `missing` or
+`unreachable`.
+
+The store is `data/artifacts.db` at the install root, which every cousin
+can read: a path, a host or a note there is visible to the whole
+install. For work whose paths must stay private, `--private --label L`
+keeps the path and host out of the shared row: they go to the owner's
+home (`data/artifacts-private.json`), so only the owner can verify it
+and everyone else sees `private` (the owner sees `unknown` if the entry
+is gone). The label, checksum, size, mtime, job id and owner are still
+shared, and `--note` and `--commit` are refused on a private row. An
+`rm` from outside the cousin drops the shared row; the owner's next
+private write prunes the path from its home.
+
+`list` shows rows newest first, at most 100 (`--mine`, `--job N`,
+`--path FILE`, or `--path DIR/` for everything under a directory; both
+are resolved like `add`, and match local, non-private rows only).
+`--verify` and `verify ID` hash each file now: `ok`, `changed`,
+`missing` or `unreadable`. `verify` exits 0 only for `ok` (1 for any
+other state and for an unknown id); `list --verify` always exits 0.
+`rm ID` drops a row (the file stays): your own as a cousin, any outside
+one.
+
+The console's Jobs page lists the artifacts below the jobs. "check
+files" compares each file's size and mtime with the recorded ones
+without hashing (`unchanged`, `touched` when only the mtime moved,
+`changed`, `missing`), "hash" checks one file's checksum, and "remove"
+drops a row.
+
 ### Automatic tracking from Claude Code
 
 Every cousin records jobs on its own, so it doesn't have to remember. On

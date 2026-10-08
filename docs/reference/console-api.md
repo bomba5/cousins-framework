@@ -649,6 +649,18 @@ Rows from `data/jobs.db`: `id`, `spawned_by`, `kind`, `title`, `description`, `s
 
 Query: `status`, `spawned_by`, `kind`, `active_only` (`1`/`true`), `since_hours`, `limit` (default 200). `{"jobs": [...]}`, running first, then newest. At most once every 5 minutes a list call also tidies up: jobs `running` for more than 24 hours are marked `failed`, and the table is capped at 1000 rows. A failure there is logged, the list still answers.
 
+### `GET /api/artifacts`
+
+Build outputs recorded with `cousin-artifact` ([jobs and loops](../jobs-and-loops.md#artifacts)), newest first: `{"ok": true, "artifacts": [{"id", "created_at", "created_by", "path", "host", "label", "private", "sha256", "size", "mtime", "job_id", "git_commit", "note"}]}`. `?limit=` (default and maximum 100). A private row has `path` and `host` null. `?job=N` keeps one job's; `?verify=1` adds each row's quick `state`, a stat with no hashing: `unchanged` (same size and mtime), `touched` (same size, new mtime), `changed`, `missing`, `unreadable`; `unverified` for a remote row, `private` for a private one.
+
+### `GET /api/artifacts/<id>/verify`
+
+Hashes one local file now: `{"ok": true, "id", "state"}` with `ok`, `changed`, `missing` or `unreadable` (`unverified` for a remote row, `private` for a private one; the console never runs ssh or reads a cousin's home). `404` for an unknown id.
+
+### `DELETE /api/artifacts/<id>`
+
+Drops the row, any cousin's (the file stays). `{"ok": true}` or `404`.
+
 ### `GET /api/jobs/<id>`
 
 `{"ok": true, "job": row}` or `404`.

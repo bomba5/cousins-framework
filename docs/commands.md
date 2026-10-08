@@ -69,6 +69,7 @@ Each command has one class, so you know which ones to learn first:
 | `cousin-callback` | cousin | a cousin's library of moments worth calling back to |
 | `cousin-chat` | cousin | message another cousin, list who can be reached |
 | `cousin-job` | cousin | register and track background jobs; the console's Jobs page shows them |
+| `cousin-artifact` | cousin | record build outputs as rows (path, checksum, job, commit) and check them later |
 | `cousin-reason` | cousin | write and list reasoning capsules |
 | `cousin-reply` | cousin | a cousin's answer to a person, in its chat history |
 | `cousin-schedule` | cousin | a one-shot prompt at a future time |

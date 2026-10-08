@@ -303,6 +303,7 @@ COMMANDS = {
     "cousin-loops": (["flips"], SHARED_MESSAGE),
     "cousin-health": ([], SHARED_MESSAGE),
     "cousin-upkeep": ([], SHARED_MESSAGE),
+    "cousin-artifact": (["list"], SHARED_MESSAGE),
     "cousin-doctor": ([], SHARED_MESSAGE),
     "cousin-cycle": (["state"], _HOME),
     "cousin-session": (["status"], _HOME),

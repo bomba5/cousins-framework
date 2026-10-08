@@ -235,6 +235,77 @@ function JobsView() {
           </div>
         </div>
       )}
+      <ArtifactsPanel />
+    </div>
+  );
+}
+
+// Build outputs recorded with cousin-artifact (GET /api/artifacts):
+// where, checksum, size, producing job, commit. "check files" stats each
+// row (no hashing); "hash" checks one file against its checksum; a
+// private row shows only its label and verifies only for its owner.
+function ArtifactsPanel() {
+  const [rows, setRows] = React.useState(null);
+  const [checked, setChecked] = React.useState(false);
+  const [hashed, setHashed] = React.useState({});
+  const load = React.useCallback(async (verify) => {
+    const d = await apiGet("/api/artifacts" + (verify ? "?verify=1" : ""));
+    setRows(d ? d.artifacts || [] : []);
+    setChecked(!!verify);
+    setHashed({});
+  }, []);
+  React.useEffect(() => { load(false); }, [load]);
+  const hash = async (id) => {
+    setHashed(h => ({ ...h, [id]: "hashing" }));
+    const d = await apiGet(`/api/artifacts/${id}/verify`);
+    setHashed(h => ({ ...h, [id]: d ? d.state : "error" }));
+  };
+  const drop = async (id) => {
+    if (!confirm(`Remove artifact #${id}? Only the row goes; the file stays.`)) return;
+    const { r, d } = await apiSend("DELETE", `/api/artifacts/${id}`);
+    if (!r.ok) { alert("remove failed: " + (d.error || r.status)); return; }
+    load(checked);
+  };
+  if (!rows) return null;
+  const tone = { ok: "green", unchanged: "green", touched: "amber", changed: "amber",
+                 missing: "red", unreadable: "red" };
+  const place = r => r.private ? `[private] ${r.label}`
+    : (r.host ? `${r.host}:${r.path}` : r.path) + (r.label ? ` (${r.label})` : "");
+  return (
+    <div className="panel" data-artifacts style={{ marginTop: 16, padding: "12px 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="eyebrow">artifacts</span>
+        <span className="muted" style={{ fontSize: 11 }}>build outputs recorded with cousin-artifact</span>
+        <span style={{ flex: 1 }} />
+        {rows.length > 0 && <button className="btn ghost" onClick={() => load(true)}
+          title="size and mtime of each file, no hashing">check files</button>}
+      </div>
+      {rows.length === 0 ? <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>none recorded</div> : (
+        <div className="table-scroll">
+          <table className="data">
+            <thead><tr><th className="num">#</th><th>by</th><th>where</th><th>sha256</th><th className="num">size</th><th>job</th><th>commit</th><th>now</th><th>note</th><th></th></tr></thead>
+            <tbody>{rows.map(r => {
+              const state = hashed[r.id] || (checked ? r.state : null);
+              return <tr key={r.id}>
+                <td className="num">{r.id}</td>
+                <td className="mono">{r.created_by}</td>
+                <td className="mono" style={{ wordBreak: "break-all" }}>{place(r)}</td>
+                <td className="mono" title={r.sha256}>{r.sha256.slice(0, 12)}</td>
+                <td className="num">{r.size}</td>
+                <td className="mono">{r.job_id ? "#" + r.job_id : ""}</td>
+                <td className="mono">{r.git_commit ? r.git_commit.slice(0, 12) : ""}</td>
+                <td>{state && <span className={"pill " + (tone[state] || "")}>{state}</span>}</td>
+                <td>{r.note || ""}</td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  {!r.private && !r.host && <button className="btn ghost" onClick={() => hash(r.id)}
+                    title="hash the file now and compare">hash</button>}
+                  <button className="btn ghost" onClick={() => drop(r.id)}>remove</button>
+                </td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

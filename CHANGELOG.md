@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.41.2 - 2026-10-08
+
+### Docs
+
+- **The README says what a cousin is for** (#289): an AI session is
+  disposable, the cousin is not; and the boundary table's three
+  conclusions in plain words (reads are never stopped, the primary
+  session is never gated, on `opencode` and `tmux` everything is
+  policy).
+
 ## 3.41.1 - 2026-10-08
 
 ### Fixed

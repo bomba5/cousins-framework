@@ -33,8 +33,12 @@ end of its session and wake up as itself.
 
 ## What a cousin is
 
-A cousin is an agent session (the Claude Agent SDK, or opencode on other
-models), plus:
+An AI session is disposable. The cousin is not.
+
+A cousin keeps a durable identity, memory, work queue, relationships,
+evidence and history, and treats the LLM session as replaceable execution.
+Concretely, a cousin is an agent session (the Claude Agent SDK, or opencode
+on other models), plus:
 
 - a home directory with its identity (`CLAUDE.md`), memory and notes
 - a chat store, so you (through the console) and the other cousins can talk to it
@@ -98,7 +102,17 @@ and `tmux` lanes have no gate and say so at every start. Homes are created
 users on the host and other uids out, not one cousin from another: a
 cousin's own shell can still read another cousin's files. One table
 shows what is refused and what is only policy, per lane and path:
-[boundary or policy, at a glance](docs/memory.md#boundary-or-policy-at-a-glance). See
+[boundary or policy, at a glance](docs/memory.md#boundary-or-policy-at-a-glance).
+It comes down to three things:
+
+- **Reads are never stopped.** A cousin can read another cousin's home, a
+  private one included; only policy keeps it from doing so.
+- **The primary session is never gated**, only its subagents are. A
+  `policy.toml` and the framework's own command rules narrow it; they are
+  guardrails on a command line, not a sandbox.
+- **On `opencode` and `tmux` everything is policy**, and their [runner](docs/glossary.md#runner) says
+  so at every start.
+ See
 [the perimeter](docs/memory.md#the-perimeter) and
 [`cousin-doctor homes`](docs/commands.md#maintenance).
 

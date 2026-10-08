@@ -17,9 +17,9 @@ section by section, in template order:
   there): it is removed so the text is not there twice. A same-titled
   section with different text is the cousin's own and stays.
 
-It runs by itself at every start and flip (spawn.start_cousin), so nobody
-has to remember it; `cousin-spawn <slug> --sync-template` shows the diff
-and `--apply` writes it by hand. Every write keeps the old file in
+It does not run by itself: `cousin-spawn <slug> --sync-template` shows
+the diff and `--apply` writes it, and `cousin-upgrade --apply-homes`
+brings every home's registry to a release. Every write keeps the old file in
 data/claude-md-backups/, like the console's CLAUDE.md editor.
 The MCP registry gets the same treatment, additively and at every level:
 a table the shipped registry has and the cousin's lacks is appended whole,

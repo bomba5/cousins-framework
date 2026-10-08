@@ -24,8 +24,9 @@ are in the shipped `config/mcp-registry.toml.example` since 3.8.0, and
 `scope` and `valid_until` on `remember` since 3.31.0, and `depth` on `why`
 since 3.32.0; a cousin spawned before that, or from an install whose own
 `config/mcp-registry.toml` predates them, has them only once its copy is
-updated. `cousin-upgrade --apply-homes`, and every start, update a copy:
-they add what it lacks and rewrite each value that is still exactly what
+updated. `cousin-upgrade --apply-homes` (every home) and `cousin-spawn
+SLUG --sync-template --apply` (one) update a copy; nothing does it at a
+start. They add what it lacks and rewrite each value that is still exactly what
 an earlier release shipped (options and argv included, since 3.36.1), and
 leave the cousin's own edits alone.
 
@@ -34,8 +35,8 @@ property that no command of it passes on (a `scope` the copy's
 `remember` options do not map), the call is an error naming
 `cousin-upgrade --apply-homes`, never a reply that says it was done
 while the value was dropped. That check is on the stdio server (the
-`opencode` and `tmux` kinds); the `sdk` kind calls the library in
-process and reads every argument it is given.
+`tmux` kind); the `sdk` and `opencode` kinds call the library in
+process and read every argument they are given.
 
 A call names the command and its arguments:
 

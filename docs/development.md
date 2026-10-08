@@ -442,7 +442,7 @@ input properties, and how each subcommand maps to argv. The registry's
 4. When you change a value already shipped (a description, an `options`
    table, an `argv`, a property's enum), run
    `python -m cousin_lib.registry_history --write` from a full clone after
-   committing the registry, and commit what it writes. It records every
+   changing the registry, and commit what it writes. It records every
    value a past release shipped, so the sync can bring existing cousins'
    copies up to date; `tests/test_registry_history.py` fails until you do.
 

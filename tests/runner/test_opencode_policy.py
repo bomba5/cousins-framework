@@ -221,9 +221,10 @@ class TestRecording(OpencodeCase):
         a = r.enqueue(_op("status?"))
         self.assertTrue(_wait(lambda: self.outcome(r, a) is not None))
         log = r.home / "data" / "activity" / ("%s.log" % datetime.now().strftime("%Y-%m-%d"))
-        # the line, not the file: the activity log is created a moment
-        # before its line is written (activity.record)
-        self.assertTrue(_wait(lambda: log.exists() and log.read_text().splitlines()))
+        # the lines, not the file: the activity log is created a moment
+        # before its first line is written (activity.record), and the two
+        # calls are recorded one after the other
+        self.assertTrue(_wait(lambda: log.exists() and len(log.read_text().splitlines()) >= 2))
         lines = log.read_text().splitlines()
         self.assertEqual(len(lines), 2, lines)
         self.assertRegex(lines[0], r"Bash\s+ok\s+git status --short # state$")

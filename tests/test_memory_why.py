@@ -170,7 +170,8 @@ class TestRawRefs(HomeCase):
         memory.remember(self.home, "kestrel", "seen on the roof at dawn")
         ref, eid, path, n = self.ref("kestrel")
         memory.remember(self.home, "nest", "nests on the roof",
-                        derived_from=[ref, "%s#%d" % (path, n), "memory/raw/%s#%d" % (path.name, n)])
+                        derived_from=[ref, "%s#%d" % (path, n), "memory/raw/%s#%d" % (path.name, n),
+                                      "cousins/wren/memory/raw/%s#%d" % (path.name, n)])
         _, nest, _, _ = self.ref("nest")
         self.assertEqual([e["id"] for e in memory.why(self.home, nest)["derived_from"]], [eid])
 
@@ -179,7 +180,8 @@ class TestRawRefs(HomeCase):
         ref, _, path, n = self.ref("kestrel")
         other = self.root / "cousins" / "finch" / "memory" / "raw" / path.name
         for bad in ([ref.replace("#%d" % n, "#99")], ["raw:../../cousin.toml#1"],
-                    [str(other) + "#%d" % n]):
+                    [str(other) + "#%d" % n],
+                    ["cousins/finch/memory/raw/%s#%d" % (path.name, n)]):
             with self.assertRaisesRegex(ValueError, "raw ref"):
                 memory.remember(self.home, "t", "f", derived_from=bad)
 
@@ -262,7 +264,7 @@ class TestReceipt(HomeCase):
         with mock.patch.object(memory_search, "recall_thresholds",
                                return_value=({"min_chars": 1, "top": 3, "min_score": 0.5}, True)), \
                 mock.patch.object(memory_search, "search", return_value=(hits, None)), \
-                mock.patch.object(memory_search, "_hit_name", side_effect=lambda h: h["path"][-4:]):
+                mock.patch.object(memory_search, "_hit_name", side_effect=lambda h, entry=None: h["path"][-4:]):
             kept = memory_search.recall_entries(self.home, "where is the kestrel",
                                                 config=self.config())
         self.assertEqual(len(kept), 1)

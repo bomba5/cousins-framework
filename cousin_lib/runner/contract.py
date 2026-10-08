@@ -56,8 +56,9 @@ told you is operator-stated: `remember` with `level=operator` and a
 `level=hypothesis`. Recall arrives on its own; search when you need
 more. When a decision or a fact rests on an entry you recalled or
 found, pass its ref (`raw:<file>#<line>`, or its id) in `derived_from`:
-that is the chain `why` walks. A ref named in a decision's reasoning or
-a cite is linked for you.]]
+that is the chain `why` walks. Naming a ref or an entry id in a
+decision's reasoning or a cite links it for you, so leave out one you
+only argue against.]]
 
 ## Tools, not the terminal CLIs
 

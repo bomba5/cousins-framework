@@ -1069,11 +1069,12 @@ def raw_entry(key):
     return None
 
 
-def _hit_name(hit):
+def _hit_name(hit, entry=None):
     """What a recall line calls a hit: a raw entry by its topic (its
-    file stem is only a date), a file by its first heading."""
+    file stem is only a date), a file by its first heading. `entry`: the
+    raw entry when the caller has already read it."""
     if hit.get("collection") == "raw":
-        entry = raw_entry(hit["path"]) or {}
+        entry = entry or raw_entry(hit["path"]) or {}
         topic = str(entry.get("topic") or "").strip()
         if topic:
             from cousin_lib.memory import qualifiers
@@ -1148,19 +1149,17 @@ def recall_hits(home, text, *, config=None, root=None):
                                         thresholds["min_score"])))
                 continue
         returned.append(row)
-        kept.append("%s (%s:%s%s)" % (_hit_name(hit), hit.get("collection"),
-                                      _hit_relpath(home, hit, root), _hit_id(hit)))
+        entry = raw_entry(hit["path"]) if hit.get("collection") == "raw" else None
+        kept.append("%s (%s:%s%s)" % (_hit_name(hit, entry), hit.get("collection"),
+                                      _hit_relpath(home, hit, root), _hit_id(entry)))
         items.append(recall_item(home, hit, root))
     _receipt(home, text, returned=returned, excluded=excluded)
     return kept, items
 
 
-def _hit_id(hit):
-    """", id <entry id>" for a raw hit (what derived_from stores and `why`
-    takes), else ""."""
-    if hit.get("collection") != "raw":
-        return ""
-    entry = raw_entry(hit["path"])
+def _hit_id(entry):
+    """", id <entry id>" for a raw hit's entry (what derived_from stores
+    and `why` takes), else ""."""
     if not entry:
         return ""
     from cousin_lib.memory import entry_id

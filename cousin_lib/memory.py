@@ -690,6 +690,14 @@ def resolve_ref(home, ref):
                 return None
         except OSError:
             return None
+    elif prefix:
+        # a relative one (root-relative, as the console and shared text
+        # write it) must be this home's own tail
+        rel = prefix.strip("/")
+        if rel.startswith("./"):
+            rel = rel[2:]
+        if rel not in ("", ".") and not Path(home).resolve().as_posix().endswith("/" + rel):
+            return None
     name = m.group("name")
     for path in (base / name, base / "archive" / name):
         try:

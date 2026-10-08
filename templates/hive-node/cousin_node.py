@@ -847,6 +847,7 @@ class Node:
         self._turns, self._turns_lock = set(), threading.Lock()
 
     SEND_IDS_KEPT_S = 900.0
+    SEND_CLAIM_WAIT_S = 10.0          # under the console's 15 s a try
     TURN_JOIN_S = 30.0                # stop() waits this long for a reply in flight
 
     def start_turn(self, user, message):
@@ -863,7 +864,6 @@ class Node:
             self._turns.add(thread)
         thread.start()
         return thread
-    SEND_CLAIM_WAIT_S = 10.0          # under the console's 15 s a try
 
     def claim_send(self, msg_id):
         """Claim a /api/send's msg_id, atomically: None when this request is

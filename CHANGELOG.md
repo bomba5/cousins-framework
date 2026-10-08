@@ -7,12 +7,15 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Fixed
 
-- **A hive node's stop waits for the reply it is writing.** Each send
-  through a node's chat is answered on a thread of its own, and nothing
-  waited for it: a stop (a restart, a SIGTERM) could cut a reply half
-  written, and the reply could land after the node had let go of its
-  files. `stop()` now waits up to 30 s for the replies in flight, after
-  the server has stopped taking sends, and logs any still running.
+- **A hive node stops cleanly, and retries what it could not tell
+  home.** The node's `main` served until killed: a SIGTERM (a restart,
+  `systemctl stop`) ended the process mid-whatever, a reply being
+  written included, and it never started the node's retrier, so a
+  tell-home that failed once (3.33.0's retry) was never tried again on
+  a real node. `main` now starts the whole node and turns SIGTERM and
+  Ctrl-C into `node.stop()`, which stops taking sends and waits up to
+  30 s for the replies in flight (looking again for one a late send
+  started), and logs any still running.
 
 ## 3.37.1 - 2026-10-08
 

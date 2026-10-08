@@ -797,9 +797,7 @@ class _Handler(BaseHTTPRequestHandler):
         # Think off the request thread: the send returns as soon as the
         # message is stored, and the reply lands in the thread for the
         # next history poll.
-        threading.Thread(
-            target=self.node.brain.turn, args=(user, message),
-            daemon=True).start()
+        self.node.start_turn(user, message)
         self._send_json(200, {"ok": True, "id": row["id"],
                               "timestamp": row["timestamp"]})
 
@@ -845,8 +843,25 @@ class Node:
         Handler.node = node
         self.httpd = ThreadingHTTPServer((config.host, config.port), Handler)
         self._thread = None
+        self._turns, self._turns_lock = set(), threading.Lock()
 
     SEND_IDS_KEPT_S = 900.0
+    TURN_JOIN_S = 30.0                # stop() waits this long for a reply in flight
+
+    def start_turn(self, user, message):
+        """Answer a stored send off the request thread, tracked: stop()
+        waits for it, so a stop never cuts a reply half written."""
+        def run():
+            try:
+                self.brain.turn(user, message)
+            finally:
+                with self._turns_lock:
+                    self._turns.discard(threading.current_thread())
+        thread = threading.Thread(target=run, name="turn", daemon=True)
+        with self._turns_lock:
+            self._turns.add(thread)
+        thread.start()
+        return thread
     SEND_CLAIM_WAIT_S = 10.0          # under the console's 15 s a try
 
     def claim_send(self, msg_id):
@@ -907,6 +922,15 @@ class Node:
         self.httpd.server_close()
         if self._thread:
             self._thread.join(timeout=5)
+        # no new sends now: wait for the replies already being written
+        deadline = time.time() + self.TURN_JOIN_S
+        with self._turns_lock:
+            turns = list(self._turns)
+        for thread in turns:
+            thread.join(timeout=max(0.0, deadline - time.time()))
+        left = [t for t in turns if t.is_alive()]
+        if left:
+            self.log("cousin_node: stopped with %d reply turn(s) still running" % len(left))
 
 
 def build_node(environ=None, *, log=None):

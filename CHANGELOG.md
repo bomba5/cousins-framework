@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.2 - 2026-10-08
+
+### Fixed
+
+- **A hive node's stop waits for the reply it is writing.** Each send
+  through a node's chat is answered on a thread of its own, and nothing
+  waited for it: a stop (a restart, a SIGTERM) could cut a reply half
+  written, and the reply could land after the node had let go of its
+  files. `stop()` now waits up to 30 s for the replies in flight, after
+  the server has stopped taking sends, and logs any still running.
+
 ## 3.37.1 - 2026-10-08
 
 ### Fixed

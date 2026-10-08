@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.40.0 - 2026-10-08
+
+### Added
+
+- **A claim can name the job or artifact it was built from** (#284).
+  `derived_from` takes `job:<id>` and `artifact:<id>` (checked to
+  exist, kept as written), and one named in a decision's reasoning or
+  a cite is linked on its own. `why`, its CLI print and the console's
+  why tree show each as an L2 node: an artifact with its path (never a
+  private one's), sha256 and commit, leading to the job that built it;
+  a job with its status, exit code, title, summary and artifacts. A
+  media render is now an artifact of its job. The memory tool's
+  `derived_from` description says so; `--apply-homes` updates it.
+
 ## 3.39.0 - 2026-10-08
 
 ### Added

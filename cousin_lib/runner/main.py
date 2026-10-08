@@ -704,6 +704,13 @@ def _serve(runner, once, harness=None):
                                                  else "warning"))
         _name_removed_keys(runner)
         _name_lane_gaps(runner)
+        # The state it starts in: a machine reports changes only, so a runner
+        # that resumed and waits idle would read as "starting" (no state yet)
+        # to the fleet and the pane until its first turn. Before start(), so
+        # a turn start() picks up at once comes after it.
+        machine = getattr(runner, "machine", None)
+        if machine is not None:
+            runner.stream.append("state", {"from": None, "to": machine.state, "detail": "started"})
         runner.start()
         policy = getattr(runner, "policy", None)
         if policy is not None:

@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.8 - 2026-10-08
+
+### Fixed
+
+- **A cousin that starts idle reads as idle, not "starting".** A
+  runner's state machine reports only changes, and it starts in idle,
+  so a runner that came up (a restart, a deploy) and waited for work
+  wrote no state at all: the fleet table and the reasoning pane showed
+  it "starting" until its first turn. The state it starts in is written
+  once at start now.
+
 ## 3.37.7 - 2026-10-08
 
 ### Fixed

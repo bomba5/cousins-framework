@@ -327,6 +327,42 @@ path: `deny_bash_patterns` can match a path in a Bash command, and `Write`
 or `Edit` can only be denied as whole tools (`deny_tools`). See
 [policy.toml](configuration.md#policytoml).
 
+### Boundary or policy, at a glance
+
+What actually stops a write, per lane and per kind of path. **Refused**:
+the gate refuses it, whatever the model wants. **Best-effort**: a Bash
+command is refused only when it is one the scan knows (a redirect, `cp`,
+`mv`, `install`, `ln`, `tee`, `rm`, `unlink`, `truncate`, `chmod`,
+`chown`, `shred`, `touch`, `sed -i`, `dd of=`) and its write target is
+written out literally; a variable, a glob, `find -exec` or a relative
+`cd` gets through, and so does any other program's write (`python -c`,
+`git`, `rsync`, `curl -o`, `tar -x`, `patch`).
+**Policy**: nothing in the code stops it; only the law, the house rules
+and the cousin's own judgement do. Every cousin runs as the same OS user,
+so the operating system separates none of them.
+
+| Path | Read, any lane | `sdk` primary session: write | `sdk` subagent: write by tool | `sdk` subagent: write by Bash | `opencode`, `tmux`: write |
+|---|---|---|---|---|---|
+| Its own home (files, memory, notes) | Policy | Policy | Policy | Policy | Policy |
+| Its own configuration (`policy.toml`, `cousin.toml`, `.mcp.json`, `mcp-registry.toml`, `chat-hooks.json`, `.claude/`) | Policy | Policy | Refused | Best-effort | Policy |
+| Another cousin's home, a private cousin's included | Policy | Policy | Refused | Best-effort | Policy |
+| `config/law.md` | Policy | Policy (the operator's work) | Refused | Best-effort | Policy |
+| A committed `self-portrait.md` | Policy | Policy | Refused | Best-effort | Policy |
+| A canonical `shared/*.md` | Policy | Policy | Refused | Best-effort | Policy |
+| A proposal in `shared/proposed/` not under its own name | Policy | Policy | Refused | Best-effort | Policy |
+| `shared/audit.jsonl` | Policy | Policy | Refused | Best-effort | Policy |
+| Anything outside the install (other repositories, the host) | Policy | Policy | Policy | Policy | Policy |
+
+Three things follow. **Reads are never stopped**: a cousin can read
+another cousin's home, a private one included, and only policy keeps it
+from doing so; closing that needs a separate OS user per cousin (designed,
+not built). **The primary session is never gated**, only its subagents
+are; a `policy.toml` `deny_bash_patterns` rule or `deny_tools` is the one
+way to narrow the primary session. **On `opencode` and `tmux` everything is
+policy**, and their runner says so at every start. What keeps other users
+on the host out is real: homes are created 0700 and the [supervisor](glossary.md#supervisor) runs
+everything under umask 077.
+
 The install's law seed, the console's law editor, `commit_candidate` and
 the body-swap's identity trade are operator-initiated and outside the
 perimeter, as is the [shared tier](glossary.md#shared-tier)'s own reviewer

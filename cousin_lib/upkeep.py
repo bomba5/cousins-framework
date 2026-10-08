@@ -70,6 +70,26 @@ def _kinds(home):
         conn.close()
 
 
+def generation_idle(home, since):
+    """True when every inbox row since `since` (the generation's start)
+    is upkeep: heartbeats, the boot, a flip, memory proposals. Nothing
+    asked the cousin for work and it set itself nothing, so its daily
+    flip would buy only a handoff and a boot (#280). False when the inbox
+    is missing or unreadable: flipping is the safe default."""
+    path = Path(home) / "data" / "inbox.db"
+    if not path.exists():
+        return False
+    conn = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+    try:
+        rows = conn.execute("SELECT source, substr(body, 1, 40) FROM inbox"
+                            " WHERE created_at >= ?", (float(since),)).fetchall()
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+    return all(classify(row_kind(source, body)) == "upkeep" for source, body in rows)
+
+
 _CACHE = {}          # (path, mtime, size) -> the file's costed turns
 
 

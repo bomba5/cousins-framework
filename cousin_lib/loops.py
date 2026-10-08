@@ -741,8 +741,12 @@ def _fire_daily_flips(state, do_flip, is_alive, now, report):
     daemon was down at it). A session that started at or after it
     (a cousin spawned or started since), or none at all, is younger
     than the flip point: its day is marked done, not flipped seconds
-    after its first turn (boot.generation_started)."""
-    from cousin_lib import boot
+    after its first turn (boot.generation_started). An idle generation
+    (upkeep.generation_idle: nothing but heartbeats and its own boot
+    since it started) keeps its session too: the flip would cost a
+    handoff and a boot and carry nothing (#280). It is reported in
+    `idle_flips` and flips at the first daily point after it works."""
+    from cousin_lib import boot, upkeep
     if report["flips"]:
         return  # a timed flip already used this tick's slot
     when = datetime.fromtimestamp(now)
@@ -764,6 +768,10 @@ def _fire_daily_flips(state, do_flip, is_alive, now, report):
             if (started is None or started >= target
                     or not is_alive(config.slug)):
                 state["last_flips"][config.slug] = str(when.date())
+                continue
+            if upkeep.generation_idle(config.home, started):
+                state["last_flips"][config.slug] = str(when.date())
+                report.setdefault("idle_flips", []).append(config.slug)
                 continue
             result = do_flip(config.slug)
             state["last_flips"][config.slug] = str(when.date())
@@ -1074,7 +1082,8 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     now = now or time.time()
     state = _load_state()
     report = {"fired": [], "errors": [], "requests": 0, "flips": [],
-              "ready": [], "scheduled": 0, "distilled": [], "health": []}
+              "idle_flips": [], "ready": [], "scheduled": 0, "distilled": [],
+              "health": []}
     # Expire first: the first tick after downtime must not fire a timed
     # flip or a manual fire that outlived its TTL (it never fires late).
     expire_stale_requests(now=now)

@@ -480,6 +480,44 @@ class TestFlipDrivers(LoopsCase):
         self._tick_f(now=self._at(23) + 60)
         self.assertEqual(sorted(self.flips), ["toki", "wren"])
 
+    def _seed_inbox(self, home, source, body, at):
+        import sqlite3
+        from cousin_lib.delivery import Item
+        from cousin_lib.runner.inbox import Inbox
+        inbox = Inbox(home)
+        rec = inbox.put(Item("loop:daemon" if source == "loop" else "operator:priya",
+                             source, body, sender="x"))
+        conn = sqlite3.connect(inbox.path)
+        conn.execute("UPDATE inbox SET created_at=? WHERE id=?", (at, rec))
+        conn.commit()
+        conn.close()
+
+    def test_an_idle_generation_keeps_its_session(self):
+        # #280: nothing but heartbeats since it started; the flip would buy
+        # a handoff and a boot and carry nothing. Its day is done.
+        from datetime import date
+        home = self._flip_cousin("wren")
+        self._seed_inbox(home, "loop", "Context heartbeat. nothing new", self._at(1))
+        report = self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, [])
+        self.assertEqual(report["idle_flips"], ["wren"])
+        self.assertEqual(self._flipped_on("wren"), str(date.today()))
+
+    def test_a_generation_that_worked_is_flipped(self):
+        home = self._flip_cousin("wren")
+        self._seed_inbox(home, "loop", "Context heartbeat. nothing new", self._at(1))
+        self._seed_inbox(home, "chat", "can you check the NAS", self._at(2))
+        report = self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, ["wren"])
+        self.assertEqual(report["idle_flips"], [])
+
+    def test_an_idle_generation_does_not_spend_the_ticks_flip(self):
+        idle = self._flip_cousin("aaidle")
+        self._seed_inbox(idle, "loop", "Context heartbeat. nothing new", self._at(1))
+        self._flip_cousin("wren")
+        self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, ["wren"])
+
     def test_daily_flip_fires_late_once(self):
         self._flip_cousin("wren")
         from datetime import datetime
@@ -814,6 +852,16 @@ class TestMaxAgeOnTheRunnerLane(HermeticCase):
             yesterday = dt.datetime.now().replace(hour=0, minute=0, second=0,
                                                   microsecond=0).timestamp() - 86400
             boot.mark_generation_start(home, now=yesterday)
+            # the generation worked (#280: an idle one keeps its session)
+            import sqlite3
+            from cousin_lib.delivery import Item
+            from cousin_lib.runner.inbox import Inbox
+            inbox = Inbox(home)
+            done = inbox.put(Item("operator:priya", "chat", "check the NAS", sender="Priya"))
+            conn = sqlite3.connect(inbox.path)
+            conn.execute("UPDATE inbox SET state='done', outcome='delivered' WHERE id=?", (done,))
+            conn.commit()
+            conn.close()
             homes.append(home)
         p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}); p.start(); self.addCleanup(p.stop)
         with contextlib.ExitStack() as stack:

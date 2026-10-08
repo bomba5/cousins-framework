@@ -140,7 +140,11 @@ session's state digest. A rollover happens:
   another until the context drops 10 points below the threshold or five turns
   pass;
 - once a day at the cousin's flip time (the daily flip), unless its session
-  started after that time that day;
+  started after that time that day, or the generation was idle: nothing
+  but heartbeats and its own boot since it started (no chat, peer,
+  meeting, loop or self-set schedule). An idle generation keeps its
+  session, so an edit to its rules waits for its next work, or for a
+  flip by hand;
 - when you flip it by hand, or reincarnate or transplant it.
 
 **Without it.** A session grows until the agent CLI compacts it itself, which

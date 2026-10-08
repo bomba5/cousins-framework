@@ -118,3 +118,46 @@ class TestMeasure(UpkeepCase):
             rc = upkeep.upkeep_main([self.home.name, "--json"])
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out.getvalue())[self.home.name]["turns"], 1)
+
+
+class TestGenerationIdle(HermeticCase):
+    """#280: a generation whose inbox since its start holds only upkeep
+    rows is idle, and its daily flip is skipped."""
+
+    def setUp(self):
+        super().setUp()
+        from cousin_lib.runner.inbox import Inbox
+        self.home = temp_home(self)
+        self.inbox = Inbox(self.home)
+
+    def put(self, source, body, at):
+        from cousin_lib.delivery import Item
+        rec = self.inbox.put(Item("loop:daemon" if source == "loop" else "operator:priya",
+                                  source, body, sender="x"))
+        conn = sqlite3.connect(self.inbox.path)
+        conn.execute("UPDATE inbox SET created_at=? WHERE id=?", (at, rec))
+        conn.commit()
+        conn.close()
+
+    def test_heartbeats_and_the_boot_alone_are_idle(self):
+        self.put("boot", "STATE DIGEST", 1000)
+        self.put("loop", "Context heartbeat. nothing new", 2000)
+        self.assertTrue(upkeep.generation_idle(self.home, 1000))
+
+    def test_no_rows_at_all_is_idle(self):
+        self.put("chat", "old work", 500)        # before the generation
+        self.assertTrue(upkeep.generation_idle(self.home, 1000))
+
+    def test_a_chat_row_is_work(self):
+        self.put("loop", "Context heartbeat. nothing new", 2000)
+        self.put("chat", "hello", 3000)
+        self.assertFalse(upkeep.generation_idle(self.home, 1000))
+
+    def test_a_schedule_it_set_itself_is_not_idle(self):
+        self.put("loop", "[cousin-schedule] #4 check the build", 2000)
+        self.assertFalse(upkeep.generation_idle(self.home, 1000))
+
+    def test_no_inbox_is_never_idle(self):
+        self.inbox.path.unlink()
+        self.assertFalse(upkeep.generation_idle(self.home, 1000))
+

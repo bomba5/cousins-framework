@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.38.0 - 2026-10-08
+
+### Changed
+
+- **An idle generation skips its daily flip** (#280). When every inbox
+  row since the generation started is upkeep (heartbeats, its boot, a
+  flip, memory proposals), the daily flip would buy a handoff and a
+  boot and carry nothing. It is skipped, its day is marked done, and the
+  tick reports it in `idle_flips`; the generation flips at the first
+  daily point after it does any work. A flip by hand, a timed flip and
+  a rollover on context pressure are unchanged. `upkeep.generation_idle`
+  is the test; a missing or unreadable inbox is never idle.
 ## 3.37.12 - 2026-10-08
 
 ### Fixed

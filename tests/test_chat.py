@@ -166,6 +166,22 @@ class TestSenderName(HermeticCase):
         self.assertEqual(self._rows(), [("Wren", "one"), ("wren", "two"),
                                         ("Wren", "three")])
 
+    def test_a_cousin_whose_own_name_has_an_accent_sends_under_it(self):
+        """The plain-name pattern is ASCII; a cousin's own name is its own
+        whatever its letters (Totò). Another accented name is still
+        refused, and so is an accented look-alike of the operator."""
+        from cousin_lib.chat import SenderRefused
+        (self.root / "cousins" / "wren" / "cousin.toml").write_text(
+            '[cousin]\nslug = "toto"\nname = "Totò"\n\n[agent]\nrunner = "sdk"\n')
+        toto = CousinConfig.load(self.root / "cousins" / "wren")
+        send_message(self.fw, toto, "sam", "ciao", display_name="Totò")
+        send_message(self.fw, toto, "sam", "again")
+        self.assertEqual(self._rows(), [("Totò", "ciao"), ("Totò", "again")])
+        for name in ("Nicolò", "Anà"):
+            with self.subTest(name=name):
+                with self.assertRaises(SenderRefused):
+                    send_message(self.fw, toto, "sam", "x", display_name=name)
+
     def test_a_cousin_whose_own_name_is_the_operators_is_refused(self):
         from cousin_lib.chat import SenderRefused
         (self.root / "cousins" / "wren" / "cousin.toml").write_text(

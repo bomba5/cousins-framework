@@ -85,9 +85,12 @@ def check_sender_name(sender, target, display_name, *, external=False):
     if display_name:
         own = {normalize_chat_user(sender.slug),
                normalize_chat_user(sender.name or sender.slug)}
+        # the cousin's own name or slug is its own, whatever its letters
+        # (Totò); the plain-name pattern is for a free-form name only
+        mine = isinstance(display_name, str) and normalize_chat_user(display_name) in own
         if not isinstance(display_name, str) \
-                or not _DISPLAY.match(display_name) \
-                or (not external and normalize_chat_user(display_name) not in own):
+                or (not mine and not _DISPLAY.match(display_name)) \
+                or (not external and not mine):
             raise SenderRefused(
                 "--from %r refused: a cousin sends under its own name or"
                 " slug only (%s)" % (display_name, sender.slug))

@@ -601,3 +601,198 @@ class TestInstallScript(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRetryAndDedup(NodeCase):
+    """#251: what the queen does not take for now is sent again under the
+    same id, and the node's /api/send keeps one row per msg_id."""
+
+    def test_a_send_retried_with_the_same_msg_id_stores_one_row(self):
+        node = self._node()
+        body = {"user": "Sam", "message": "hello", "msg_id": "console-00000001"}
+        s1, b1 = self._call(node, "/api/send", "POST", body)
+        s2, b2 = self._call(node, "/api/send", "POST", body)
+        self.assertEqual((s1, s2), (200, 200))
+        self.assertEqual(b1["id"], b2["id"])
+        self.assertTrue(b2["duplicate"])
+        msgs = self._wait_for_reply(node, "Sam")
+        self.assertEqual([m["message"] for m in msgs if m["type"] == "user"], ["hello"])
+
+    def test_a_bad_msg_id_is_400(self):
+        node = self._node()
+        status, _ = self._call(node, "/api/send", "POST",
+                               {"user": "Sam", "message": "hi", "msg_id": "x"})
+        self.assertEqual(status, 400)
+
+    def _retrier(self, outcomes):
+        sent = []
+
+        class Fake:
+            def post(self_inner, path, body):
+                sent.append((path, body))
+                return outcomes.pop(0)
+        now = [1000.0]
+        r = self.module.Retrier(Fake(), clock=lambda: now[0])
+        return r, sent, now
+
+    def test_the_retrier_keeps_the_id_and_refreshes_sent_at(self):
+        stamps = iter([1.0, 2.0])
+        r, sent, now = self._retrier(["transient", "ok"])
+        r.add("/hive/tell-home", lambda: {"msg_id": "testa-1", "sent_at": next(stamps)}, "testa-1")
+        now[0] += 15
+        self.assertEqual(r.run_once(), {"testa-1": "retrying"})
+        now[0] += 30
+        self.assertEqual(r.run_once(), {"testa-1": "delivered"})
+        self.assertEqual([b["msg_id"] for _, b in sent], ["testa-1", "testa-1"])
+        self.assertEqual([b["sent_at"] for _, b in sent], [1.0, 2.0])
+        self.assertEqual(r.pending(), [])
+
+    def test_a_permanent_answer_or_the_deadline_drops_it(self):
+        r, sent, now = self._retrier(["permanent"])
+        r.add("/hive/msg", lambda: {"id": "testa-2"}, "testa-2")
+        now[0] += 15
+        self.assertEqual(r.run_once(), {"testa-2": "gave_up"})
+        r2, sent2, now2 = self._retrier([])
+        r2.add("/hive/msg", lambda: {"id": "testa-3"}, "testa-3")
+        now2[0] += r2.RETRY_DEADLINE_S + 1
+        self.assertEqual(r2.run_once(), {"testa-3": "gave_up"})
+        self.assertEqual(sent2, [])
+
+    def test_tell_home_with_the_queen_away_is_queued_not_dropped(self):
+        node = self._node(QUEEN_URL="http://127.0.0.1:9", TELL_HOME="1")
+        self.assertTrue(node.brain._tell_home("is the build done?"))
+        self.assertEqual(len(node.retrier.pending()), 1)
+
+    def test_the_deadline_stays_inside_the_queens_id_memory(self):
+        from cousin_lib import peer_inbound
+        self.assertLess(self.module.Retrier.RETRY_DEADLINE_S, peer_inbound.SEEN_KEEP_S)
+
+
+class TestConsoleAndCliRetries(unittest.TestCase):
+    """#251: the console's send to a remote node and `cousin-hive send`
+    try again, under one id, when the other side did not answer."""
+
+    def test_retried_send_retries_no_answer_and_5xx_only(self):
+        from cousin_lib.console import proxy
+        calls, slept = [], []
+
+        def flaky():
+            calls.append(1)
+            if len(calls) == 1:
+                raise proxy.RouteError(502, {"error": "unreachable"})
+            if len(calls) == 2:
+                return 503, {"error": "busy"}
+            return 200, {"ok": True}
+        out = proxy.retried_send(flaky, unreachable=lambda e: getattr(e, "status", 0) == 502,
+                                 sleep=slept.append)
+        self.assertEqual(out, (200, {"ok": True}))
+        self.assertEqual(slept, [1.0, 2.0])
+        calls.clear()
+        self.assertEqual(proxy.retried_send(lambda: (400, {"error": "bad"}),
+                                            unreachable=lambda e: True, sleep=slept.append),
+                         (400, {"error": "bad"}))
+
+    def test_hive_send_retries_under_the_same_id(self):
+        from unittest import mock
+        from cousin_lib import hive
+        seen = []
+
+        def call(url, path, token, method="GET", body=None):
+            seen.append(body["id"])
+            if len(seen) < 3:
+                raise hive.HiveError("away")
+            return {"ok": True}
+        with mock.patch.object(hive, "_client_call", call):
+            hive.hive_send(queen_url="http://q", token="t", to="sam", body="hi",
+                           msg_id="cli-0001", sleep=lambda s: None)
+        self.assertEqual(seen, ["cli-0001"] * 3)
+
+
+class TestRetryReviewFixes(NodeCase):
+    """#251 review: concurrent tries of one send store once; no queen is
+    not an outage; the window starts at the first try; nothing pending is
+    dropped silently; a permanent hive answer is not retried."""
+
+    def test_two_concurrent_tries_of_one_send_store_once(self):
+        node = self._node()
+        real_add = node.store.add
+
+        def slow_add(**kw):
+            time.sleep(0.5)                 # the first try is still storing
+            return real_add(**kw)
+        node.store.add = slow_add
+        body = {"user": "Sam", "message": "hello", "msg_id": "console-00000002"}
+        results = []
+        threads = [threading.Thread(target=lambda: results.append(
+            self._call(node, "/api/send", "POST", body))) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(sorted(r[0] for r in results), [200, 200])
+        self.assertEqual(len({r[1]["id"] for r in results}), 1)
+        self.assertEqual(sum(1 for r in results if r[1].get("duplicate")), 1)
+
+    def test_no_queen_is_not_queued(self):
+        node = self._node(QUEEN_URL="", TELL_HOME="1")
+        self.assertFalse(node.brain._tell_home("anyone there?"))
+        self.assertEqual(node.retrier.pending(), [])
+
+    def test_the_window_starts_at_the_first_try(self):
+        node = self._node(QUEEN_URL="http://127.0.0.1:9", TELL_HOME="1")
+        before = time.time()
+        node.brain._tell_home("is the build done?")
+        [row] = node.retrier._rows
+        self.assertLessEqual(row["created"], before + 1)
+        self.assertGreaterEqual(row["created"], before - 1)
+
+    def test_stop_says_what_it_drops(self):
+        logged = []
+        hive = self.module.Hive("", "t")
+        r = self.module.Retrier(hive, log=logged.append)
+        r.add("/hive/msg", lambda: {}, "testa-9")
+        r.stop()
+        self.assertTrue(any("testa-9" in line and "dropped" in line for line in logged))
+
+    def test_hive_send_does_not_retry_a_refusal(self):
+        from unittest import mock
+        from cousin_lib import hive
+        calls = []
+
+        def call(*a, **kw):
+            calls.append(1)
+            raise hive.HiveError("refused", transient=False)
+        with mock.patch.object(hive, "_client_call", call):
+            with self.assertRaises(hive.HiveError):
+                hive.hive_send(queen_url="http://q", token="t", to="sam", body="hi",
+                               msg_id="cli-0002", sleep=lambda s: None)
+        self.assertEqual(len(calls), 1)
+
+
+class TestClaimWaitBounds(NodeCase):
+    """#251 re-look: a try that waits out a still-storing first one is a
+    503, not an ok, and the wait stays under the console's 15 s a try."""
+
+    def test_a_still_pending_first_try_is_503(self):
+        node = self._node()
+        node.SEND_CLAIM_WAIT_S = 0.2
+        real_add = node.store.add
+
+        def slow_add(**kw):
+            time.sleep(1.0)
+            return real_add(**kw)
+        node.store.add = slow_add
+        body = {"user": "Sam", "message": "hello", "msg_id": "console-00000003"}
+        first = []
+        t = threading.Thread(target=lambda: first.append(self._call(node, "/api/send", "POST", body)))
+        t.start()
+        time.sleep(0.1)
+        status, answer = self._call(node, "/api/send", "POST", body)
+        t.join()
+        self.assertEqual(status, 503)
+        self.assertFalse(answer["ok"])
+        self.assertEqual(first[0][0], 200)
+
+    def test_the_wait_is_under_the_console_timeout(self):
+        from cousin_lib.console import proxy
+        self.assertLess(self.module.Node.SEND_CLAIM_WAIT_S, proxy._SEND_TIMEOUT)

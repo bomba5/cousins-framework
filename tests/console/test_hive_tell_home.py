@@ -126,30 +126,32 @@ class TestTheNode(unittest.TestCase):
         self.assertTrue(config.tell_home)
         calls = []
         hive = node.Hive(config.queen_url, config.token)
-        with mock.patch.object(hive, "_call", side_effect=lambda path, **kw: calls.append(
-                (path, kw)) or {"ok": True}):
-            self.assertTrue(hive.tell_home("ready", msg_id="kestrel-abc12345"))
-        [(path, kw)] = calls
-        self.assertEqual((path, kw["method"]), ("/hive/tell-home", "POST"))
-        self.assertEqual(kw["body"]["msg_id"], "kestrel-abc12345")
-        self.assertLess(abs(kw["body"]["sent_at"] - time.time()), 5)
+        with mock.patch.object(hive, "post", side_effect=lambda path, body: calls.append(
+                (path, body)) or "ok"):
+            self.assertEqual(hive.tell_home("ready", msg_id="kestrel-abc12345"), "ok")
+        [(path, body)] = calls
+        self.assertEqual(path, "/hive/tell-home")
+        self.assertEqual(body["msg_id"], "kestrel-abc12345")
+        self.assertLess(abs(body["sent_at"] - time.time()), 5)
 
-    def test_a_dropped_tell_home_is_logged_and_never_retried(self):
-        """The node sends a tell-home once; when the
-        queen does not take it, or no home is configured, the log says so."""
+    def test_a_dropped_tell_home_is_logged(self):
+        """Without a retrier the node sends a tell-home once; when the queen
+        does not take it, refuses it, or no home is configured, the log
+        says so."""
         node = self._node()
-        for env in ({"COUSIN_SLUG": "kestrel", "HIVE_TOKEN": "hive_x",
-                     "QUEEN_URL": "http://192.0.2.10:8600", "TELL_HOME": "1"},
-                    {"COUSIN_SLUG": "kestrel", "HIVE_TOKEN": "hive_x"}):
+        home = {"COUSIN_SLUG": "kestrel", "HIVE_TOKEN": "hive_x",
+                "QUEEN_URL": "http://192.0.2.10:8600", "TELL_HOME": "1"}
+        for env, answer in ((home, "transient"), (home, "permanent"),
+                            ({"COUSIN_SLUG": "kestrel", "HIVE_TOKEN": "hive_x"}, "ok")):
             config = node.NodeConfig(env)
             hive = node.Hive(config.queen_url, config.token)
             logged, calls = [], []
             brain = node.Brain(config, hive, None, log=logged.append)
-            with mock.patch.object(hive, "_call", side_effect=lambda path, **kw: calls.append(
-                    path)):
+            with mock.patch.object(hive, "post", side_effect=lambda path, body: calls.append(
+                    path) or answer):
                 self.assertFalse(brain._tell_home("ready"))
             self.assertLessEqual(len(calls), 1, env)
-            self.assertEqual(len(logged), 1, env)
+            self.assertEqual(len(logged), 1, (env, answer))
             self.assertIn("tell-home dropped", logged[0])
 
     def test_the_archive_env_carries_tell_home(self):

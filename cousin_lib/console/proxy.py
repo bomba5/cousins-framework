@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -144,6 +145,29 @@ def _upstream(cousin, path, *, query=None, body=None, timeout=_READ_TIMEOUT):
         raise RouteError(502, {"ok": False,
                                "error": "chat server answered non-JSON"})
     return status, parsed
+
+
+SEND_RETRY_WAITS_S = (1.0, 2.0)
+
+
+def retried_send(send, *, unreachable, sleep=time.sleep):
+    """A send to a remote node, tried again after 1 s and 2 s when it got
+    no answer (`unreachable(err)` says which exceptions those are) or a
+    5xx. The caller puts one `msg_id` in the body for all the tries: the
+    node keeps one row per msg_id, so a try that did land is answered as
+    a duplicate, never stored twice. Returns send()'s (status, body), or
+    raises the last no-answer error."""
+    waits = list(SEND_RETRY_WAITS_S)
+    while True:
+        try:
+            status, body = send()
+        except Exception as err:  # noqa: BLE001 - re-raised unless retried
+            if not unreachable(err) or not waits:
+                raise
+        else:
+            if status < 500 or not waits:
+                return status, body
+        sleep(waits.pop(0))
 
 
 def serves_locally(cousin):
@@ -322,8 +346,11 @@ def register():
             # no recall context: a runner recalls in its own prompt hook
             return _local(chat_api.send, cousin, forward,
                           deliver=chat_api.make_deliver(cousin))
-        return _upstream(cousin, "/api/send", body=forward,
-                         timeout=_SEND_TIMEOUT)
+        import uuid
+        forward["msg_id"] = "console-" + uuid.uuid4().hex
+        return retried_send(
+            lambda: _upstream(cousin, "/api/send", body=forward, timeout=_SEND_TIMEOUT),
+            unreachable=lambda err: isinstance(err, RouteError) and err.status == 502)
 
     @router.route("POST", "/api/chat/archive")
     @guarded

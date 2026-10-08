@@ -364,7 +364,11 @@ warning on stderr.
 
 - **Queen unreachable.** The node keeps serving its own chat. Recall
   returns nothing and remember does nothing until the queen is back. It
-  polls at its normal pace, no retry storm.
+  polls at its normal pace, no retry storm. Its `[tell]`, replies and
+  tell-home messages are held and sent again under the same id, at least
+  15 s, 30 s, 1, 2, 4 and 5 minutes apart, for up to 14 minutes; they live
+  in the node's memory, so a node restart in that window drops them (the
+  log names them). This needs node runtime 0.3.0.
 - **Wrong or revoked token.** The queen answers 401, which the node
   treats as no queen. Its checkin logs `HTTP 401` once.
 - **Checkin failing.** Logged once per distinct reason and retried every
@@ -495,7 +499,7 @@ http://<this machine>:8101`.
 | `cousin-hive revoke <slug>` | turn off every live token of the slug |
 | `cousin-hive forget <slug>` | remove a revoked node's token and node rows |
 | `cousin-hive import-legacy --tokens F [--memory-dir D] [--shared-slugs a,b]` | import an older queen |
-| `cousin-hive send --queen URL [--token-file PATH] --to SLUG --id ID BODY` | send a message over the hive; the token from `PATH` (`-`: stdin), else `HIVE_TOKEN` |
+| `cousin-hive send --queen URL [--token-file PATH] --to SLUG --id ID BODY` | send a message over the hive; the token from `PATH` (`-`: stdin), else `HIVE_TOKEN`. With no answer or a `429`/`5xx` it tries twice more (after 1 s and 2 s) under the same `--id`; a refusal is not retried |
 | `cousin-hive recall --queen URL [--token-file PATH] QUERY` | recall memories; the token as for `send` |
 
 `send` and `recall` still take `--token T`, deprecated (the token is on

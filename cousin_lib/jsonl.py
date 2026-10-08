@@ -6,8 +6,8 @@ to write straight after the fragment, gluing a good entry onto it, so
 the reader lost that entry too (#286, point 1). `append_line` starts a
 new line when the file does not end with one, and hands the kernel the
 whole line in one write(2) on an O_APPEND descriptor, so a later kill
-leaves at most that one line torn. runner/stream.py's append keeps the
-same rule for the event stream.
+leaves at most that one line torn. The event stream appends through it
+too.
 
 It proves atomicity against a kill, not durability against a power
 loss: only a caller that asks (`fsync=True`) gets an fsync.

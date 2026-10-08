@@ -11,12 +11,15 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   A writer killed mid-append leaves a line with no newline; the next
   append wrote straight after it, gluing a good entry onto the
   fragment, and readers lost both (shown on a live install: entries a,
-  b, c written around a torn line read back as a, c). Every log now
-  appends through `jsonl.append_line`: a newline first when the file
-  does not end with one, then the whole line in one write, and a short
-  write raises instead of passing for a landed entry. A kill now costs
-  at most the line it cut. This is atomicity against a kill, not
-  durability against a power loss: nothing here calls fsync.
+  b, c written around a torn line read back as a, c). Every line log
+  appends through `jsonl.append_line` now (the archives, job logs and
+  the memory import keep their own appends, listed with why in
+  `tests/test_jsonl.py`): a newline first when the file does not end
+  with one, then the whole line in one write, and a short write raises
+  instead of passing for a landed entry. A kill now costs at most the
+  line it cut. This is atomicity against a kill, not durability against
+  a power loss: only a caller that asks gets an fsync (the dream
+  journal does).
 
 ## 3.37.11 - 2026-10-08
 

@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.37.1 - 2026-10-08
+
+### Fixed
+
+- **The console loads on Safari before 16.4 again.** 3.36.4's table
+  rows were split with a regex lookbehind, which those browsers cannot
+  parse: the whole chat page failed to load there, not just the
+  tables. The cells are split by a plain scan now, and a test refuses a
+  lookbehind in any console script.
+
 ## 3.37.0 - 2026-10-08
 
 ### Added

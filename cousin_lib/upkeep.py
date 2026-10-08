@@ -13,7 +13,8 @@ Each row gets a kind: `heartbeat` (the loops daemon's context beat),
 `boot`, `flip`, `propose`, ...). A turn with no row that the SDK started
 when a background task finished is `task`. Four classes:
 - upkeep: every row is `heartbeat`, `boot`, `flip` or `propose`;
-- self: the turn answered a `schedule`, a prompt the cousin set itself;
+- self: the turn answered a `schedule`, a prompt the cousin set itself,
+  or a `job` close notice it asked for (`cousin-job start --notify`);
   the tool cannot tell a self-set heartbeat from a reminder, so it is
   shown apart, neither upkeep nor work: upkeep is a floor, upkeep + self
   a ceiling;
@@ -36,7 +37,7 @@ import time
 from pathlib import Path
 
 UPKEEP_KINDS = ("heartbeat", "boot", "flip", "propose")
-SELF_KINDS = ("schedule",)
+SELF_KINDS = ("schedule", "job")   # a job's close notice: a wake-up the cousin asked for
 # an interrupt is the operator stopping a turn: their act, not upkeep
 WORK_KINDS = ("chat", "meeting", "reaction", "hook", "loop", "task", "interrupt")
 HEARTBEAT_PREFIX = "Context heartbeat."

@@ -54,6 +54,8 @@ def _db():
     # never taken for the job's own, whatever the wall clock did
     add_column(conn, "jobs", "start_ticks", "INTEGER")
     add_column(conn, "jobs", "boot_id", "TEXT")
+    # 1: the owner asked to be told when the row closes (notify_owner)
+    add_column(conn, "jobs", "notify", "INTEGER NOT NULL DEFAULT 0")
     conn.commit()
     return conn
 
@@ -63,17 +65,18 @@ def _now():
 
 
 def register_job(*, kind, title, description="", spawned_by=None,
-                 log_path=None, command=None):
-    """Insert a running job row and return its id."""
+                 log_path=None, command=None, notify=False):
+    """Insert a running job row and return its id. `notify`: the owner
+    gets one inbox row when the job closes (notify_owner)."""
     slug = spawned_by or CousinConfig.from_env().slug
     conn = _db()
     try:
         cur = conn.execute(
             "INSERT INTO jobs (spawned_by, kind, title, description,"
-            " started_at, log_path, command)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            " started_at, log_path, command, notify)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (slug, kind, title[:200], description[:500], _now(),
-             log_path, command),
+             log_path, command, 1 if notify else 0),
         )
         conn.commit()
         return cur.lastrowid
@@ -104,6 +107,7 @@ def finish_job(job_id, *, status="done", summary="", exit_code=None):
         conn.close()
     if before is not None and before["status"] in ("running", "lost") and row:
         record_job_result(dict(row))
+        notify_owner(dict(row))
 
 
 # What a finished job leaves in its cousin's raw memory. The topic
@@ -145,6 +149,40 @@ def record_job_result(job):
             home, "L2_TOOL", job_topic(title), content, "job",
             job_id=job.get("id"), status=job["status"],
             exit_code=job.get("exit_code"), kind=job.get("kind"))
+    except Exception:  # noqa: BLE001 - the close already happened
+        return False
+
+
+def notify_owner(job):
+    """One inbox row to the owning cousin for a job that asked for it
+    (`notify`) and ended: what it was, how it ended, where its log is.
+    The cousin waiting on it needs no polling (#282). A job whose
+    spawned_by names no cousin home is skipped. Never raises: the job is
+    closed either way, and a failed delivery is the poll it replaced."""
+    try:
+        if not job.get("notify"):
+            return False
+        owner = str(job.get("spawned_by") or "")
+        if not owner or "/" in owner or owner.startswith("."):
+            return False
+        home = FrameworkConfig.from_env().root / "cousins" / owner
+        if not (home / "cousin.toml").is_file():
+            return False
+        from cousin_lib import delivery
+        title = " ".join(str(job.get("title") or "").split())
+        head = "[cousin-job] job #%s %s" % (job.get("id"), job.get("status"))
+        if job.get("exit_code") is not None:
+            head += " (exit %s)" % job["exit_code"]
+        body = "%s: %s" % (head, title or "(untitled)")
+        summary = " ".join(str(job.get("result_summary") or "").split())
+        if summary:
+            body += " - %s" % summary[:JOB_SUMMARY_CHARS]
+        if job.get("log_path"):
+            body += "\nlog: %s" % job["log_path"]
+        item = delivery.Item(thread_id=delivery.thread_id("system"), source="job",
+                             body=body, sender="cousin-job")
+        wait = not isinstance(delivery.backend_for(home), delivery.InboxBackend)
+        return delivery.accepted(delivery.deliver(home, item, wait=wait), home)
     except Exception:  # noqa: BLE001 - the close already happened
         return False
 
@@ -595,7 +633,7 @@ def reap_lost():
         if not rows:
             return []
         groups = _groups()
-        marked = []
+        marked, lost = [], []
         for job in rows:
             if not _process_gone(job, groups):
                 continue
@@ -606,10 +644,13 @@ def reap_lost():
                 (_now(), LOST_NOTE, job["id"]))
             if cur.rowcount:
                 marked.append(job["id"])
+                lost.append(job)
         conn.commit()
-        return marked
     finally:
         conn.close()
+    for job in lost:
+        notify_owner(dict(job, status="lost", result_summary=LOST_NOTE.strip()))
+    return marked
 
 
 def reap_lost_quietly():
@@ -785,6 +826,7 @@ def _cmd_start(args):
         kind=args.kind, title=args.title, description=args.desc or "",
         spawned_by=slug, log_path=args.log,
         command=" ".join(cmd) if cmd else None,
+        notify=bool(getattr(args, "notify", False)),
     )
     log_path = args.log
     if cmd:
@@ -974,6 +1016,12 @@ def _start_options(p, *, help_text=False):
     else:
         p.add_argument("--home-log")
     p.add_argument("--json", action="store_true")
+    if help_text:
+        p.add_argument("--notify", action="store_true",
+                       help="when the job ends, put one row in your inbox with its status,"
+                            " exit code and log, so you need not poll it")
+    else:
+        p.add_argument("--notify", action="store_true")
     if help_text:
         p.add_argument("--artifact", action="append", metavar="PATH",
                        help="a file the command builds (repeat for more), relative to"

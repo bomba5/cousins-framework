@@ -220,6 +220,33 @@ class TestClose(MeetingCase):
         self.assertEqual(meetings.show(m["id"])["transcript"][-1]["kind"],
                          "minutes")
 
+    def test_the_facilitator_is_told_when_the_floor_comes_back(self):
+        # #282: a facilitator drives a meeting the user only listens to;
+        # the end of a round is pushed to it instead of polled
+        m = self.open(facilitator="moss")
+        self.post(m["id"], "ideas?")
+        self.say(m["id"], "wren", "Kestrel")
+        self.assertFalse(any(s == "moss" for s, _ in self.delivered))   # mid-round: nothing
+        self.say(m["id"], "toki", "Wren")
+        notices = [t for s, t in self.delivered if s == "moss"]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("round 1 is done, the floor is back; you facilitate", notices[0])
+        self.assertIn("cousin-meeting post %d --user moss" % m["id"], notices[0])
+
+    def test_a_skip_that_ends_the_round_tells_the_facilitator(self):
+        m = self.open(facilitator="moss")
+        self.post(m["id"], "ideas?")
+        self.say(m["id"], "wren", "Kestrel")
+        meetings.skip(m["id"], "ana", deliver=self.deliver)
+        self.assertEqual(len([s for s, _ in self.delivered if s == "moss"]), 1)
+
+    def test_no_facilitator_no_floor_notice(self):
+        m = self.open()
+        self.post(m["id"], "ideas?")
+        self.say(m["id"], "wren", "Kestrel")
+        self.say(m["id"], "toki", "Wren")
+        self.assertFalse(any("floor is back" in t for _, t in self.delivered))
+
     def test_skip_by_the_user(self):
         m = self.open()
         self.post(m["id"], "ideas?")

@@ -25,7 +25,7 @@ THREAD_KINDS = ("operator", "person", "peer", "meeting", "loop",
                 "schedule", "system")
 _BARE_KINDS = ("schedule", "system")
 SOURCES = ("chat", "reaction", "hook", "loop", "schedule", "meeting",
-           "flip", "boot", "propose", "interrupt", "outbox")
+           "flip", "boot", "propose", "interrupt", "outbox", "job")
 # The sender names the framework writes itself: chat_hooks.HOOK_SENDER
 # (threaded on `system` as a hook), the runner's own items, the fallback
 # for a missing sender and the bare thread kinds. peer_inbound refuses

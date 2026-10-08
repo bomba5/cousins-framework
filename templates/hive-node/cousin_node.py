@@ -918,6 +918,12 @@ class Node:
         self.retrier.start()
 
     def stop(self):
+        # every part told first, then each joined: a part blocked in a
+        # Hive call winds down while the others do, so the stop takes the
+        # slowest part's time, not the sum of their caps. The retrier is
+        # told last, after the turns (a late tell-home still goes out).
+        self.checkin._stop.set()
+        self.poller._stop.set()
         self.checkin.stop()
         self.poller.stop()
         self.httpd.shutdown()

@@ -211,7 +211,14 @@ chat history and inbox directly, from the sender's own process, as a
 `name`. `--from` may only respell it (the cousin's own `name` or slug, case
 and spaces aside): any other name is refused, exit 2, and nothing is sent. To an
 external peer `--from` may still be a free-form display name ("Wren of
-testbed"): the receiving install checks it.
+testbed"): the receiving install checks it. A display name is letters,
+digits, spaces, `.`, `_` and `-`. A letter may be an ASCII letter with
+accents (Totò, Nicolò, José) or one of ø, æ, œ, ß, ł, đ, þ, ð (Søren,
+Łukasz); any other letter is refused, since it passes for an ASCII one: a
+Cyrillic "А", a small capital "ᴊ", an IPA "ɑ", a fullwidth "Ａ". The
+receiving install compares the name with its operator's, its cousins'
+and the framework's own with the accents dropped and those letters
+spelled out, so "Àna" does not pass for "Ana".
 So is a sender name that is the target's operator or one the framework
 writes itself (`fw-hook`, `runner`): a cousin's message never reaches the
 operator-only paths, such as correction capture.

@@ -80,7 +80,7 @@ def check_sender_name(sender, target, display_name, *, external=False):
     name would reach the operator-only paths, such as correction capture
     and the login-code divert). Returns the name to show."""
     from cousin_lib.delivery import FRAMEWORK_SENDERS
-    from cousin_lib.peer_inbound import _DISPLAY
+    from cousin_lib.peer_inbound import _plain
     from cousin_lib.server.storage import is_operator, normalize_chat_user
     shown = display_name or sender.name or sender.slug
     if display_name:
@@ -92,7 +92,7 @@ def check_sender_name(sender, target, display_name, *, external=False):
         # (Totò); the plain-name pattern is for a free-form name only
         mine = isinstance(display_name, str) and nfc(display_name) in own
         if not isinstance(display_name, str) \
-                or (not mine and not _DISPLAY.match(display_name)) \
+                or (not mine and not _plain(display_name)) \
                 or (not external and not mine):
             raise SenderRefused(
                 "--from %r refused: a cousin sends under its own name or"

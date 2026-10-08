@@ -40,6 +40,7 @@ import socket
 import sqlite3
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 WINDOW_S = 300.0          # how far a send time may be from this host's clock
@@ -92,6 +93,54 @@ def _target(root, to, allowed):
     return target
 
 
+# The Latin letters that are real letters of a language and do not
+# decompose to an ASCII base, with what a reader takes each for. Any other
+# non-ASCII letter is refused: small capitals, IPA forms, other scripts and
+# fullwidth forms all pass for an ASCII letter.
+_LATIN_EXTRA = {"ø": "o", "Ø": "O", "æ": "ae", "Æ": "AE", "œ": "oe", "Œ": "OE",
+                "ß": "ss", "ł": "l", "Ł": "L", "đ": "d", "Đ": "D", "þ": "th",
+                "Þ": "TH", "ð": "d", "Ð": "D"}
+
+
+def _ascii_base(char):
+    """The ASCII letters a letter is, by its canonical decomposition (ò is
+    o and a grave) or _LATIN_EXTRA; None for anything else. Canonical
+    only: a fullwidth "Ａ" decomposes to "A" only by compatibility, and is
+    not one."""
+    if char.isascii():
+        return char
+    if char in _LATIN_EXTRA:
+        return _LATIN_EXTRA[char]
+    base = "".join(c for c in unicodedata.normalize("NFD", char) if not unicodedata.combining(c))
+    return base if base and base.isascii() and base.isalpha() else None
+
+
+def _plain(display):
+    """A plain name: _DISPLAY's shape, where a letter may also be an ASCII
+    letter with diacritics (Totò, Nicolò) or one of _LATIN_EXTRA (Søren,
+    Łukasz), compared composed (NFC). Nothing else: a look-alike from
+    another script, a small capital or an IPA letter would pass for an
+    ASCII one."""
+    if not isinstance(display, str):
+        return False
+    shape = []
+    for char in unicodedata.normalize("NFC", display):
+        base = _ascii_base(char)
+        if base is None:
+            return False
+        shape.append(base[0] if not char.isascii() else char)
+    return bool(_DISPLAY.match("".join(shape)))
+
+
+def skeleton(name):
+    """The name a reader would take it for: _LATIN_EXTRA spelled out, the
+    accents dropped, case-folded, spaces as underscores. "Àna" and "Ana"
+    are one skeleton, so are "Søren" and "Soren"."""
+    spelled = "".join(_LATIN_EXTRA.get(c, c) for c in unicodedata.normalize("NFC", str(name or "")))
+    folded = "".join(c for c in unicodedata.normalize("NFKD", spelled) if not unicodedata.combining(c))
+    return folded.casefold().replace(" ", "_")
+
+
 def check_display(root, target, display):
     """Refuse a display name that is not a plain name, that the framework
     writes itself (delivery.FRAMEWORK_SENDERS: "fw-hook" would be threaded
@@ -100,15 +149,17 @@ def check_display(root, target, display):
     from cousin_lib.config import FrameworkConfig
     from cousin_lib.delivery import FRAMEWORK_SENDERS
     from cousin_lib.server.storage import is_operator, normalize_chat_user
-    if not isinstance(display, str) or not _DISPLAY.match(display):
+    if not _plain(display):
         raise Refused(403, "the sender's configured name is not a plain name")
-    if normalize_chat_user(display) in {normalize_chat_user(n) for n in FRAMEWORK_SENDERS}:
+    # compared by skeleton: an accent is not enough to pass for another name
+    wanted = skeleton(display)
+    if wanted in {skeleton(n) for n in FRAMEWORK_SENDERS}:
         raise Refused(403, "the sender's configured name is reserved by the framework")
-    if is_operator(target, display):
+    operator = getattr(target, "operator_name", None)
+    if is_operator(target, display) or (operator and wanted == skeleton(operator)):
         raise Refused(403, "the sender's configured name is the operator's")
-    wanted = normalize_chat_user(display)
     for cousin in FrameworkConfig(root).list_cousins():
-        if wanted in (normalize_chat_user(cousin.slug), normalize_chat_user(cousin.name)):
+        if wanted in (skeleton(cousin.slug), skeleton(cousin.name)):
             raise Refused(403, "the sender's configured name is a local cousin's")
 
 

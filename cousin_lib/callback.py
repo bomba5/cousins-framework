@@ -16,6 +16,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from cousin_lib import jsonl
 from cousin_lib.trace import traced_cli
 
 MOMENT_MAX = 200
@@ -72,8 +73,7 @@ def tag(home, text, *, cycle=None, category=None):
     line = "- %s | cycle %s | %s | %s\n" % (
         stamp, cycle if cycle is not None else "-",
         _escape(category) if category else "-", _escape(moment))
-    with open(path, "a") as fh:
-        fh.write(line)
+    jsonl.append_line(path, line)
     return path
 
 

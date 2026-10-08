@@ -14,6 +14,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from cousin_lib import jsonl
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError, default_flip_at,
                                flip_time, parse_flip_at)
@@ -136,9 +137,7 @@ def _log_fire(slug, name, now):
     failed append is reported by the caller, never fatal to the tick."""
     path = _fires_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a") as fh:
-        fh.write(json.dumps({"ts": now, "cousin": slug, "loop": name})
-                 + "\n")
+    jsonl.append_line(path, json.dumps({"ts": now, "cousin": slug, "loop": name}))
 
 
 def _health(report, key, ok, error=None):

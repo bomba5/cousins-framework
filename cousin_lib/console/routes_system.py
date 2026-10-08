@@ -49,6 +49,7 @@ import tomllib
 import urllib.parse
 from pathlib import Path
 
+from cousin_lib import jsonl
 from cousin_lib.console import router  # noqa: F401 - the package's routes use it
 
 # ---- shared helpers -------------------------------------------------------
@@ -330,8 +331,7 @@ def system_audit(root, record):
     path.parent.mkdir(parents=True, exist_ok=True)
     row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     row.update(record)
-    with open(path, "a") as fh:
-        fh.write(json.dumps(row, default=str) + "\n")
+    jsonl.append_line(path, json.dumps(row, default=str))
     return row
 
 

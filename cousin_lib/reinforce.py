@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cousin_lib import memory_lock, perimeter
+from cousin_lib import jsonl
 
 MAX_BONUS = 0.15
 HALF_LIFE_DAYS = 14.0
@@ -142,12 +143,11 @@ def record(home, paths, *, query=None):
         # writer at a time per home (memory_lock), or a session loses the
         # other's recall
         with memory_lock.write_lock(home):
-            with open(log, "a") as out:
-                out.write(json.dumps({
-                    "ts": _iso(now),
-                    "query": (query or "")[:_QUERY_CHARS],
-                    "paths": paths,
-                }) + "\n")
+            jsonl.append_line(log, json.dumps({
+                "ts": _iso(now),
+                "query": (query or "")[:_QUERY_CHARS],
+                "paths": paths,
+            }))
             _rotate(log)
             counts = load_counts(home)
             for path in paths:

@@ -50,6 +50,7 @@ from pathlib import Path
 
 from cousin_lib import memory_lock, perimeter
 from cousin_lib.home_files import PathRefused, resolve_in
+from cousin_lib import jsonl
 
 TRASH_NAME = ".trash"
 _RAW_LINE_RE = re.compile(r"^memory/raw/[^/]+\.jsonl$")
@@ -68,8 +69,7 @@ def trash_dir(home):
 def _audit(home, record):
     path = trash_dir(home) / "audit.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a") as fh:
-        fh.write(json.dumps(record) + "\n")
+    jsonl.append_line(path, json.dumps(record))
 
 
 def line_sha(text):

@@ -15,6 +15,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cousin_lib import jsonl
+
 # (pattern, class) in priority order: the first match wins. Halts and
 # negative directives before the softer classes; acceptance last.
 CORRECTION_PATTERNS = [
@@ -71,8 +73,7 @@ def record(home, *, user, text, kind):
         "kind": kind,
         "text": (text or "")[:_STORED_TEXT_CHARS],
     }
-    with open(path, "a") as fh:
-        fh.write(json.dumps(entry) + "\n")
+    jsonl.append_line(path, json.dumps(entry))
 
 
 def detect_and_record(home, *, user, text):

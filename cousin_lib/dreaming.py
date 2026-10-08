@@ -46,6 +46,8 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from cousin_lib import jsonl
+
 MODES = ("off", "nightly", "rollover")
 DEFAULT_AT = "03:00"
 DEFAULT_MODEL = "sonnet"
@@ -126,8 +128,7 @@ def log_dir(home):
 def _write(home, record):
     path = log_dir(home) / ("%s.jsonl" % datetime.now().strftime("%Y-%m-%d"))
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    jsonl.append_line(path, json.dumps(record, ensure_ascii=False))
 
 
 def passes(home, *, limit=50):

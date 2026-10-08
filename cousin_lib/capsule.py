@@ -35,6 +35,7 @@ from pathlib import Path
 
 from cousin_lib import distill, memory
 from cousin_lib.trace import traced_cli
+from cousin_lib import jsonl
 
 CONFIDENCES = ("low", "medium", "high")
 DEFAULT_CONFIDENCE = "medium"
@@ -218,8 +219,7 @@ def write_capsule(home, *, conclusion, evidence, rejected=None,
     }
     store = capsules_path(home)
     store.parent.mkdir(parents=True, exist_ok=True)
-    with open(store, "a") as fh:
-        fh.write(json.dumps(entry) + "\n")
+    jsonl.append_line(store, json.dumps(entry))
     mirror = markdown_path(home)
     _append_block(mirror, _render_block(entry))
     _rotate_if_needed(mirror)

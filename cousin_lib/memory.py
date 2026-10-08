@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from cousin_lib import memory_lock, perimeter
 from cousin_lib.trace import traced_cli
+from cousin_lib import jsonl
 
 # decisions.jsonl grows monotonically; past the threshold the older
 # entries move to a dated sibling archive and the newest tail stays
@@ -206,8 +207,8 @@ def _append_raw(home, entry):
     # reach by convention. `mark_obsolete` and `record_event` land here, so
     # one check covers the three producers. See perimeter.py.
     perimeter.assert_writable(path, writer="memory._append_raw")
-    with memory_lock.write_lock(home), open(path, "a") as fh:
-        fh.write(json.dumps(entry) + "\n")
+    with memory_lock.write_lock(home):
+        jsonl.append_line(path, json.dumps(entry))
     return entry
 
 
@@ -794,8 +795,7 @@ def decide(home, topic, decision, reasoning, *, level=None, cite=None, derived_f
     # replace) and the raw bridge. A decision appended by another session
     # between the rotation's read and its replace would be lost.
     with memory_lock.write_lock(home):
-        with open(decisions, "a") as fh:
-            fh.write(json.dumps(entry) + "\n")
+        jsonl.append_line(decisions, json.dumps(entry))
         lines = ["Decision logged: [%s] %s" % (topic, decision)]
         note = demotion(level, cite)
         if note:

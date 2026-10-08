@@ -6,6 +6,8 @@ import threading
 import time
 from pathlib import Path
 
+from cousin_lib import jsonl
+
 
 class EventStream:
     def __init__(self, home, session_id):
@@ -22,14 +24,10 @@ class EventStream:
             line = json.dumps({"seq": self._seq, "ts": time.time(),
                                "kind": kind, "payload": payload},
                               ensure_ascii=False)
-            with open(self.path, "a+b") as f:
-                if f.seek(0, 2) > 0:  # file is non-empty
-                    f.seek(-1, 2)
-                    if f.read(1) != b"\n":
-                        f.write(b"\n")
-            with open(self.path, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
-                f.flush()
+            # one write, a torn tail closed first (jsonl.append_line): an
+            # event over a buffer's size (a tool's output) no longer tears
+            # mid-line on a kill
+            jsonl.append_line(self.path, line)
             return self._seq
 
     def tail(self, after=None):

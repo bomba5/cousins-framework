@@ -1041,7 +1041,7 @@ pass on demand whatever the setting.
 
 | key | default | meaning |
 |---|---|---|
-| `upkeep_alarm_percent` | `0` | `0` is off. A percent, 0-100: once an hour the loops daemon measures the cousin's last 7 days (`cousin-upkeep`), and when upkeep plus its own schedules and job notices is more than this share of a spend of at least $1, the `upkeep:<slug>` health row fails with the numbers. The `sdk`, `opencode` and `fake` lanes (the ones that write `usage.db`). Read from `cousin.toml` at each check, so a change needs no restart. The console's Tokens page marks a cousin over its alarm. |
+| `upkeep_alarm_percent` | `0` | `0` is off. A percent, 0-100: once an hour the loops daemon measures the cousin's last 7 days (`cousin-upkeep`), and when upkeep plus its own schedules and job notices is more than this share of a spend of at least $1, the `upkeep:<slug>` health row fails with the numbers. The `sdk`, `opencode` and `fake` lanes (the ones that write `usage.db`). Read from `cousin.toml` at each check, so a change needs no restart. Between two checks a failing row shows "not seen since" in `cousin-health`: that is the hourly cadence, not a check that stopped. The console's Tokens page marks a cousin over its alarm on its 7-day view (the alarm's own window). |
 
 ### [agent] daily_cost_cap_usd
 

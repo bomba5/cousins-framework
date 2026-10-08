@@ -1079,9 +1079,10 @@ function UpkeepPanel() {
   const usd = (v) => "$" + (Number(v) || 0).toFixed(2);
   const pct = (v) => v == null ? "-" : Math.round(v * 100) + "%";
   const cls = (m, k) => (m.classes && m.classes[k]) || { turns: 0, cost_usd: 0 };
-  // upkeep.alarm's rule: over the alarm, once the spend is worth one ($1)
-  const over = (m) => !!m.alarm_percent && m.headline_share != null && m.cost_usd >= 1
-    && m.headline_share * 100 > m.alarm_percent;
+  // upkeep.alarm's rule: over the alarm, once the spend is worth one ($1),
+  // on the alarm's own 7-day window only
+  const over = (m) => d.days === 7 && !!m.alarm_percent && m.headline_share != null
+    && m.cost_usd >= 1 && m.headline_share * 100 > m.alarm_percent;
   return (
     <div className="panel" data-upkeep style={{ marginTop: 16, padding: "12px 16px" }}>
       <div className="eyebrow">upkeep vs work, last {d.days} days</div>

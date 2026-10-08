@@ -16,7 +16,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `[agent] upkeep_alarm_percent` (0 is off; the console's agent
   settings edit it): hourly, the loops daemon measures the last 7 days,
   and over the alarm (on a spend of at least $1) the `upkeep:<slug>`
-  health row fails with the numbers; the Tokens page marks the cousin.
+  health row fails with the numbers; the Tokens page marks the cousin
+  on its 7-day view.
 
 ## 3.41.2 - 2026-10-08
 

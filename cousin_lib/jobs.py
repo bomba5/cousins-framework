@@ -187,8 +187,10 @@ def notify_owner(job, *, was_lost=False):
             body += " - %s" % summary[:JOB_SUMMARY_CHARS]
         if job.get("log_path"):
             body += "\nlog: %s" % job["log_path"]
+        # "framework": a reserved sender (delivery.FRAMEWORK_SENDERS), so a
+        # peer can never pass for the job notice
         item = delivery.Item(thread_id=delivery.thread_id("system"), source="job",
-                             body=body, sender="cousin-job")
+                             body=body, sender="framework")
         wait = not isinstance(delivery.backend_for(home), delivery.InboxBackend)
         return delivery.accepted(delivery.deliver(home, item, wait=wait), home)
     except Exception:  # noqa: BLE001 - the close already happened

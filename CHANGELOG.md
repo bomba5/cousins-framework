@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.42.2 - 2026-10-08
+
+### Fixed
+
+- **A job's end notice comes from a reserved sender** (3.39.0's
+  `notify`): it said `cousin-job`, which is not one of
+  `delivery.FRAMEWORK_SENDERS`, so a peer could have passed for it; it
+  says `framework` now. Its transport branch is classified in the lane
+  audit like the meetings and loops ones.
+
+3.38.0 through 3.42.1 were never tagged: they ship together in this
+release (the notice above was wrong in 3.39.0 to 3.42.1).
+
 ## 3.42.1 - 2026-10-08
 
 ### Fixed

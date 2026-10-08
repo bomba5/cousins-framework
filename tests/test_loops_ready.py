@@ -93,7 +93,7 @@ class TestHeartbeatAndMessageTriggers(ReadyCase):
         self.assertEqual(len(self.delivered), 1)
         _, text = self.delivered[0]
         self.assertIn("Context heartbeat", text)
-        self.assertIn("STATUS.md CHANGED", text)
+        self.assertIn("STATUS.md", text)
         self.assertFalse(path.exists())
         # The delta committed: a second beat reports no changes.
         self.assertTrue((home / "data" / "heartbeat-mtimes.json").exists())

@@ -262,7 +262,9 @@ class TestHeartbeat(LoopsCase):
         home = self._cousin("wren", extra=(
             "[heartbeat]\ncontext_beat_seconds = %d\n" % seconds))
         (home / "CLAUDE.md").write_text("# Wren\nidentity\n")
-        (home / "STATUS.md").write_text("# Wren - STATUS\n")
+        (home / "STATUS.md").write_text(
+            "# Wren - STATUS\n_gen 8 header, superseded_\n\n## Open loops\n\n- [ ] ship the descaler\n\n"
+            "## Archived loops\n\n- [x] SUPERSEDED old item\n")
         return home
 
     def test_beat_fires_with_changed_files_inlined(self):
@@ -271,8 +273,31 @@ class TestHeartbeat(LoopsCase):
         self.assertEqual(len(self.delivered), 1)
         _, text = self.delivered[0]
         self.assertIn("Context heartbeat", text)
-        self.assertIn("STATUS.md CHANGED", text)
-        self.assertIn("# Wren - STATUS", text)
+        self.assertIn("its open loops now", text)
+        self.assertIn("- [ ] ship the descaler", text)
+
+    def test_the_beat_carries_only_status_open_loops_and_pointers(self):
+        # #248: no header, no archive, no identity or memory bodies; and
+        # nothing the beat says calls itself authoritative
+        home = self._beat_cousin()
+        (home / "MEMORY.md").write_text("# Memory\nan old line\n")
+        self._tick()
+        _, text = self.delivered[0]
+        self.assertNotIn("superseded", text)
+        self.assertNotIn("SUPERSEDED old item", text)
+        self.assertNotIn("identity", text)
+        self.assertNotIn("an old line", text)
+        self.assertIn("CLAUDE.md changed since the last heartbeat", text)
+        self.assertIn("MEMORY.md changed since the last heartbeat", text)
+        self.assertNotIn("AUTHORITATIVE", text)
+
+    def test_long_open_loops_are_cut_with_a_pointer(self):
+        from cousin_lib import loops
+        home = self._beat_cousin()
+        (home / "STATUS.md").write_text("## Open loops\n\n" + "- [ ] x\n" * 2000)
+        self._tick()
+        _, text = self.delivered[0]
+        self.assertIn("cut at %d characters" % loops._BEAT_INLINE_CAP, text)
 
     def test_unchanged_files_yield_the_no_changes_note(self):
         home = self._beat_cousin()
@@ -293,7 +318,7 @@ class TestHeartbeat(LoopsCase):
         self.assertEqual(self.delivered, [])
         self._tick(now=base + 10)  # delivery works now
         _, text = self.delivered[0]
-        self.assertIn("STATUS.md CHANGED", text)
+        self.assertIn("its open loops now", text)
 
     def test_beat_coalesces_with_due_loops(self):
         self._beat_cousin()

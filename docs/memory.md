@@ -697,8 +697,8 @@ isn't flagged. The step-by-step is in
 [reference/lifecycle.md](reference/lifecycle.md).
 
 Between boots, the loops daemon's context heartbeat re-sends
-`CLAUDE.md`, `STATUS.md` and `MEMORY.md` whenever they change
-([jobs and loops](jobs-and-loops.md)).
+`STATUS.md`'s open loops when it changes, and points at `CLAUDE.md` or
+`MEMORY.md` when they change ([jobs and loops](jobs-and-loops.md)).
 
 ## Search
 

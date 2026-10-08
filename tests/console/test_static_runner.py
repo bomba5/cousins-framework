@@ -785,6 +785,19 @@ process.stdout.write(JSON.stringify([shape(oc), shape(sdk)]));""")
              ["line", "harness · cli drift"]],
         ])
 
+    def test_every_subtype_and_kind_a_runner_emits_has_a_reading(self):
+        """Each system subtype and stream kind the runners' sources emit
+        is named in the pane, so none of them is a raw-JSON row: the
+        list is read from the sources, so a new one fails here first."""
+        import re
+        runner = pathlib.Path(__file__).resolve().parents[2] / "cousin_lib"
+        src = "".join(p.read_text() for p in runner.rglob("*.py"))
+        subtypes = set(re.findall(r'"subtype": "([a-z_]+)"', src)) | {"connect_failed"}
+        kinds = set(re.findall(r'stream\.append\("([a-z_]+)"', src))
+        missing = sorted(n for n in subtypes | kinds
+                         if not re.search(r'(\b%s:|"%s"|case "%s")' % (n, n, n), self.chat))
+        self.assertEqual(missing, [])
+
     TASKS = """
 const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
 const S = (seq, payload) => E(seq, "system", payload);

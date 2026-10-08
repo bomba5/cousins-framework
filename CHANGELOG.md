@@ -18,9 +18,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   and a repeat gate that ended the turn says so. The rest of what the
   lanes send reads as a line too: a compacted context, a reconnect, a
   restart note, a retry, a stall, a denied or asked permission, a hook
-  error, a memory update and a config change; the CLI's bare notices
-  (status, informational, notification) are no row. Checked against
-  every stream on a real install: no raw-JSON row is left.
+  error, a memory update, a config change, a failed resume or connect,
+  a cost cap, and the tmux lane's pane events; the CLI's bare notices
+  (status, informational, notification) are no row. Every subtype and
+  kind the runners emit has a reading, and a test reads that list from
+  the runners' sources, so a new one cannot land as raw JSON unnoticed.
 
 ## 3.35.0 - 2026-10-07
 

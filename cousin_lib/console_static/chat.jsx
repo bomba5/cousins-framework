@@ -1790,6 +1790,24 @@ const RP_SYSTEM_LINES = {
   retry: p => ["rp-warn", "retry " + (p.attempt || 1) + (p.message ? " · " + rpCut(p.message, 140) : "")],
   stall: p => ["rp-warn", "stall · " + (p.site || "?") + (p.seconds != null ? " " + Math.round(p.seconds) + " s" : "") + (p.ongoing ? ", ongoing" : "")],
   permission_denied: p => ["rp-warn", "permission denied" + (p.tool_name ? " · " + p.tool_name : "")],
+  resume_failed: p => ["rp-warn", "resume failed" + (p.error ? " · " + rpCut(p.error, 140) : "")],
+  connect_failed: p => ["rp-err", "connect failed" + (p.error ? " · " + rpCut(p.error, 140) : "")],
+  side_restarted: p => ["rp-warn", "side session restarted · " + (p.session || "?") + (p.attempt ? ", attempt " + p.attempt : "")],
+  interrupt_dropped: p => ["rp-dim", "interrupt dropped · its turn had ended"],
+  drained: p => ["rp-dim", "drained · " + (Array.isArray(p.messages) ? p.messages.length : (p.messages || 0)) + " messages"],
+  resync_skipped: p => ["rp-dim", "resync skipped" + (p.why ? " · " + p.why : "")],
+  opencode_leftover: p => ["rp-roll", "leftover opencode killed · " + (p.pids || []).length + " process" + ((p.pids || []).length === 1 ? "" : "es")],
+  pressure_off: p => ["rp-dim", "context pressure off" + (p.why ? " · " + rpCut(p.why, 140) : "")],
+  event_gap: p => ["rp-dim", "event stream gap" + (p.settled ? " · settled" : "")],
+  adopt_refused: p => ["rp-warn", "pane not adopted" + (p.reason || p.detail || p.why ? " · " + rpCut(p.reason || p.detail || p.why, 140) : "")],
+  hooks_silent: p => ["rp-warn", "hooks silent" + (p.detail ? " · " + rpCut(p.detail, 140) : "")],
+  notice_not_typed: p => ["rp-warn", "notice not typed" + (p.waited_s != null ? " after " + p.waited_s + " s" : "")],
+  pane_failing: p => ["rp-err", "pane failing" + (p.reason ? " · " + rpCut(p.reason, 140) : "")],
+  pane_lost: p => ["rp-err", "pane lost" + (p.requeued ? " · " + p.requeued + " requeued" : "")],
+  pane_reopened: p => ["rp-roll", "pane reopened" + (p.source ? " · " + p.source : "")],
+  pane_unreachable: p => ["rp-err", "pane unreachable" + (p.detail ? " · " + rpCut(p.detail, 140) : "")],
+  session_changed: p => ["rp-dim", "new session · " + rpCut(p.new_session_id || "", 60)],
+  typing_blocked: p => ["rp-warn", "typing blocked · " + (p.what || "?") + (p.screen ? " (" + p.screen + ")" : "")],
 };
 const RP_SYSTEM_BOOT = { session: 1 };
 // The framework's own kinds that are not turn content, as a line.
@@ -1797,6 +1815,11 @@ const RP_KIND_LINES = {
   memory_update: p => ["rp-dim", "memory updated · " + (p.entries || 0) + " entr" + (p.entries === 1 ? "y" : "ies")],
   config_change: p => ["rp-dim", "config changed · " + (p.files || []).join(", ")],
   hook: p => [p.error ? "rp-warn" : "rp-dim", "hook " + (p.event || "") + (p.error ? " · " + rpCut(p.error, 140) : "")],
+  cap: p => ["rp-warn", "cost cap · $" + Number(p.spent || 0).toFixed(2) + " of $" + Number(p.limit || 0).toFixed(2) + " today"
+                        + (p.allowed === "person" ? " · only a person's chat runs" : "")],
+  duplicate_delivery: p => ["rp-dim", "duplicate delivery ignored"],
+  foreign_turn: p => ["rp-dim", "a turn typed in the pane"],
+  other: p => ["rp-dim", "SDK message · " + (p.type || "?")],
   permission: p => ["rp-warn", p.tool_name ? "permission asked · " + p.tool_name
                                             : "notification · " + rpCut(p.message || p.event || "", 140)],
 };

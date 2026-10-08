@@ -880,8 +880,12 @@ Four classes:
 - **other**: a row gone from the inbox, a source in no list (an `outbox`
   report), or a turn with no row that isn't a `task`.
 
-It prints one line per cousin and a row per kind; `--json` prints the
-numbers (`{"<slug>": {...}}`); name cousins to report only those. Tokens
+It prints one line per cousin and a row per kind. The headline is upkeep
+plus self (`headline_share`): what keeps the cousin going, its own polling
+included, with the framework's share alone after it; a cousin's
+`upkeep_alarm_percent` ([configuration](configuration.md)) turns that into
+a health row. `--json` prints the numbers (`{"<slug>": {...}}`); name
+cousins to report only those. Tokens
 are usage totals, cache reads included, so a heartbeat in a long session
 shows a large count. On a login lane the dollars are the API-equivalent
 estimate the tokens page shows: read them as a share. The console's Tokens

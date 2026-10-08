@@ -200,16 +200,51 @@ def measure(home, *, days=7, now=None):
     cost = lambda c: out["classes"].get(c, {}).get("cost_usd", 0.0)
     out["upkeep_share"] = cost("upkeep") / spent if spent else None
     out["upkeep_or_self_share"] = (cost("upkeep") + cost("self")) / spent if spent else None
+    # the headline (#288): what keeps the cousin going, its own schedules
+    # and job notices included; the framework's share alone hid the polling
+    out["headline_share"] = out["upkeep_or_self_share"]
     return out
+
+
+ALARM_KEY = "upkeep_alarm_percent"
+ALARM_DAYS = 7
+ALARM_MIN_USD = 1.0      # a few cents of heartbeats is no alarm
+
+
+def alarm_percent(home):
+    """[agent] upkeep_alarm_percent from cousin.toml, or 0 (off)."""
+    import tomllib
+    try:
+        agent = tomllib.loads((Path(home) / "cousin.toml").read_text()).get("agent") or {}
+        value = float(agent.get(ALARM_KEY) or 0)
+    except (OSError, ValueError, TypeError, tomllib.TOMLDecodeError):
+        return 0.0
+    return value if 0 < value <= 100 else 0.0
+
+
+def alarm(home, *, now=None):
+    """(ok, error) for a cousin with an alarm set, None without one: over
+    the last ALARM_DAYS, upkeep plus self against the alarm, once the
+    spend is worth one (ALARM_MIN_USD)."""
+    limit = alarm_percent(home)
+    if not limit:
+        return None
+    m = measure(home, days=ALARM_DAYS, now=now)
+    share = m.get("headline_share")
+    if share is None or m["cost_usd"] < ALARM_MIN_USD or share * 100 <= limit:
+        return True, None
+    return False, ("upkeep and its own schedules took %.0f%% of $%.2f over %d days"
+                   " (alarm at %.0f%%)" % (share * 100, m["cost_usd"], ALARM_DAYS, limit))
 
 
 def format_measure(slug, m):
     if not m["turns"]:
         return "%s: no costed turns in the last %d days" % (slug, m["days"])
     pct = lambda v: "%.0f%%" % (v * 100) if v is not None else "n/a"
-    lines = ["%s: %d turns, $%.2f in the last %d days; upkeep %s (with its own schedules %s)"
-             % (slug, m["turns"], m["cost_usd"], m["days"], pct(m["upkeep_share"]),
-                pct(m["upkeep_or_self_share"]))]
+    lines = ["%s: %d turns, $%.2f in the last %d days; upkeep %s (the framework's %s, the"
+             " rest its own schedules and job notices)"
+             % (slug, m["turns"], m["cost_usd"], m["days"], pct(m["headline_share"]),
+                pct(m["upkeep_share"]))]
     for name, b in sorted(m["kinds"].items(), key=lambda kv: -kv[1]["cost_usd"]):
         lines.append("  %-10s %-7s %4d turns  $%8.2f  %12d tokens (cache reads included)"
                      % (name, classify(name), b["turns"], b["cost_usd"], b["tokens"]))

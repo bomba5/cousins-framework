@@ -1018,3 +1018,23 @@ class TestNeverFiresLate(LoopsCase):
         self._tick(now=base + 3600)
         self.assertFalse([t for _, t in self.delivered if "manual fire" in t], self.delivered)
         self.assertEqual(list_requests()[0]["status"], "expired")
+
+
+class TestUpkeepAlarm(LoopsCase):
+    """#288: hourly, a cousin with an alarm gets an `upkeep:<slug>` health row."""
+
+    def test_the_alarm_is_a_health_row_checked_hourly(self):
+        from unittest import mock as _mock
+        from cousin_lib import loops, upkeep
+        self._cousin("wren", extra="[agent]\nupkeep_alarm_percent = 50\n")
+        calls = []
+        def fake(home, now=None):
+            calls.append(now)
+            return False, "upkeep and its own schedules took 63%"
+        with _mock.patch.object(upkeep, "alarm", side_effect=fake):
+            report = self._tick(now=10_000.0)
+            self.assertIn(("upkeep:wren", False, "upkeep and its own schedules took 63%"),
+                          [tuple(h) for h in report["health"]])
+            self._tick(now=10_060.0)                       # within the hour: no second check
+            self._tick(now=10_000.0 + loops.UPKEEP_CHECK_SECONDS)
+        self.assertEqual(len(calls), 2)

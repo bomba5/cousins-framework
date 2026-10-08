@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.42.0 - 2026-10-08
+
+### Added
+
+- **The upkeep headline counts a cousin's own schedules, and has an
+  alarm** (#288). `cousin-upkeep` and the console's Tokens page lead
+  with upkeep plus self (`headline_share`): heartbeats, boots and
+  memory proposals plus the prompts a cousin scheduled for itself and
+  the job notices it asked for, with the framework's share alone after
+  it, because the framework's share alone hid a cousin's polling. A new
+  `[agent] upkeep_alarm_percent` (0 is off; the console's agent
+  settings edit it): hourly, the loops daemon measures the last 7 days,
+  and over the alarm (on a spend of at least $1) the `upkeep:<slug>`
+  health row fails with the numbers; the Tokens page marks the cousin.
+
 ## 3.41.2 - 2026-10-08
 
 ### Docs

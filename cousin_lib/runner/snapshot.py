@@ -27,6 +27,10 @@ def fingerprint(home, root, *, registry=None):
         from pathlib import Path
 
         from cousin_lib.runner import mcp_config, prompt, tools
+        # one spelling of each path, so a runner and the daemon that reach a
+        # home by different ones (a symlinked root) still hash the same
+        # plugin env (it carries COUSIN_HOME, FRAMEWORK_ROOT)
+        home, root = Path(home).resolve(), Path(root).resolve()
         if registry is None:
             registry = tools.resolve_registry(home, root)[0]
         try:

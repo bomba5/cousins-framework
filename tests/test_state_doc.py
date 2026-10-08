@@ -1,15 +1,24 @@
-"""docs/reference/state.md names every store (#285): a `.db` or `.jsonl`
-name in cousin_lib that the page does not mention fails here, so a new
-store gets its row (level, writer, what wins) when it is added."""
+"""docs/reference/state.md names every store (#285): a `.db`, `.jsonl`
+or `.json` name in cousin_lib that the page does not mention, and that
+NOT_STORES does not list as config or another program's file, fails
+here, so a new store gets its row (level, writer, what wins)."""
 import pathlib
 import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs" / "reference" / "state.md"
-NAME = re.compile(r"""["']([A-Za-z0-9_.-]+\.(?:db|jsonl))["']""")
-# names that are no store of this install: an import source read once
-NOT_STORES = {"memory.jsonl", "-digest.jsonl"}
+NAME = re.compile(r"""["']([A-Za-z0-9_.-]+\.(?:db|jsonl|json))["']""")
+# names that are no store of this install: an import source read once,
+# another program's files, config, manifests inside an export or backup
+NOT_STORES = {
+    "memory.jsonl", "-digest.jsonl",
+    ".claude.json", ".credentials.json", "auth.json", "settings.json", "settings.local.json",
+    "package-lock.json", "manifest.json", "MANIFEST.json", ".manifest.json", ".meta.json",
+    ".baseline.json", "embeddings.json", ".mcp.json", "chat-hooks.json",
+    "net-allowlist.json", "outbound-filter.json", "shared-reviewers.json",
+    "console-users.json", "cousin-policy.json", "cousin-policy.ack.json",
+}
 
 
 def store_names():

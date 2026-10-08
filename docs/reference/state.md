@@ -39,7 +39,7 @@ lags its source is shown with what it has, and the source decides.
 | `memory/imported/auto/` | transactional | `memory_import` | a copy of the agent CLI's own memory files; the copy is searched when current |
 | `data/decisions.jsonl` | raw event | `memory.decide` | a compatibility log: every decision is also a raw entry, and raw wins (recall and consolidate count raw only) |
 | `data/corrections.jsonl` | raw event | `corrections` | the operator's corrections |
-| `data/review-gate.json`, `data/extract-cursor.json`, `data/propose-cursor.json`, `data/proposals.json` | transactional | `review_gate`, `runner/extract` | cursors; the held and released entries live in raw |
+| `data/review-gate.json`, `data/review-gate-attempts.json`, `data/extract-cursor.json`, `data/propose-cursor.json`, `data/proposals.json` | transactional | `review_gate`, `runner/extract` | cursors and attempts; the held and released entries live in raw |
 | `MEMORY.md`, `memory/**/*.md`, `notes/**/*.md` | authored | the cousin | its own knowledge files |
 
 Memory written from outside the session is newer than the digest the
@@ -59,6 +59,9 @@ never written back.
 | `data/last-activity.txt` | transactional | `memory.note_activity` | the latest activity line |
 | `data/generations/gen-NNNN/` | raw event | `rollover.archive_generation` | copies of STATUS, handoff and threads at each [rollover](../glossary.md#rollover) |
 | `data/generation.txt`, `data/generation-started.json` | transactional | `boot` | the counter and when the generation started |
+| `data/cycle.json`, `data/cycle-archive.json` | transactional | `cycle` | the cousin's breadcrumbs |
+| `data/heartbeat-mtimes.json` | transactional | the loops daemon's heartbeat | the mtimes it last saw, so a beat says only what changed |
+| `data/.chat-imported.json` | transactional | `chat_import` | what an import already brought in |
 | `CLAUDE.md`, `self-portrait.md` | authored | the operator, template sync for the framework part | boot reads only the committed portrait, never `.self-portrait-candidate.md` |
 | `data/run/system-prompt.md` | context | `runner/prompt.system_prompt_option`, at every connect | from the law, the contract, identity, shared rules and the operator's rules |
 | `cousin.toml`, `.mcp.json`, `mcp-registry.toml`, `policy.toml`, `chat-hooks.json` | config | the operator, the console, `spawn`, template sync | read at start; a runner reports an edit made since |
@@ -81,7 +84,18 @@ built from it.
 | `data/turn-tools.jsonl` | transactional | `runner/tool_ledger` | the live turn's tool calls, reset each turn |
 | `data/activity/*.log` | raw event | `activity.record` | one line per tool call |
 | `data/artifacts-private.json` | transactional | `artifacts` | the private rows' paths, for their owner only |
-| `data/telegram-bridge.json` | transactional | `telegram` | offsets and cursors; chat.db owns the messages |
+| `data/telegram-bridge.json`, `data/telegram-pending.json` | transactional | `telegram`, `telegram_admin` | offsets and cursors, and senders waiting for approval; chat.db owns the messages |
+| `data/tmux-claims.json`, `data/tmux-cursor.json` | transactional | `tmux_runner` | the rows the tmux kind claimed and how far it read the CLI's transcript; on that [lane](../glossary.md#lane) the transcript is the record of the turns |
+| `data/run/tmux-context-origin.json`, `run/tmux-session.json`, `run/turn.json` | runtime | the tmux kind, the runner | the pane's session and the live turn; a restart rebuilds them |
+| `data/run/tmux-giving-up.json` | transactional | `tmux_runner` | a start that keeps failing gives up; a start honours it for an hour |
+| `run/held` | transactional | a stop | holds the cousin down across a [supervisor](../glossary.md#supervisor) restart until its next start |
+| `data/runner-restart.json` | transactional | `restart_note` | a stop cut a live turn: the next resume says so first, then it is cleared |
+| `data/login-required.json` | transactional | `runner/auth` | the account needs a login; cleared when it has one |
+| `data/mcp-client.json` | transactional | `mcp_server` | the MCP client versions seen |
+| `data/run/mcp-config.json` | context | `runner/sdk`, at every connect | the MCP servers handed to the CLI |
+| `data/opencode.runner.json` | config | `runner/opencode` | the opencode kind's own settings |
+| `data/harness-attribution-owned.json`, `.claude/cousin-tmux-owned.json` | transactional | `harness_settings` | what the framework wrote into the agent CLI's settings, so it removes only its own |
+| `data/.flip-in-progress.json` | runtime | none today (an older flip wrote it) | read by the console only |
 
 ## The install
 
@@ -89,7 +103,7 @@ built from it.
 |---|---|---|---|
 | `data/jobs.db`, `data/job-logs/` | transactional + raw event | `jobs` | the job record; a closed job also lands as an L2 entry in its owner's raw memory |
 | `data/artifacts.db` | transactional | `artifacts` | path, sha256, size, job, commit |
-| `data/tracker.db` | transactional + raw event (`history`) | `tracker` | the backlog |
+| `data/tracker.db` | transactional + raw event (`history`) | `tracker` | the backlog; a delete keeps a `deleted` row, with who and when, in its history |
 | `data/meetings.db` | transactional | `meetings` | meetings and their transcripts |
 | `data/scheduled.db` | transactional | `schedule` | one-shot prompts |
 | `data/loop-requests.db`, `data/loops-state.json`, `data/loops-fires.jsonl` | transactional + raw event | `loops` | timed flips and fires; the daemon's state |
@@ -105,5 +119,7 @@ built from it.
 | `shared/hive/hive.db` | transactional | the hive | tokens, the hive inbox, the shared corpus and nodes |
 | `config/*` | config | the operator | [configuration](../configuration.md) |
 
-Runtime files (`run/`, locks, sockets, pid files) hold no state worth
-keeping: a restart rebuilds them.
+Runtime files (sockets, locks, pid files, the live turn's marker) hold
+no state worth keeping: a restart rebuilds them. Two files under `run/`
+do outlive a restart and have rows above: `run/held` and
+`data/run/tmux-giving-up.json`.

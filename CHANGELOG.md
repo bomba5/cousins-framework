@@ -12,8 +12,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   state, its runner and transport, the install), its level (raw event,
   transactional, projection, context, authored, config), its writer,
   what it is rebuilt from and which one wins on conflict.
-  `tests/test_state_doc.py` fails for a `.db` or `.jsonl` name in
-  `cousin_lib` the page does not name.
+  `tests/test_state_doc.py` fails for a `.db`, `.jsonl` or `.json` name
+  in `cousin_lib` the page does not name and its not-a-store list (config,
+  another program's files) does not list.
 
 ## 3.40.0 - 2026-10-08
 

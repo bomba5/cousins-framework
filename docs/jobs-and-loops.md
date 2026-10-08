@@ -54,8 +54,10 @@ is refused.
 
 A cousin does the same through its `job` tool without a shell: `run`
 with `title` and `argv` (the command as an array, never a shell string),
-and optionally `desc` and `log` (relative to its home, passed as
-`--home-log`). It's this same launcher, run from the cousin's home, and it answers at once with the
+and optionally `desc`, `log` (relative to its home, passed as
+`--home-log`), and `artifacts` with `commit`: the files the command
+builds, relative to its home, recorded as artifacts of the job when it
+exits 0 (passed as `--artifact` and `--artifact-commit`). It's this same launcher, run from the cousin's home, and it answers at once with the
 job id and the log path ([MCP tools](mcp.md#what-a-cousin-gets)). The
 tool's `start` refuses `shell`, since it takes no command and the row
 would never close. The row keeps the command line as given, secrets
@@ -138,7 +140,16 @@ as its target, so a rebuild behind `latest.bin` later reads `missing`),
 its sha256, size and mtime, measured then, with the producing job (it
 must exist in the jobs store), the commit it was built from and a
 one-line note. A file still being written while it is hashed is refused;
-record it when the build is done. Outside a cousin (no `COUSIN_HOME`)
+record it when the build is done. A job can record its own: `cousin-job
+start shell --artifact PATH [--artifact-commit SHA] -- TITLE CMD` (the
+job tool's `run` with `artifacts` and `commit`) records each named file
+for the job once the command exits 0, before the row closes, with a line
+per file in the job's log; a named file that is not there fails the job
+with the reason, so a build that did not produce what it said never reads
+`done`. The rows a job records are shared, like `cousin-artifact add`'s
+default: path, sha256, job and commit, readable by the whole install. A
+private path is recorded by hand, with `cousin-artifact add --private
+--label`. Outside a cousin (no `COUSIN_HOME`)
 the row's owner is `$USER`, so `--mine` won't find it later.
 
 A file on another machine is recorded with `--host` and the checksum and

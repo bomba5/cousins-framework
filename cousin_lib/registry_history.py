@@ -101,10 +101,17 @@ SHIPPED_BEFORE = {
         ['start', 'shell', '{title}', '--json', '--', '{argv}'],
     ),
     ('tools.job.commands.run', 'options'): (
+        {'desc': '--desc', 'log': '--home-log'},
         {'desc': '--desc', 'log': '--log'},
     ),
     ('tools.job.commands.start', 'argv'): (
         ['start', '{kind}', '{title}'],
+    ),
+    ('tools.job.properties', 'artifacts'): (
+        {'type': 'array', 'items': 'string', 'optional': True, 'description': 'files the command builds, relative to your home or absolute (run): on exit 0 each is recorded as an artifact of the job (path, sha256, size); one that is missing fails the job'},
+    ),
+    ('tools.job.properties', 'artifacts.description'): (
+        'files the command builds, relative to your home or absolute (run): on exit 0 each is recorded as an artifact of the job (path, sha256, size); one that is missing fails the job',
     ),
     ('tools.job.properties', 'desc'): (
         {'type': 'string', 'description': 'context for the job (start)'},

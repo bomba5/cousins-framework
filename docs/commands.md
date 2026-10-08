@@ -625,15 +625,20 @@ Jobs page reads the same store. Subcommands: `start KIND TITLE [-- CMD...]`
 title that looks like a flag is only a title. Its options are `--desc`,
 `--json`, and one of `--log PATH` or `--home-log REL`, a log path relative to
 the cousin's home and confined to it (absolute, `~`, `..` and `.secrets` are
-refused).
+refused). `--artifact PATH` (repeatable) names a file the command builds,
+relative to where `start` runs (where the command runs and builds), and `--artifact-commit SHA` the commit it
+was built from: on exit 0 each one is recorded as an artifact of the job
+(`cousin-artifact`), and one that is not there fails the job with the
+reason, though the command exited 0.
 
 ```
 cousin-job start shell "rebuild the index" -- cousin-memory reindex
 cousin-job start shell --home-log logs/reindex.log -- "rebuild the index" cousin-memory reindex
+cousin-job start shell --artifact out/image.bin --artifact-commit 3f2a9c1 -- "image rev A" make image
 ```
 
 A cousin's `job` tool does the same with `run` (`title`, `argv` as an array,
-optional `desc` and `log`); see [MCP tools](mcp.md#what-a-cousin-gets).
+optional `desc`, `log`, `artifacts` and `commit`); see [MCP tools](mcp.md#what-a-cousin-gets).
 
 `cousin-loops` is the loops daemon and its controls. Subcommands: `run
 [--interval S] [--ticks N]` (the daemon), `status`, `requests`, `flips` (each

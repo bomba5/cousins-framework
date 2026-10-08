@@ -995,6 +995,35 @@ class TestRegistrySyncCorrectsShippedText(unittest.TestCase):
         return self.template_sync._registry_sync(self.home, self.root,
                                                   apply=True)
 
+    def test_stale_options_and_argv_and_a_hash_in_a_string_are_migrated(self):
+        """`options` and `argv` a past release shipped are the
+        framework's own too: a remember that still maps no `scope` gets
+        the shipped table, whole. A `#` inside a string (a description
+        naming `raw:<file>#<line>`) is not a comment: the keys after it
+        stay visible to the sync, so their old text migrates as well."""
+        old = {("tools.memory.commands.remember", "options"):
+               'options = { level = "--level", cite = "--cite", derived_from = "--derived-from" }\n',
+               ("tools.memory.properties", "keyword"):
+               'keyword = { type = "string", optional = true, description = "filter (recall)" }\n'}
+        ts = self.template_sync
+        out = []
+        for path, body in ts._blocks(self.shipped):
+            lines = []
+            for key, entry in ts._entries(body):
+                lines.extend([old[(path, key)]] if (path, key) in old else entry)
+            out.append(("" if path is None else "[%s]\n" % path) + "".join(lines))
+        self.reg.write_text("".join(out))
+        result = self._sync()
+        self.assertIn("tools.memory.commands.remember.options", result["corrected"])
+        self.assertIn("tools.memory.properties.keyword", result["corrected"])
+        now = tomllib.loads(self.reg.read_text())["tools"]["memory"]
+        shipped = tomllib.loads(self.shipped)["tools"]["memory"]
+        self.assertEqual(now["commands"]["remember"]["options"],
+                         shipped["commands"]["remember"]["options"])
+        self.assertEqual(now["properties"]["keyword"], shipped["properties"]["keyword"])
+        self.assertEqual(self._sync()["corrected"], [])
+        self.assertEqual(ts._depth('a = { d = "raw:<f>#<n>" }\n'), 0)
+
     def test_old_shipped_text_is_corrected(self):
         self.reg.write_text(self._old_registry())
         before = tomllib.loads(self.reg.read_text())["tools"]["job"]

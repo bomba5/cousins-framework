@@ -179,9 +179,11 @@ _STR = re.compile(r'"(?:[^"\\]|\\.)*"' + r"|'[^']*'")
 
 
 def _depth(line):
-    """Bracket balance of a line, strings ignored."""
-    bare = _STR.sub("", line.split("#")[0] if not line.lstrip().startswith("#")
-                    else "")
+    """Bracket balance of a line, strings ignored. Strings go before the
+    comment is cut: a `#` inside a string (a description naming
+    `raw:<file>#<line>`) is not a comment, and cutting there left an
+    unclosed brace that swallowed every key after it."""
+    bare = _STR.sub("", line).split("#")[0]
     return (bare.count("[") - bare.count("]")
             + bare.count("{") - bare.count("}"))
 
@@ -251,26 +253,16 @@ def _place(blocks, path):
 # edit is never one of these exact values, so anything that is not this
 # precise old value (including the cousin's own rewrite of it) stays
 # untouched. `key` is a table's own key ("description" for its plain
-# `description = "..."` line), or "<key>.<field>" for a string field of an
-# inline table ("kind.description": the `description` inside
-# `kind = { ... }`). `new` is the value the shipped registry must hold for
-# the migration to apply, or None for whatever it ships now (other than
-# `old`): the shipped text is what gets written, never `new` itself, so a
-# release that does not ship it migrates nothing.
-_MIGRATIONS = {
-    ("tools.job", "description"): ((
-        "Track sub-agents and background work: start, done, fail, list,"
-        " show.", None),),
-    ("tools.job.properties", "kind.description"): ((
-        "(start) not shell: start takes no command, so a shell row would"
-        " never close. For long shell work use a Bash call with"
-        " run_in_background (tracked automatically by the job hooks), or"
-        " run `cousin-job start shell TITLE -- CMD` from a shell, which"
-        " launches CMD and closes the row with its exit code", None),),
-    ("tools.job.properties", "title.description"): (("(start)", None),),
-    ("tools.job.properties", "desc.description"): ((
-        "context for the job (start)", None),),
-}
+# `description = "..."` line, "options" or "argv" whole), or
+# "<key>.<field>" for a string field of an inline table
+# ("kind.description": the `description` inside `kind = { ... }`). `new`
+# is None: whatever the shipped registry holds now is written. The old
+# values come from git history (registry_history), never kept by hand:
+# a hand-kept list is how three releases of `options` never reached a
+# home.
+from cousin_lib.registry_history import SHIPPED_BEFORE
+
+_MIGRATIONS = {key: tuple((old, None) for old in olds) for key, olds in SHIPPED_BEFORE.items()}
 
 
 def _entry_value(key, lines):

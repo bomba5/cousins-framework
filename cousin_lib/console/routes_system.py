@@ -941,6 +941,17 @@ def register():
     def get_supervisor(req):
         return 200, supervisor_status(req.server)
 
+    @router.route("GET", "/api/system/outbox")
+    def get_outbox(req):
+        """Messages to external peers the outbox kept: pending ones are
+        being sent again, then delivered or gave_up (cousin_lib/outbox)."""
+        from cousin_lib import outbox
+        state = req.query.get("state") or None
+        if state is not None and state not in (outbox.PENDING, outbox.DELIVERED, outbox.GAVE_UP):
+            raise _err(400, "state must be pending, delivered or gave_up")
+        return 200, {"ok": True, "rows": outbox.list_rows(req.server.root, state=state, limit=100),
+                     "deadline_s": outbox.DEADLINE_S}
+
     @router.route("POST", "/api/system/supervisor/start")
     def start_child(req):
         return supervisor_child(req, "start")

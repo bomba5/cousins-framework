@@ -970,7 +970,7 @@ Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", 
 
 ## System (the System view)
 
-The supervisor, one-shot schedules, console users, backup and the install-wide config (`console/routes_system.py`, the view in `system.jsx`). Every change is a `POST`; a refusal is `{"ok": false, "error"}` with the status named below, and nothing is written.
+The supervisor, the outbox, one-shot schedules, console users, backup and the install-wide config (`console/routes_system.py`, the view in `system.jsx`). Every change is a `POST`; a refusal is `{"ok": false, "error"}` with the status named below, and nothing is written.
 
 ### `GET /api/system/supervisor`
 
@@ -987,6 +987,10 @@ As start, with the supervisor's `stop`, not waiting (`state: "stopping"`), `by: 
 ### `POST /api/system/supervisor/reload`
 
 The supervisor's rescan: `200 {"ok": true, "added", "removed"}`.
+
+### `GET /api/system/outbox`
+
+What the outbox holds (messages to signed external peers sent again under the same id, [chat](../chat.md#cousins-on-another-install)), newest first, 100 at most: `{"ok": true, "rows": [{"id", "msg_id", "sender", "dest", "message", "created", "attempts", "next_at", "state", "last_error", "finished"}], "deadline_s": 840.0}`. `state` is `pending`, `delivered` or `gave_up`; `?state=` filters by it (`400` for another word).
 
 ### `GET /api/system/schedules`
 

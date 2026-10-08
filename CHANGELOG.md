@@ -3,6 +3,28 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.30.0 - 2026-10-07
+
+### Added
+
+- **A message to another install is retried instead of lost.** A send
+  to a signed external peer used to be one attempt: a network blip, a
+  timeout or a peer restarting lost the message. Now a send that can't
+  be confirmed (5xx, 429, a connection error, a broken-off answer, a
+  timeout) goes to an outbox and answers `queued: true` with its
+  `msg_id`. The loops daemon sends it again (at least 15 s, 30 s, 1, 2,
+  4, then 5 minutes apart) under the same id, re-signed with a fresh
+  time, so the peer's gate shows it once even if an earlier try had
+  landed (a 409 counts as delivered). Nothing is sent more than 14
+  minutes after the first try started; any other 4xx ends it at once.
+  The sending cousin gets a `system` item saying whether it was
+  delivered. A pass sends for at most 20 s and stops trying a peer after
+  its first failure, so a dead peer never holds the loops tick. See the
+  outbox with `cousin-chat outbox`, on the console's System page, or at
+  `GET /api/system/outbox`. A legacy peer (no `token_file`) is still
+  sent once. The gate now answers 404 (final) instead of 502 for a
+  cousin with no runner kind.
+
 ## 3.29.0 - 2026-10-07
 
 ### Added

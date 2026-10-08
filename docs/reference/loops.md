@@ -2,7 +2,7 @@
 
 The loop data model and exactly how the loops daemon decides what to deliver and when. Read it when a loop didn't fire (or fired twice) and you want to know why. For setting loops up, read [jobs and loops](../jobs-and-loops.md).
 
-One process, `cousin-loops run`, owns all scheduling: loops, context heartbeats, trigger files, one-shots and scheduled [flips](../glossary.md#flip). Nothing else fires anything. The console, the CLIs and scripts only read its state or leave requests for it to pick up on its next tick.
+One process, `cousin-loops run`, owns all scheduling: loops, context heartbeats, trigger files, one-shots, scheduled [flips](../glossary.md#flip) and the outbox's retries. Nothing else fires anything. The console, the CLIs and scripts only read its state or leave requests for it to pick up on its next tick.
 
 ```sh
 cousin-loops run                # the daemon: a tick every 30 s, forever
@@ -78,10 +78,10 @@ Every tick does this, in this order:
    - the context heartbeat (if due) and every due loop are collected and delivered together, as one message.
 3. **Requests.** Consume pending manual fires.
 4. **One-shots.** Deliver due `cousin-schedule` jobs.
-5. **Index and meetings.** Queue the memory index refresh for the cousins that need it, and run the meetings' tick.
+5. **Index, outbox and meetings.** Queue the memory index refresh for the cousins that need it, send again what the outbox holds that is due ([chat](../chat.md#cousins-on-another-install)), and run the meetings' tick.
 6. **Housekeeping.** Mark pending requests older than their TTL as `expired`, write `last_tick`, save the state.
 
-A failure inside one cousin (an exception, a bad file) is reported and the walk moves on to the next cousin. A broken one-shot store, index refresh or meetings store is reported and doesn't cost the loops their tick. Errors go to the daemon's stderr, prefixed `cousin-loops:`. After each tick the daemon also writes what each step did to `data/health.json`, a count of consecutive failures per component that `cousin-health` prints ([operations](../operations.md#health)).
+A failure inside one cousin (an exception, a bad file) is reported and the walk moves on to the next cousin. A broken one-shot store, index refresh, outbox or meetings store is reported and doesn't cost the loops their tick. Errors go to the daemon's stderr, prefixed `cousin-loops:`. After each tick the daemon also writes what each step did to `data/health.json`, a count of consecutive failures per component that `cousin-health` prints ([operations](../operations.md#health)).
 
 ## Delivery
 

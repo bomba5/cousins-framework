@@ -703,8 +703,11 @@ def _send(ctx, a):
     from cousin_lib.outbound_filter import OutboundPolicy
     # One root for the filter on both routes: reply loads it from ctx.root too.
     policy = OutboundPolicy.load(ctx.root) if getattr(ctx.policy, "outbound_filter", True) else None
-    result = chat.send_message(fw, cfg, to, text, policy=policy, display_name=ctx.name)
-    return json.dumps({"ok": True, "to": to, "id": (result or {}).get("id")}, sort_keys=True)
+    result = chat.send_message(fw, cfg, to, text, policy=policy, display_name=ctx.name) or {}
+    out = {"ok": True, "to": to, "id": result.get("id")}
+    if result.get("queued"):
+        out.update(queued=True, msg_id=result.get("msg_id"), note=result.get("note"))
+    return json.dumps(out, sort_keys=True)
 
 
 # ------------------------------------------------------------ handoff

@@ -211,7 +211,7 @@ console's Loops view, which writes the same `[[loops]]` tables back.
 ### The loops daemon
 
 One process fires everything: loops, heartbeats, one-shot schedules,
-timed [flips](glossary.md#flip), meeting [turns](glossary.md#turn), and the memory index refresh that keeps every
+timed [flips](glossary.md#flip), meeting [turns](glossary.md#turn), the outbox's retries to external peers, and the memory index refresh that keeps every
 cousin's search index level with its files (checked every 5 minutes per
 cousin, one home at a time, only changed files embedded; each pass that
 did work is logged as `cousin-loops: index <slug>: ...`).

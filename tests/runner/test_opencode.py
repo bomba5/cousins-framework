@@ -910,7 +910,7 @@ class TestTurns(OpencodeCase):
             patch = mock.patch.object(runner_auth, name, 300.0)
             patch.start(); self.addCleanup(patch.stop)
 
-    def test_a_deleted_login_file_retries_within_a_second_whatever_the_backoff(self):
+    def test_a_deleted_login_file_retries_on_the_trigger_not_the_backoff(self):
         home = self.home()
         self.long_backoff()
         r = self.started(self.runner([[("AUTH_401",)], [("text", "back")]], home=home))
@@ -923,7 +923,7 @@ class TestTurns(OpencodeCase):
         self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered", 10))
         self.assertIn("manual retry", [p.get("retry") for p in self.payloads(r, "auth")])
 
-    def test_a_changed_auth_json_retries_within_a_second_whatever_the_backoff(self):
+    def test_a_changed_auth_json_retries_on_the_trigger_not_the_backoff(self):
         home = self.home(model="openai/gpt-x")
         account = self.account(endpoint=None, endpoint_model=None, providers=("openai",))
         auth_json = Path(account.data_dir).joinpath(*accounts.AUTH_JSON)

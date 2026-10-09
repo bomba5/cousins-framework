@@ -3,6 +3,24 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.50.0 - 2026-10-09
+
+### Changed
+
+- **Law 1.4: rule 9 records reasoning with the memory tool's `decide`.**
+  A reasoning capsule held a conclusion, its evidence, the rejected
+  alternatives and a confidence: what a decision holds too (its
+  reasoning, `derived_from`). The fleet had four capsules, the newest
+  weeks old. The shipped law changes; an install's own `config/law.md` is
+  the operator's to update (#300, meeting 11 F).
+
+### Deprecated
+
+- **Reasoning capsules.** `cousin-reason capsule` still writes one and
+  warns on stderr, naming `decide`; `cousin-reason list`, the console's
+  capsule view and its route still read them. The boot packet no longer
+  reads capsules. All of it is removed in 4.0.0.
+
 ## 3.49.0 - 2026-10-09
 
 ### Changed

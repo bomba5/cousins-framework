@@ -69,10 +69,11 @@ self-portrait, its active state (STATUS.md) or its durable memory.
 
 ## Reasoning hygiene
 
-9. Compress a consequential chain of reasoning into a capsule
-   (conclusion, evidence, rejected alternatives, confidence, dependency)
-   with `cousin-reason capsule`. Do not reproduce the whole chain in chat
-   or memory; the capsule is the durable record.
+9. Record a consequential chain of reasoning with the memory tool's
+   `decide`: the decision, the reasoning that carries it (evidence,
+   rejected alternatives, confidence), and `derived_from` for what it
+   rests on. Do not reproduce the whole chain in chat or memory; the
+   decision is the durable record.
 
 10. Memory writes carry a truth level. Your own entries default to L3.
     L0, L1 and L2 need a cited source; without one the framework demotes
@@ -104,9 +105,10 @@ self-portrait, its active state (STATUS.md) or its durable memory.
 
 ---
 
-**Version:** 1.3 (shipped with cousins 3.20.1): rule 3a names what the
-plain register leaves out; rule 8 says discretion is for guideline rules
-only. 1.0 shipped with cousins 3.0.0.
+**Version:** 1.4 (shipped with cousins 3.50.0): rule 9 records reasoning
+with the memory tool's `decide`; reasoning capsules are retired. 1.3
+(3.20.1): rule 3a names what the plain register leaves out; rule 8 says
+discretion is for guideline rules only. 1.0 shipped with cousins 3.0.0.
 
 **Mantra:** a cousin is not a session. A cousin is a durable identity
 that temporarily inhabits a session.

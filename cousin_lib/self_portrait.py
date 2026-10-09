@@ -56,16 +56,35 @@ def md_section(text, *keys):
     return ""
 
 
+# where each section's draft comes from in CLAUDE.md, the cousin's own
+# part (below the template's append marker) read before the template's
+_CLAUDE_KEYS = {"Temperament": ("temperament", "principles", "who i am"),
+                "Working Style": ("working style", "how you work", "how i work",
+                                  "working method"),
+                "Voice": ("voice",)}
+_CAPS = {"Temperament": 800, "Working Style": 800, "Voice": 500}
+
+
 def _gather_evidence(home, slug):
-    """Per-section draft from the cousin's real sources. Empty body
-    means no source; the candidate marks it as a review TODO."""
+    """Per-section draft from the cousin's real sources: the committed
+    portrait's own section first (it was reviewed; the trim keeps it
+    whole), then the cousin's part of CLAUDE.md, then the template's
+    part. The template's Identity is the last resort for Temperament, its
+    role paragraph only: the rest is the framework's boilerplate. Empty
+    body means no source; the candidate marks it as a review TODO."""
+    from cousin_lib.template_sync import MARKER
+    committed = _read(committed_path(home))
     claude = _read(Path(home) / "CLAUDE.md")
-    evidence = {s: "" for s in SECTIONS}
-    evidence["Temperament"] = _cap(
-        md_section(claude, "principles", "Identity"), 800)
-    evidence["Working Style"] = _cap(md_section(
-        claude, "working style", "how you work", "Working method"), 800)
-    evidence["Voice"] = _cap(md_section(claude, "Voice"), 500)
+    own = claude.split(MARKER, 1)[1] if MARKER in claude else ""
+    evidence = {}
+    for section in SECTIONS:
+        keys = _CLAUDE_KEYS[section]
+        evidence[section] = (md_section(committed, section)
+                             or _cap(md_section(own, *keys), _CAPS[section])
+                             or _cap(md_section(claude, *keys), _CAPS[section]))
+    if not evidence["Temperament"]:
+        role = md_section(claude, "Identity").split("\n\n", 1)[0]
+        evidence["Temperament"] = _cap(role, _CAPS["Temperament"])
     return evidence
 
 

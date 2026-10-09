@@ -750,7 +750,12 @@ The state digest, the session's first message, has a ceiling of about
 8. Tool trace summary.
 9. Retrieved memories: the other five distilled files, the newest
    capsule conclusions, recent raw entries (up to the last 60 lines
-   from the newest 14 raw files) and the head of `MEMORY.md`.
+   from the newest 14 raw files, without the framework's own log:
+   `episode:`, `job:` and `framework:` topics) and the head of
+   `MEMORY.md`. Each distilled file's lines come in the order the budget
+   should spare them: a line whose topic an open loop in `STATUS.md`
+   names, then operator, framework and tool lines (L0-L2), then the rest
+   newest first. Nothing is dropped; the cut falls on old conclusions.
 10. Shared reference: a one-line index of the rest of the shared tier.
 
 When the digest is too big, the memories are cut first. A

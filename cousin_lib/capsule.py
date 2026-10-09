@@ -16,7 +16,8 @@ operator said it).
 Two stores, one write:
 
 - <home>/memory/capsules.jsonl is the record: one object per line,
-  append-only, what list_capsules and the boot packet read.
+  append-only, what list_capsules reads (the boot packet no longer does,
+  since 3.50.0).
 - <home>/memory/distilled/reasoning-capsules.md is the readable
   mirror, one markdown block per capsule separated by `---`, so the
   memory search indexes capsules like any other memory file.

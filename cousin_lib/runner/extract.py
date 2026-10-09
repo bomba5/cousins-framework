@@ -166,10 +166,40 @@ _FIND_WRITES = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fp
                 "-fprintf", "-fls"}
 # a command run inside the line: $(...), `...`, <(...), >(...)
 _SUBSTITUTION = re.compile(r"\$\(|`|[<>]\(")
+# a sed script that writes (the w command, the s///w flag) or runs (e)
+_SED_WRITES = re.compile(r"(?:^|[;{}\s'\"])[we]\s|/[gpIiMm0-9]*[we]\b")
+# words that make an otherwise reading command write or run something
+_WRITE_WORDS = {"sort": ("-o", "--output"), "git": ("--output",), "rg": ("--pre",),
+                "awk": ("-i",)}
 _READ_COUSIN = re.compile(r"^cousin-[\w-]+$")
-_SHELL_SPLIT = re.compile(r"\|\|?|&&|;|\n")
+# a lone & runs what follows too; &&, >&, &> and 2>&1 are not one
+_SHELL_SPLIT = re.compile(r"\|\|?|&&|;|\n|(?<![<>&])&(?![>&])")
 # a redirect into a file; into /dev/null, or fd to fd (2>&1), writes nothing
-_WRITE_REDIRECT = re.compile(r"(?<![<>&])>>?(?![>&])(?!\s*/dev/null)")
+# (&> and &>> write too; >&2 and 2>&1 are fd to fd)
+_WRITE_REDIRECT = re.compile(r"(?<![<>])>>?(?![>&])(?!\s*/dev/null)")
+
+
+def _writes(head, words, segment):
+    """True when an otherwise reading command writes or runs something
+    through its arguments: sed in place or with a w/e script, find's
+    writing actions, awk's system(), an output flag, uniq IN OUT."""
+    args = words[1:]
+    if head == "sed" and (any(w == "--in-place" or w.startswith("--in-place=")
+                              or (w.startswith("-") and not w.startswith("--") and "i" in w)
+                              for w in args)
+                          or _SED_WRITES.search(segment.split("sed", 1)[1])):
+        return True
+    if head == "find" and _FIND_WRITES & set(args):
+        return True
+    if head == "awk" and re.search(r"system\s*\(", segment):
+        return True
+    if head == "uniq" and len([w for w in args if not w.startswith("-")]) > 1:
+        return True                         # uniq IN OUT writes OUT
+    for flag in _WRITE_WORDS.get(head, ()):
+        if any(w == flag or w.startswith(flag + "=")
+               or (len(flag) == 2 and w.startswith(flag)) for w in args):
+            return True
+    return False
 
 
 def _read_only_shell(command):
@@ -187,22 +217,16 @@ def _read_only_shell(command):
         if not words:
             continue
         head = words[0].rsplit("/", 1)[-1]
+        if _writes(head, words, segment):
+            return False
         if head in ("cd", "systemctl") and (head == "cd" or "status" in words[1:2]
                                              or "is-active" in words[1:2]):
             continue
         if head == "git" and len(words) > 1 and (
                 words[1] in _READ_GIT
-                or set(words[2:]) <= _READ_GIT_LISTS.get(words[1], set()) | {""}
-                and words[1] in _READ_GIT_LISTS):
+                or words[1] in _READ_GIT_LISTS
+                and set(words[2:]) <= _READ_GIT_LISTS[words[1]]):
             continue
-        if head == "sed" and any(w == "--in-place" or w.startswith("--in-place=")
-                                 or (w.startswith("-") and not w.startswith("--") and "i" in w)
-                                 for w in words[1:]):
-            return False
-        if head == "find" and _FIND_WRITES & set(words):
-            return False
-        if head == "awk" and "system(" in segment:
-            return False
         if head in _READ_SHELL:
             continue
         if _READ_COUSIN.match(head) and len(words) > 1 and words[1] in ("list", "show", "status"):

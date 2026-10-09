@@ -49,8 +49,7 @@ DEFAULT_LEVEL = memory.DEFAULT_TRUTH_LEVEL
 _ALIASES = memory.LEVEL_ALIASES
 _KNOWN_FIELDS = {"topic", "content", "truth_level", "source", "timestamp",
                  "created_at", "id", "entries", "first_at", "last_at", "cite"}
-ACTIVE_FILES = ("STATUS.md", "data/active-threads.md", "data/handoff.md",
-                "data/handoff-manual.md", "data/session-checkpoint.md",
+ACTIVE_FILES = ("STATUS.md", "data/handoff.md", "data/handoff-manual.md",
                 "data/pre-compact-checkpoint.md")
 INDEX_FILES = ("MEMORY.md",)
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl$")

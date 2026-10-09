@@ -136,14 +136,15 @@ class TestFiles(HermeticCase):
         self.assertIn("DEGRADED", text)
         self.assertIn("UnicodeDecodeError", text)
 
-    def test_archive_copies_the_three_files(self):
+    def test_archive_copies_status_and_the_handoff(self):
+        # a stray active-threads.md (an older framework wrote it) is not
+        # archived: STATUS.md is the one list (meeting 11 A)
         home = temp_home(self)
         (home / "STATUS.md").write_text("s"); (home / "data" / "handoff.md").write_text("h")
         (home / "data" / "active-threads.md").write_text("t")
         arch = rollover.archive_generation(home, 7)
         self.assertEqual(arch, home / "data" / "generations" / "gen-0007")
-        self.assertEqual(sorted(p.name for p in arch.iterdir()),
-                         ["STATUS.md", "active-threads.md", "handoff.md"])
+        self.assertEqual(sorted(p.name for p in arch.iterdir()), ["STATUS.md", "handoff.md"])
 
 
 class TestRequest(HermeticCase):

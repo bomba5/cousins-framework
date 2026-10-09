@@ -89,18 +89,16 @@ characters kept for its header (`DIGEST_MAX_CHARS` in
 |---|---|---|
 | operator calibration | 3,200 | 8,000 |
 | active state (STATUS.md open loops, the handoff) | 2,000 | 6,000 |
-| task packet (active threads, reasoning capsules) | 2,000 | 8,000 |
 | tool trace summary (last 24 hours) | 2,000 | 6,000 |
 | memories | 4,000 | 16,000 |
 | shared reference | 1,600 | 6,000 |
 
 Over the total, layers are cut to their floor in this order until it fits:
-memories, trace summary, calibration, task packet, active state, shared
-reference. [lifecycle](reference/lifecycle.md#the-boot-packet) describes
+memories, trace summary, calibration, active state, shared reference. [lifecycle](reference/lifecycle.md#the-boot-packet) describes
 each layer.
 
 **Without it.** A new session starts knowing nothing of the last one: no open
-loops, no `active-threads.md`, no memories. A digest that cannot be built is replaced by
+loops, no memories. A digest that cannot be built is replaced by
 the last handoff, marked degraded.
 
 **Knob.** None on its size. How often it is paid is how often a session
@@ -163,8 +161,8 @@ pressure rollover has no off switch.
 ## The handoff
 
 **Costs.** Part of the rollover's first turn: one `handoff` tool call that
-writes STATUS.md's open loops, `data/active-threads.md`, what the session
-learned (as memories) and, last, `data/handoff.md`. With the rest of the
+writes STATUS.md's open loops (the one list of what is in flight), what
+the session learned (as memories) and, last, `data/handoff.md`. With the rest of the
 rollover it also archives those files under `data/generations/gen-NNNN/`.
 
 **Without it.** The next session starts from whatever the last one left on

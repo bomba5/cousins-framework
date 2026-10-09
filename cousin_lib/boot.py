@@ -52,7 +52,6 @@ LAYER_BUDGETS = {
     # floor is the old ceiling, so an overflow pass keeps what it used to.
     "calibration": (800 * CHARS_PER_TOKEN, 2000 * CHARS_PER_TOKEN),
     "active_state": (500 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
-    "task_packet": (500 * CHARS_PER_TOKEN, 2000 * CHARS_PER_TOKEN),
     "trace_summary": (500 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
     "memories": (1000 * CHARS_PER_TOKEN, 4000 * CHARS_PER_TOKEN),
 }
@@ -65,7 +64,7 @@ HARD_LAYERS = ("law",)
 # Overflow victims first to last; law is never truncated.
 TRUNCATE_ORDER = [
     "memories", "trace_summary", "calibration",
-    "task_packet", "active_state", "shared", "self_portrait",
+    "active_state", "shared", "self_portrait",
 ]
 
 
@@ -308,20 +307,6 @@ def _active_state(home, *, open_loops=_open_loops_section):
     return "\n\n".join(parts) if parts else "(no active state - degraded boot)"
 
 
-def _task_packet(home):
-    parts = []
-    threads = _read(Path(home) / "data" / "active-threads.md")
-    if threads:
-        parts.append("### active-threads.md")
-        parts.append(threads[:1500])
-    chunks = capsule.recent_blocks(home, n=3)
-    if chunks:
-        parts.append("### last reasoning capsules")
-        parts.append("\n---\n".join(chunks))
-    return "\n\n".join(parts) if parts \
-        else "(no in-flight tasks - check STATUS.md)"
-
-
 def _distilled_body(path):
     """A distilled file as the packet should quote it: the auto marker
     and generated header stripped; the stub reads as empty."""
@@ -473,12 +458,4 @@ def _is_degraded(name, content, sections):
     if name == "active_state":
         return not content or content.startswith(
             "(no active state - degraded boot)")
-    if name == "task_packet":
-        if not content:
-            return True
-        if content.startswith("(no in-flight tasks"):
-            active = sections.get("active_state", "")
-            return not active or active.startswith(
-                "(no active state - degraded boot)")
-        return False
     return not content

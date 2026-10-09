@@ -310,7 +310,7 @@ COMMANDS = {
     "cousin-callback": (["list"], _HOME),
     "cousin-reason": (["list"], _HOME),
     "cousin-backup": (["--dest", "{tmp}/backups"], _HOME),
-    "cousin-sync-state": ([], _HOME),
+    "cousin-sync-state": ([], None),               # a deprecated no-op (3.47.0)
     "cousin-console": (["adduser"], SHARED_MESSAGE),
     "cousin-image": (["gen", "a cat"], SHARED_MESSAGE),
     "cousin-voice": (["gen", "hello"], SHARED_MESSAGE),

@@ -166,7 +166,6 @@ show.
 | `cousin-callback` | moments worth calling back to, kept under `memory/` | `cousin-callback tag "<moment>" --category <name>` · `cousin-callback search "<query>"` |
 | `cousin-reason` | reasoning capsules: a conclusion with its evidence and rejected alternatives, kept under `memory/` | `cousin-reason capsule --conclusion "<text>" --evidence "<bullet>" [--rejected "<alt>"] [--confidence low\|medium\|high] [--topic <t>]` · `cousin-reason list --n 5` |
 | `cousin-backup` | snapshot your databases and memory into a directory | `cousin-backup --dest <dir>` (operator-run; the destination is always explicit) |
-| `cousin-sync-state` | render your STATUS.md into `data/state.json` | `cousin-sync-state` after reconciling STATUS; the boot packet reads the JSON |
 | `cousin-image` / `cousin-voice` / `cousin-video` | media generation, if a provider is configured | `cousin-image chat "<prompt>" --user <name>`; off until config/media.toml declares a provider |
 | `cousin-telegram` | bridge your chat to Telegram, if configured | per-cousin `[telegram]` in cousin.toml; off until a token and operator are set |
 | `cousin-hive` | cross-machine cousins, if a queen is configured | `cousin-hive recall "<query>"`; off until a queen and token are set |

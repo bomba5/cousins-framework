@@ -44,9 +44,10 @@ class TestInheritedFromBoot(DigestCase):
         self.healthy()
         d = self.digest()
         self.assertEqual(d["degraded_sections"], [])
-        for title in ("Operator Calibration", "Active State", "Task Packet",
+        for title in ("Operator Calibration", "Active State",
                       "Recent Tool Trace", "Retrieved Memories"):
             self.assertIn(title, d["text"])
+        self.assertNotIn("Task Packet", d["text"])      # retired: meeting 11 A
         self.assertIn("Generation: 3", d["text"])
 
     def test_fresh_home_names_its_real_gaps_and_only_those(self):
@@ -85,7 +86,7 @@ class TestInheritedFromBoot(DigestCase):
 class TestDigestOwnRules(DigestCase):
     def test_order_is_boots_order_filtered(self):
         self.assertEqual(prompt.DIGEST_ORDER, ["memories", "trace_summary", "calibration",
-                                               "task_packet", "active_state", "shared_index"])
+                                               "active_state", "shared_index"])
 
     def test_no_distilled_calibration_means_no_section_and_no_fallback(self):
         self.healthy()

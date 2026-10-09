@@ -499,8 +499,6 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
                                        "additionalContext": text}}
 
     async def on_stop(payload):
-        path = await asyncio.to_thread(cp.write_session_checkpoint, home, slug=slug)
-        stream.append("checkpoint", {"kind": "session", "path": str(path)})
         missing = [] if payload.get("stop_hook_active") else unanswered()
         if missing:
             for event in gate_events(missing):

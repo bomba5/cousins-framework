@@ -88,11 +88,6 @@ class TestHomeArgument(HookCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertTrue(
             (self.home / "data" / "pre-compact-checkpoint.md").is_file())
-        proc = self._run("session_checkpoint.sh", clear_home=True,
-                         args=[str(self.home)])
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertTrue(
-            (self.home / "data" / "session-checkpoint.md").is_file())
         proc = self._run("session_init.sh", clear_home=True,
                          args=[str(self.home)])
         self.assertIn(str(self.home), proc.stdout)
@@ -134,30 +129,16 @@ class TestPreCompact(HookCase):
         self.assertIn("other", text.splitlines()[0])
 
 
-class TestSessionCheckpoint(HookCase):
-    def test_writes_open_work_activity_and_decisions(self):
+class TestRetiredSessionCheckpoint(HookCase):
+    """3.47.0 retired the per-turn Stop checkpoint (meeting 11 A): the
+    script stays one release as a no-op, so a home whose settings still
+    name it is not broken."""
+
+    def test_it_exits_0_and_writes_nothing(self):
+        before = _tree(self.home)
         proc = self._run("session_checkpoint.sh")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        text = (self.home / "data" / "session-checkpoint.md").read_text()
-        self.assertIn("descale the machine", text)
-        self.assertIn("port the docs", text)
-        self.assertNotIn("- [x] old", text)
-        self.assertIn("porting the hooks", text)
-        self.assertIn("retention window", text)
-
-    def test_stdout_is_a_system_message_naming_the_checkpoint(self):
-        proc = self._run("session_checkpoint.sh")
-        msg = json.loads(proc.stdout)["systemMessage"]
-        self.assertIn("session-checkpoint.md", msg)
-
-    def test_absent_inputs_still_produce_a_checkpoint(self):
-        (self.home / "STATUS.md").unlink()
-        (self.home / "data" / "last-activity.txt").unlink()
-        (self.home / "data" / "decisions.jsonl").unlink()
-        proc = self._run("session_checkpoint.sh")
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertTrue(
-            (self.home / "data" / "session-checkpoint.md").is_file())
+        self.assertEqual(_tree(self.home), before)
 
 
 class TestSessionInit(HookCase):
@@ -171,9 +152,9 @@ class TestSessionInit(HookCase):
         self.assertNotIn("MEMORY.md", proc.stdout)  # not on this disk
 
     def test_banner_points_at_the_last_checkpoint_when_one_exists(self):
-        (self.home / "data" / "session-checkpoint.md").write_text("# x\n")
+        (self.home / "data" / "pre-compact-checkpoint.md").write_text("# x\n")
         proc = self._run("session_init.sh")
-        self.assertIn("session-checkpoint.md", proc.stdout)
+        self.assertIn("pre-compact-checkpoint.md", proc.stdout)
 
     def test_banner_writes_nothing(self):
         before = _tree(self.home)

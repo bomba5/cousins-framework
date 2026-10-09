@@ -3,6 +3,34 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.47.0 - 2026-10-09
+
+### Changed
+
+- **STATUS.md is the one copy of the open loops.** A cousin carried the
+  same list three or four times: STATUS.md, `data/active-threads.md`,
+  `data/state.json` and the per-turn `data/session-checkpoint.md`, all
+  rewritten every rollover, and one reader preferred the stale copy
+  (#295, meeting 11 A).
+  - The handoff tool no longer writes `data/active-threads.md`, and the
+    rollover no longer archives it. `active_threads` is still accepted
+    for one release; it writes nothing and the result says so.
+  - The digest's "Current Task Packet" layer is gone. It held the
+    threads, which are gone, and the newest capsules, which the
+    memories layer already carries.
+  - The per-turn Stop checkpoint is gone on every lane. The
+    pre-compaction checkpoint stays.
+  - `data/state.json` is no longer written, and the checkpoint reads
+    STATUS.md only.
+
+### Deprecated
+
+- `cousin-sync-state` does nothing but say so; it goes in the next major
+  release.
+- `hooks/session_checkpoint.sh` is a no-op for one release. A settings
+  apply still recognises it as the framework's own, so it removes it
+  from a home's `.claude/settings.json`.
+
 ## 3.46.0 - 2026-10-09
 
 ### Changed

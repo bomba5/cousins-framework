@@ -79,7 +79,7 @@ Each command has one class, so you know which ones to learn first:
 | `cousin-runner` | internal | drives one cousin; the supervisor starts one per cousin |
 | `cousin-session` | internal | a cousin's session start and end hooks |
 | `cousin-sweep` | internal | the weekly memory compaction, from its timer |
-| `cousin-sync-state` | internal | renders STATUS.md's open loops into `data/state.json` |
+| `cousin-sync-state` | internal | deprecated since 3.47.0: does nothing (STATUS.md is the one copy of the open loops); removed in the next major release |
 | `cousin-gate` | developer | scan a tree for private data before you publish it |
 
 ## Running cousins
@@ -244,7 +244,7 @@ cousin-self-portrait synthesize && cousin-self-portrait diff
 out.
 
 ```
-cousin-session end --skip sync-state
+cousin-session end --skip step-2
 ```
 
 `cousin-cycle` keeps per-cousin session counters and breadcrumbs the boot
@@ -533,13 +533,9 @@ cousin-reason capsule --conclusion "keep backups for 30 days" \
     --evidence "audits need a month" --rejected "7 days" --confidence high
 ```
 
-`cousin-sync-state` renders the live `## Open loops` section of STATUS.md
-into `data/state.json`: the bare heading the handoff writes; a suffixed
-`## Open loops (...)` heading is history and is not read.
-
-```
-cousin-sync-state --home cousins/wren
-```
+`cousin-sync-state` is deprecated (3.47.0) and does nothing but say so: it
+rendered STATUS.md's open loops into `data/state.json`, a second copy that
+nothing reads any more. It goes in the next major release.
 
 ## Chat
 

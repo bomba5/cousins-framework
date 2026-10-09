@@ -761,7 +761,8 @@ HANDOFF_SCHEMA = {
                                   " framework writes the heading, so no '#' or '##'"
                                   " headings inside. The rest of the file is kept."},
         "active_threads": {"type": "array", "items": {"type": "string"},
-                           "description": "One line per in-flight thread."},
+                           "description": "Deprecated and ignored: STATUS.md's open loops"
+                                          " (status) are the one list of what is in flight."},
         "learned": {"type": "array", "description": "What this generation learned that is"
                     " not in memory yet; each becomes a remembered fact.",
                     "items": {"type": "object", "properties": {
@@ -819,8 +820,10 @@ def _with_open_loops(text, name, status):
 
 def handoff(ctx, args):
     """The generation's handoff, in the ritual's order: STATUS.md's open
-    loops, the thread list, the memories, and data/handoff.md LAST."""
-    from cousin_lib import memory, sync_state
+    loops, the memories, and data/handoff.md LAST. STATUS.md is the one
+    copy of the open loops: `active_threads` is accepted and ignored until
+    it is removed (meeting 11 A)."""
+    from cousin_lib import memory
     if getattr(ctx, "session", "primary") != "primary":
         # the same tool list in every session keeps the cached prefix shared;
         # a side session is refused here instead
@@ -853,15 +856,6 @@ def handoff(ctx, args):
     atomic.write_text(status_path, _with_open_loops(old, ctx.name, str(args["status"])),
                       newline="")
     written.append("STATUS.md (open loops)")
-    try:
-        sync_state.write_state(home)
-    except Exception as err:  # noqa: BLE001 - state.json is a view; STATUS is written
-        errors.append("state.json: %s" % err)
-    if threads:
-        atomic.write_text(home / "data" / "active-threads.md",
-                          "# Active threads - %s\n\n%s\n" % (ctx.name, "\n".join(
-                              "- %s" % t.strip() for t in threads)))
-        written.append("data/active-threads.md")
     for item in items or []:
         try:
             line = memory.remember(home, item.get("topic"), item.get("fact"),
@@ -872,6 +866,9 @@ def handoff(ctx, args):
                       for n in str(line or "").splitlines()[1:] if n.startswith("demoted:")]
         except (ValueError, AttributeError) as err:
             errors.append("memory %r: %s" % ((item or {}).get("topic"), err))
+    if threads:
+        notes.append("active_threads is no longer written: STATUS.md's open loops are the one"
+                     " list; put a thread there")
     atomic.write_text(
         home / "data" / "handoff.md",
         "# Handoff - %s, written %s\n\ndegraded_state: false\n\n## Position\n\n%s\n\n"

@@ -22,7 +22,9 @@ class TestHandoff(HermeticCase):
         self.assertFalse(err, text)
         home = ctx.home
         self.assertIn("March open", (home / "STATUS.md").read_text())
-        self.assertIn("- ledger audit - March", (home / "data" / "active-threads.md").read_text())
+        # meeting 11 A: STATUS.md is the one list; the threads are not written
+        self.assertFalse((home / "data" / "active-threads.md").exists())
+        self.assertIn("active_threads is no longer written", text)
         handoff = (home / "data" / "handoff.md").read_text()
         self.assertIn("Halfway through the ledger audit.", handoff)
         self.assertIn("Reconcile March", handoff)
@@ -62,7 +64,8 @@ class TestHandoff(HermeticCase):
                 mock.patch.object(atomic, "write_text", atomic_spy):
             tools.call(ctx, "handoff", dict(ARGS))
         self.assertEqual(order[-1], "handoff.md")
-        self.assertLess(order.index("STATUS.md"), order.index("active-threads.md"))
+        self.assertLess(order.index("STATUS.md"), order.index("handoff.md"))
+        self.assertNotIn("active-threads.md", order)
 
     def test_only_the_open_loops_section_of_status_is_replaced(self):
         ctx = _ctx(self)
@@ -149,7 +152,6 @@ class TestHandoff(HermeticCase):
         with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": "/nonexistent/framework-root"}):
             text = prompt.state_digest(ctx.home, root=ctx.root, slug="wren")["text"]   # the passed root, never the env's
         self.assertIn("March open", text)
-        self.assertIn("ledger audit - March", text)
 
     def test_missing_required_fields_are_a_tool_error(self):
         ctx = _ctx(self)

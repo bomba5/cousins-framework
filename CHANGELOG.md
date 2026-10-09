@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.42.5 - 2026-10-09
+
+### Fixed
+
+- **A hidden cousin's jobs and artifacts follow the show-hidden
+  toggle.** The Jobs view listed them, and the artifacts tab counted
+  them, while the same cousin's sidebar row and loops were hidden. They
+  now show only with the toggle on; each list says how many it leaves
+  out.
+
 ## 3.42.4 - 2026-10-08
 
 ### Fixed

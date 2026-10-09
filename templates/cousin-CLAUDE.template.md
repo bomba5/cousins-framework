@@ -62,7 +62,7 @@ fallback when a tool is missing.
 | `cousin-cycle` | your session-cadence counters and breadcrumbs | `cousin-cycle inc --action "shipped X"` · `cousin-cycle state` |
 | `cousin-session` | your bookend hooks from cousin.toml `[session]`, run at session start and end | `cousin-session start` · `cousin-session end` · `cousin-session status` |
 | `cousin-callback` | moments worth calling back to, kept under `memory/` | `cousin-callback tag "<moment>" --category <name>` · `cousin-callback search "<query>"` |
-| `cousin-reason` | reasoning capsules: a conclusion with its evidence and rejected alternatives, kept under `memory/` | `cousin-reason capsule --conclusion "<text>" --evidence "<bullet>" [--rejected "<alt>"] [--confidence low\|medium\|high] [--topic <t>]` · `cousin-reason list --n 5` |
+| `cousin-reason` | retired: reasoning capsules (`list` still reads the old ones); record reasoning with the `memory` tool's decide | `cousin-reason list --n 5` |
 | `cousin-backup` | snapshot your databases and memory into a directory | `cousin-backup --dest <dir>` (operator-run; the destination is always explicit) |
 | `cousin-sync-state` | deprecated: does nothing; STATUS.md is the one copy of the open loops | none |
 | `cousin-image` / `cousin-voice` / `cousin-video` | media generation, if a provider is configured | `cousin-image chat "<prompt>" --user <name>`; off until config/media.toml declares a provider |

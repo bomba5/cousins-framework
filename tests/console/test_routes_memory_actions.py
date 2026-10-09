@@ -496,8 +496,12 @@ class Moments(ActionsCase):
     def test_callbacks_and_capsules_read_only(self):
         from cousin_lib import callback, capsule
         callback.tag(self.home, "the roof leak joke", category="house")
-        capsule.write_capsule(self.home, conclusion="fix in spring",
-                              evidence=["frost"], rejected=["now"])
+        # an old capsule (none are written since 3.50.0): still listed read-only
+        import json
+        capsule.capsules_path(self.home).parent.mkdir(parents=True, exist_ok=True)
+        capsule.capsules_path(self.home).write_text(json.dumps(
+            {"id": "c1", "conclusion": "fix in spring", "evidence": ["frost"],
+             "rejected": ["now"], "confidence": "medium"}) + "\n")
         self.serve()
         _, body = self.get("/api/memory/wren/callbacks")
         self.assertEqual(body["callbacks"][0]["moment"], "the roof leak joke")

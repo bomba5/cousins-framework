@@ -70,7 +70,7 @@ Each command has one class, so you know which ones to learn first:
 | `cousin-chat` | cousin | message another cousin, list who can be reached |
 | `cousin-job` | cousin | register and track background jobs; the console's Jobs page shows them |
 | `cousin-artifact` | cousin | record build outputs as rows (path, checksum, job, commit) and check them later |
-| `cousin-reason` | cousin | write and list reasoning capsules |
+| `cousin-reason` | cousin | retired: lists the old reasoning capsules; record reasoning with `decide` |
 | `cousin-reply` | cousin | a cousin's answer to a person, in its chat history |
 | `cousin-schedule` | cousin | a one-shot prompt at a future time |
 | `cousin-self-portrait` | cousin | draft the cousin's self-portrait; a person commits it |
@@ -522,16 +522,10 @@ Subcommands: `tag`, `list`, `search`.
 cousin-callback tag "ana named the espresso machine Gustav" --category banter
 ```
 
-`cousin-reason` writes and lists reasoning capsules: a conclusion with its
-evidence and the alternatives you rejected. Subcommands: `capsule`, `list`.
-
-`capsule` also takes `--truth-level` (default `conclusion`, the same levels
-as `cousin-memory`'s `--level`) and `--topic`.
-
-```
-cousin-reason capsule --conclusion "keep backups for 30 days" \
-    --evidence "audits need a month" --rejected "7 days" --confidence high
-```
+`cousin-reason` is retired (3.50.0): `list` still shows the old reasoning
+capsules, and `capsule` refuses, naming the memory tool's `decide`, which
+records the same (the decision, its reasoning, `derived_from`). It goes in
+the next major release.
 
 `cousin-sync-state` is deprecated (3.47.0) and does nothing but say so: it
 rendered STATUS.md's open loops into `data/state.json`, a second copy that

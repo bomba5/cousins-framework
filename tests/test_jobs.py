@@ -22,11 +22,38 @@ from cousin_lib.jobs import (
 )
 
 
+def _wait_children_gone(root, timeout=15.0):
+    """Wait until no process launched under this test's FRAMEWORK_ROOT is
+    alive. A job's detached runner commits the row's status first, then
+    writes the owner's raw memory and close notice into the home: a test
+    that returns at "done" can have its temp root removed under those
+    writes ("Directory not empty")."""
+    mark = ("FRAMEWORK_ROOT=%s" % root).encode()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        alive = False
+        for proc in pathlib.Path("/proc").iterdir():
+            if not proc.name.isdigit() or int(proc.name) == os.getpid():
+                continue
+            try:
+                env = (proc / "environ").read_bytes().split(b"\0")
+            except OSError:
+                continue
+            if mark in env:
+                alive = True
+                break
+        if not alive:
+            return
+        time.sleep(0.05)
+
+
 class JobsCase(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = pathlib.Path(tmp.name)
+        # cleanups run last-in first-out: the children finish, then the root goes
+        self.addCleanup(_wait_children_gone, self.root)
         home = self.root / "cousins" / "wren"
         home.mkdir(parents=True)
         (home / "cousin.toml").write_text(

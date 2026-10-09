@@ -459,3 +459,30 @@ class TestWholeFileCrashes(ProducerCrashCase):
         from cousin_lib import memory_trash
         memory_trash.restore(self.home, batch["id"])
         self.assertEqual(path.read_text(), '{"n": 1}\n{"n": 2}\n{"n": 3}\n')
+
+
+class TestChatRedeliveryHealth(ProducerCrashCase):
+    def test_a_row_the_inbox_will_not_take_stays_pending_and_fails_the_health_line(self):
+        from unittest import mock
+        from cousin_lib import delivery, loops
+        from cousin_lib.server.storage import ChatStore
+        store = ChatStore(self.home / "data" / "chat.db")
+        try:
+            row = store.add_message(chat_user="priya", user="Priya", message="stuck",
+                                    msg_type="user", pending=True)
+        finally:
+            store.close()
+        conn = sqlite3.connect(self.home / "data" / "chat.db")
+        conn.execute("UPDATE messages SET timestamp='2026-01-01T00:00:00+00:00'")
+        conn.commit(); conn.close()
+        report = {"errors": []}
+        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(self.root)}), \
+                mock.patch.object(delivery.InboxBackend, "send", return_value=delivery.FAILED):
+            self.assertEqual(loops._redeliver_chat(report), [])
+        self.assertEqual(len(report["errors"]), 1, report)
+        self.assertIn("chat rows [%d] still pending" % row["id"], report["errors"][0])
+        conn = sqlite3.connect(self.home / "data" / "chat.db")
+        try:
+            self.assertEqual(conn.execute("SELECT delivery FROM messages").fetchone()[0], "pending")
+        finally:
+            conn.close()

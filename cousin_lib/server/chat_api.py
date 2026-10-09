@@ -157,13 +157,15 @@ def deliver_stored(config, row_id, deliver, *, user, message, attachments=(), ke
     return outcome
 
 
-def redeliver_pending(config, *, older_than_s=30.0, now=None):
+def redeliver_pending(config, *, older_than_s=30.0, now=None, failed=None):
     """Put again every inbound row of this home still `pending` after
     `older_than_s`: the process that stored it died before its put
     returned (deliver_stored). Under the row's own key, so a put that did
     land is the same inbox row. The message reaches the cousin; the chat
     hooks and the correction capture that run after a delivery are not
-    run for it. Returns the ids put."""
+    run for it. Returns the ids put; a row the inbox did not take stays
+    pending, tried again next time, and its id goes into `failed` (a
+    list, when given): never dropped, never quiet."""
     from datetime import datetime, timedelta, timezone
     if not db_path(config.home).exists():
         return []
@@ -181,6 +183,8 @@ def redeliver_pending(config, *, older_than_s=30.0, now=None):
                                  key=row.get("delivery_key"))
         if outcome != delivery.FAILED:
             done.append(row["id"])
+        elif failed is not None:
+            failed.append(row["id"])
     return done
 
 

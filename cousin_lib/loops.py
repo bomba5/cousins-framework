@@ -1297,17 +1297,23 @@ def _redeliver_chat(report):
     """Every runner cousin's inbound chat rows still waiting for their
     inbox put (chat_api.redeliver_pending): the console or a bridge died
     between storing a message and handing it over. [(slug, [ids])] of the
-    rows put; one cousin's broken store is an error, never the walk's end."""
+    rows put; one cousin's broken store is an error, never the walk's end,
+    and so is a row its inbox did not take (it stays pending, tried again
+    every tick, and `chat-redelivery` fails until it lands)."""
     from cousin_lib.server import chat_api
     out = []
     for config in FrameworkConfig.from_env().list_cousins():
         if config.type == "worker":
             continue
+        failed = []
         try:
-            ids = chat_api.redeliver_pending(config)
+            ids = chat_api.redeliver_pending(config, failed=failed)
         except Exception as err:  # noqa: BLE001 - per-cousin isolation
             report["errors"].append("chat redelivery: %s: %s" % (config.slug, err))
             continue
+        if failed:
+            report["errors"].append("chat redelivery: %s: chat rows %s still pending: the"
+                                    " inbox did not take them" % (config.slug, failed))
         if ids:
             out.append((config.slug, ids))
     return out

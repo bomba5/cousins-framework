@@ -918,9 +918,9 @@ class TestTurns(OpencodeCase):
         self.assertTrue(_wait(lambda: r.login_required()))
         time.sleep(0.3)
         (home / "data" / "login-required.json").unlink()   # the manual retry, or login --via
-        t = time.monotonic()
-        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered", 5))
-        self.assertLess(time.monotonic() - t, 2.5)
+        # far inside the 300 s backoff; a wall-clock bound tighter than the
+        # wait flaked on a loaded CI runner (3.06 s against 2.5)
+        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered", 10))
         self.assertIn("manual retry", [p.get("retry") for p in self.payloads(r, "auth")])
 
     def test_a_changed_auth_json_retries_within_a_second_whatever_the_backoff(self):
@@ -937,9 +937,9 @@ class TestTurns(OpencodeCase):
         self.assertTrue(_wait(lambda: r.login_required()))
         time.sleep(0.3)
         auth_json.write_text(json.dumps({"openai": {"type": "api", "key": "fake-k2"}}))
-        t = time.monotonic()
-        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered", 5))
-        self.assertLess(time.monotonic() - t, 2.5)
+        # far inside the 300 s backoff; a wall-clock bound tighter than the
+        # wait flaked on a loaded CI runner (3.06 s against 2.5)
+        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered", 10))
         self.assertIn("credentials changed", [p.get("retry") for p in self.payloads(r, "auth")])
 
     def test_a_login_file_left_by_an_earlier_runner_clears_on_the_first_good_result(self):

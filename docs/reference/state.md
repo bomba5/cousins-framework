@@ -38,7 +38,6 @@ lags its source is shown with what it has, and the source decides.
 | `memory/.trash/` and its `audit.jsonl` | transactional + raw event | `memory_trash` | removed memory, restorable |
 | `memory/imported/auto/` | transactional | `memory_import` | a copy of the agent CLI's own memory files; the copy is searched when current |
 | `data/decisions.jsonl` | raw event | `memory.decide` | a compatibility log: every decision is also a raw entry, and raw wins (recall and consolidate count raw only) |
-| `data/corrections.jsonl` | raw event | `corrections` | the operator's corrections |
 | `data/review-gate.json`, `data/review-gate-attempts.json`, `data/extract-cursor.json`, `data/propose-cursor.json`, `data/proposals.json` | transactional | `review_gate`, `runner/extract` | cursors and attempts; the held and released entries live in raw |
 | `MEMORY.md`, `memory/**/*.md`, `notes/**/*.md` | authored | the cousin | its own knowledge files |
 

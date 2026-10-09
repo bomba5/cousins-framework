@@ -720,32 +720,6 @@ class TestInboundReachesTheInbox(HermeticCase):
         self.assertEqual(kind, "image")
         self.assertEqual(path, str(staged))
 
-    def test_operator_correction_captured_and_no_presence_marker(self):
-        # What /api/send did after storing a message that the first
-        # Telegram pass silently dropped: operator-correction capture,
-        # through the shared after_inbound_stored() helper. The presence
-        # marker (the legacy pane line's baseline) is no longer written.
-        from cousin_lib import telegram
-        from tests.runner._home import temp_home
-        home = temp_home(self, runner="fake")
-        (home / "cousin.toml").write_text(
-            '[cousin]\nslug = "wren"\nname = "Wren"\n\n[operator]\nname = "Priya"\n'
-            '\n[agent]\nrunner = "fake"\n\n[telegram]\noperators = [42]\n')
-        cfg = telegram.BridgeConfig(slug="wren", token="unused",
-                                    operator_ids={42},
-                                    operator_name={42: "Priya"}, port=0,
-                                    home=home)
-        with mock.patch(
-                "cousin_lib.server.inbound.corrections.detect_and_record"
-        ) as detect:
-            telegram._default_chat_send(cfg, user="Priya",
-                                        message="actually, no")
-        self.assertFalse((home / "data" / ".last-user-msg").exists())
-        detect.assert_called_once_with(home, user="Priya",
-                                       text="actually, no")
-
-
-class TestLoginNotice(HermeticCase):
     def test_the_action_line_is_relayed_once_per_since(self):
         from cousin_lib import telegram
         from cousin_lib.runner import auth

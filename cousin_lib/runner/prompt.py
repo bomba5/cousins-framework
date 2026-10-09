@@ -32,7 +32,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import boot, corrections, distill, memory, self_portrait, template_sync, trace
+from cousin_lib import boot, distill, memory, self_portrait, template_sync, trace
 from cousin_lib.runner import contract
 
 IDENTITY_ABSENT = (
@@ -269,8 +269,7 @@ def _calibration_blocks(home):
     they give way: [(heading, entries, where the rest are)]. The
     operator's own entries, newest first, after any curated text above
     the view's marker (one entry); the standing instructions are left
-    out (the system prompt has them whole). Then the recent corrections.
-    Never the portrait's section: the prompt already carries it."""
+    out (the system prompt has them whole). Never the portrait's section: the prompt already carries it."""
     home = Path(home)
     entries = []
     path = home.joinpath(*CALIBRATION_FILE)
@@ -291,10 +290,6 @@ def _calibration_blocks(home):
     if entries:
         blocks.append(("## operator-calibration.md", entries,
                        " (older, in memory/distilled/operator-calibration.md)"))
-    summary = corrections.summary_for_boot(home, n=15)
-    if summary != corrections.EMPTY_MARKER:
-        head, _, lines = summary.partition("\n")
-        blocks.append((head, lines.splitlines(), " (older, in data/corrections.jsonl)"))
     return blocks
 
 

@@ -47,7 +47,6 @@ Everything below is relative to the cousin home.
 | Decisions | `data/decisions.jsonl` | `decide` | `consolidate`, the boot packet's staleness warning (a compatibility log: `recall` reads raw memory, and the one-time backfill (triggered by recall, search, consolidate) copies the decisions only this log holds into raw) |
 | Memory and notes files | `memory/**/*.md`, `notes/**/*.md` | the cousin | search |
 | Reasoning capsules | `memory/capsules.jsonl`, mirrored to `memory/distilled/reasoning-capsules.md` | `cousin-reason capsule` | boot packet, search (the mirror) |
-| Corrections | `data/corrections.jsonl` | the chat send path, from your messages | boot packet (calibration layer) |
 | Raw entries | `memory/raw/*.jsonl`, `memory/raw/archive/*.jsonl.gz` | `cousin-memory decide` and `remember`, the transcript miner, the jobs ledger, framework events | distill, **search**, `recall` |
 | Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself (switched off by the `sdk` and `tmux` [runner](glossary.md#runner) kinds) | search (a file whose imported copy is current is found as the copy), explorer, `import-auto` |
 | Imported auto-memory | `memory/imported/auto/*.md`, `.manifest.json`, `.baseline.json` | `cousin-memory import-auto --apply` | search (collection `memory`), `import-auto --verify` |
@@ -456,10 +455,11 @@ fill themselves in:
   and a flip that died halfway.
   Nothing is written when nothing changed, and there are no periodic
   entries.
-- **L2 tool.** When a cousin's job finishes as done or failed, its
-  title, exit code and summary land in that cousin's memory under
-  `job:<title>`. Repeat runs of the same job fold into one line.
-  Cancelled and lost jobs, and jobs with no owning cousin, are skipped.
+- **L2 tool.** When a cousin's job fails, its title, exit code and
+  summary land in that cousin's memory under `job:<title>`. Repeat runs
+  of the same job fold into one line. A job that ends done is not
+  copied (its row, its log and its close notice hold it), nor are
+  cancelled and lost jobs, and jobs with no owning cousin.
 - **L4 hypothesis.** When the runner mines a turn's transcript, a
   sentence that hedges ("probably", "might", "I suspect", "I think",
   "likely", "maybe", "not sure", "seems") is kept as a hypothesis under
@@ -740,8 +740,8 @@ system prompt, never cut, holds:
 The state digest, the session's first message, has a ceiling of about
 8000 tokens and holds:
 
-5. Operator calibration: the rest of your L0 entries, newest first, then
-   recent corrections. Up to 2000 tokens; an entry that doesn't fit is
+5. Operator calibration: the rest of your L0 entries, newest first. Up
+   to 2000 tokens; an entry that doesn't fit is
    left out whole and counted in a closing "N more not shown" line, never
    cut in the middle.
 6. Active state: the open loops from `STATUS.md` and the latest
@@ -1026,7 +1026,8 @@ context, ahead of recall, each with its entry id and said once per runner:
 [runner] memory written since this session started, not by you (it is not in your digest; where it disagrees with the digest, this is newer):
 ```
 
-From outside means a console write, a review-gate verdict, a dreaming
+From outside means a console write, a review-gate drop (its held and keep
+records are bookkeeping and are not said), a dreaming
 pass, or an obsolete mark made from the console. The session's own
 `remember`, `decide` and `obsolete`, its job events and the turn
 extractor are never echoed back. A note holds at most 12 entries and 2500

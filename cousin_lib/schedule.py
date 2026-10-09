@@ -18,6 +18,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
+from cousin_lib import delivery
+from cousin_lib.crashpoint import crashpoint
 from cousin_lib.trace import traced_cli
 from cousin_lib.sqlite_util import wal
 
@@ -126,10 +128,12 @@ def tick(*, now_ts=None, deliver, on_error=_print_error):
     Delivery is AT-LEAST-ONCE by contract, not by accident: a job is
     marked fired only AFTER its delivery returned, so a failed delivery
     stays pending and retries next tick, and a crash between delivery
-    and the mark refires the job. A duplicate reminder is the accepted
-    cost; losing one silently is not. Do not "fix" a duplicate by
-    marking before delivering - that flips the contract to
-    at-most-once, which loses reminders instead of repeating them.
+    and the mark refires the job. Do not "fix" a duplicate by marking
+    before delivering - that flips the contract to at-most-once, which
+    loses reminders instead of repeating them. The refire is no
+    duplicate for a runner cousin: each delivery runs inside
+    `delivery.keyed("schedule:<id>")`, and the inbox keeps one row per
+    key, so the second put is the first row and the job is marked.
 
     Delivered lines carry a provenance prefix and that is also
     contract, not cosmetics: a scheduled prompt is machine-authored
@@ -164,11 +168,14 @@ def tick(*, now_ts=None, deliver, on_error=_print_error):
             text = annotate(job_id, prompt, created_ts=created_ts,
                             target_ts=target_ts, now_ts=now_ts)
             try:
-                if deliver(cousin, text) is False:
+                with delivery.keyed("schedule:%d" % job_id):
+                    accepted = deliver(cousin, text)
+                if accepted is False:
                     raise RuntimeError("delivery not accepted")
             except Exception as err:
                 on_error(job_id, err)
                 continue
+            crashpoint("schedule.delivered")
             conn.execute(
                 "UPDATE scheduled_jobs SET status='fired', fired_at=?"
                 " WHERE id=?",
@@ -312,8 +319,6 @@ def _default_deliver(slug, prompt):
     False (skipped at a menu, failed, a tmux cousin's `queued`) is an
     outcome the producer does not accept. A runner cousin is not waited
     on: the inbox put is the acceptance."""
-    from cousin_lib import delivery
-
     root = FrameworkConfig.from_env()
     for cfg in root.list_cousins():
         if cfg.slug == slug:

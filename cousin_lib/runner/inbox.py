@@ -65,9 +65,12 @@ class Inbox:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._db() as conn:
             conn.execute(_SCHEMA)
-            add_columns(conn, "inbox", {})  # additive columns land here later
+            # a producer's idempotency key (delivery.keyed): one row per key
+            add_columns(conn, "inbox", {"dedup_key": "TEXT"})
             conn.execute("CREATE INDEX IF NOT EXISTS inbox_claim"
                          " ON inbox(state, priority, id)")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS inbox_dedup"
+                         " ON inbox(dedup_key) WHERE dedup_key IS NOT NULL")
 
     @contextmanager
     def _db(self):
@@ -83,23 +86,37 @@ class Inbox:
         finally:
             conn.close()
 
-    def put(self, item, *, rank=None):
+    def put(self, item, *, rank=None, key=None):
         """Queue `item`; its priority is base.priority's for its source and
         thread unless `rank` is given (a lower rank is claimed first: the
-        kind switch's notice goes ahead of every row queued before it)."""
+        kind switch's notice goes ahead of every row queued before it).
+        With a `key` (delivery.keyed) a row already put under it is
+        returned instead, whatever its state: nothing new is queued."""
         if not isinstance(item, Item):
             raise TypeError("put() takes a delivery.Item")
         with self._db() as conn:
-            cur = conn.execute(
-                "INSERT INTO inbox (thread_id, source, sender, body,"
-                " attachments_json, context, message_id, priority, state,"
-                " created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (item.thread_id, item.source, item.sender, item.body,
-                 json.dumps(list(item.attachments)), item.context,
-                 item.message_id,
-                 priority(item.source, item.thread_id) if rank is None else int(rank),
-                 QUEUED, time.time()))
+            try:
+                cur = conn.execute(
+                    "INSERT INTO inbox (thread_id, source, sender, body,"
+                    " attachments_json, context, message_id, priority, state,"
+                    " created_at, dedup_key) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (item.thread_id, item.source, item.sender, item.body,
+                     json.dumps(list(item.attachments)), item.context,
+                     item.message_id,
+                     priority(item.source, item.thread_id) if rank is None else int(rank),
+                     QUEUED, time.time(), key))
+            except sqlite3.IntegrityError:
+                row = conn.execute("SELECT id FROM inbox WHERE dedup_key=?", (key,)).fetchone()
+                if key is None or row is None:
+                    raise
+                return row[0]
             return cur.lastrowid
+
+    def keyed_id(self, key):
+        """The id of the row put under `key`, or None."""
+        with self._db() as conn:
+            row = conn.execute("SELECT id FROM inbox WHERE dedup_key=?", (key,)).fetchone()
+        return row[0] if row else None
 
     def claim(self, *, limit=1, claimant="", kinds=None, exclude_kinds=()):
         """Oldest first within priority. BEGIN IMMEDIATE takes the write
@@ -216,6 +233,38 @@ class Inbox:
                 "UPDATE inbox SET state=?, claimant='', claimed_at=NULL"
                 " WHERE state=? AND claimant=?", (QUEUED, CLAIMED, claimant))
             return cur.rowcount
+
+    def close_recorded(self):
+        """Close every claimed row whose claimant's stream already holds the
+        result that names it: a runner records a turn's result, then closes
+        its rows, and one killed in between left them claimed. Requeued,
+        they would run their turn again. Only for a runner whose claimant is
+        its stream's name, before `requeue_stale`, with no runner alive on
+        the home. Returns the ids closed."""
+        from cousin_lib.delivery import DELIVERED, FAILED
+        from cousin_lib.runner import stream
+        with self._db() as conn:
+            claimed = conn.execute("SELECT id, claimant FROM inbox WHERE state=?",
+                                   (CLAIMED,)).fetchall()
+        by_claimant = {}
+        for inbox_id, claimant in claimed:
+            if claimant:
+                by_claimant.setdefault(claimant, []).append(inbox_id)
+        closed = []
+        for claimant, ids in sorted(by_claimant.items()):
+            if "/" in claimant or claimant.startswith("."):
+                continue
+            found = stream.results_naming(stream.path_for(self.home, claimant), ids)
+            for inbox_id in ids:
+                event = found.get(inbox_id)
+                if event is None:
+                    continue
+                p = event.get("payload") or {}
+                outcome = FAILED if p.get("is_error") and not p.get("interrupted") else DELIVERED
+                self.done(inbox_id, outcome, "closed at restart: the turn's result was recorded"
+                          " (stream %s seq %s)" % (claimant, event.get("seq")))
+                closed.append(inbox_id)
+        return closed
 
     def requeue_stale(self, older_than_s):
         cutoff = time.time() - float(older_than_s)

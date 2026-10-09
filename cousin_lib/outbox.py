@@ -32,6 +32,8 @@ import time
 import urllib.error
 from pathlib import Path
 
+from cousin_lib.crashpoint import crashpoint
+
 BACKOFF_S = (15, 30, 60, 120, 240, 300)   # waits between attempts, the last one repeating
 DEADLINE_S = 840.0                          # 14 min: inside the gate's 900 s memory of an id
 PASS_BUDGET_S = 20.0                        # a drain pass leaves the rest for the next tick
@@ -208,6 +210,7 @@ def drain(root, *, send=None, now=None, budget_s=None):
             attempts = row["attempts"] + 1
             try:
                 send(peer, row["message"], row["msg_id"])
+                crashpoint("outbox.sent")
                 outcome, error = DELIVERED_NOW, None
             except Exception as err:  # noqa: BLE001 - classified, never raised out of a tick
                 outcome, error = classify(err), describe(err)

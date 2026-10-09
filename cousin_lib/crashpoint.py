@@ -28,6 +28,13 @@ POINTS = {
     "rollover.bumped": "a rollover: the generation moved, the digest not yet queued",
     "rollover.digest_put": "a rollover: the digest row is put, the journal not yet told",
     "rollover.digest_queued": "a rollover: the digest is queued, the flip row not yet closed",
+    "sdk.written": "the sdk lane: a row is written to the CLI, its echo not yet read",
+    "runner.result_recorded": "a runner: the result naming a turn's rows is in the stream,"
+                              " the rows not yet closed",
+    "tmux.handled": "the tmux lane: a transcript line is handled, the cursor not yet saved",
+    "peer.seen": "a peer message's id is recorded as seen, the message not yet delivered",
+    "outbox.sent": "the outbox: a retry reached the peer, its row not yet finished",
+    "schedule.delivered": "a due schedule is delivered, not yet marked fired",
 }
 
 
@@ -45,6 +52,34 @@ _TARGET = _target(os.environ.get(ENV))
 _hits = {}
 
 
+def _sigkill():
+    os.kill(os.getpid(), signal.SIGKILL)
+
+
+_kill = _sigkill
+
+
+def arm(value, kill):
+    """In-process, for a test whose process must outlive the point (the
+    tmux lane: its pane outlives the runner, so the "process" that dies is
+    the runner's thread): `value` as the variable would name it, `kill`
+    called in place of the SIGKILL (raise SystemExit there, which no
+    `except Exception` catches and a thread dies of silently; return
+    False for "not this hit", and the next hit asks again). Returns the
+    undo."""
+    global _TARGET, _kill
+    before = (_TARGET, _kill, dict(_hits))
+    _TARGET, _kill = _target(value), kill
+    _hits.clear()
+
+    def undo():
+        global _TARGET, _kill
+        _TARGET, _kill = before[0], before[1]
+        _hits.clear()
+        _hits.update(before[2])
+    return undo
+
+
 def crashpoint(name):
     """SIGKILL this process here when the environment names this point. A
     pure no-op otherwise: a name is checked against POINTS only when a
@@ -57,5 +92,5 @@ def crashpoint(name):
     if _TARGET[0] != name:
         return
     _hits[name] = _hits.get(name, 0) + 1
-    if _hits[name] == _TARGET[1]:
-        os.kill(os.getpid(), signal.SIGKILL)
+    if _hits[name] == _TARGET[1] and _kill() is False:
+        _hits[name] -= 1

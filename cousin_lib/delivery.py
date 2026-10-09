@@ -17,7 +17,14 @@ says why with.
 Outcomes are three and only three. When the framework cannot tell
 whether a cousin received something it says `queued` or `failed`,
 never `delivered`: unknown is a result, fine is a claim.
+
+A producer that may deliver the same thing twice (a schedule refired
+after a crash, a peer's retry of a message whose first delivery is
+unconfirmed) does it inside `keyed(key)`: the inbox keeps one row per
+key, and a second put of the key is the first row, not a new one.
 """
+import contextvars
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,6 +90,23 @@ class Item:
         object.__setattr__(self, "attachments", tuple(self.attachments))
 
 
+_KEY = contextvars.ContextVar("cousin_delivery_key", default=None)
+
+
+@contextmanager
+def keyed(key):
+    """Every inbox put inside carries `key` (None: no key). The inbox
+    holds one row per key, so a producer that repeats a delivery after a
+    crash (it cannot know whether the first put happened) repeats it as
+    a no-op. Wrap exactly one delivery: a second put inside is the first
+    one's row."""
+    token = _KEY.set(key)
+    try:
+        yield
+    finally:
+        _KEY.reset(token)
+
+
 class InboxBackend:
     """The runner's inbox: put a row, poke the socket, report `queued`.
     `delivered` is claimed only when `wait=True` and the runner marks
@@ -102,7 +126,7 @@ class InboxBackend:
         from cousin_lib.runner.inbox import Inbox
         try:
             inbox = Inbox(home)
-            inbox_id = inbox.put(item)
+            inbox_id = inbox.put(item, key=_KEY.get())
         except (OSError, sqlite3.Error):
             return FAILED
         try:

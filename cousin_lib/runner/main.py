@@ -676,8 +676,12 @@ def _serve(runner, once, harness=None):
         # A kind whose claims can be live in a pane that outlived its runner
         # (tmux, recovers_claims) recovers them itself in start(),
         # and closes a turn the restart cut there; it takes no restart note.
-        if not getattr(runner, "recovers_claims", False) \
-                and runner.inbox.requeue_stale(older_than_s=0.0):
+        # A row whose result the dead runner had recorded is closed first:
+        # its turn ran, and requeued it would run again.
+        recovers = getattr(runner, "recovers_claims", False)
+        if not recovers:
+            runner.inbox.close_recorded()
+        if not recovers and runner.inbox.requeue_stale(older_than_s=0.0):
             try:
                 earlier = restart_note.read(runner.home) or {}
                 restart_note.mark(runner.home, "the last runner died with a row claimed",

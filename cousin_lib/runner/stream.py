@@ -9,9 +9,37 @@ from pathlib import Path
 from cousin_lib import jsonl
 
 
+def path_for(home, session_id):
+    return Path(home) / "data" / "stream" / ("%s.jsonl" % session_id)
+
+
+def results_naming(path, ids):
+    """{inbox id: the `result` event that names it} for `ids`, read from the
+    stream file at `path` (a dead runner's: no writer). Complete lines only."""
+    want, found = set(ids), {}
+    try:
+        f = open(path, "rb")
+    except OSError:
+        return found
+    with f:
+        for raw in f:
+            if b'"result"' not in raw or not raw.endswith(b"\n"):
+                continue
+            try:
+                event = json.loads(raw.decode("utf-8", errors="replace"))
+            except ValueError:
+                continue
+            if event.get("kind") != "result":
+                continue
+            for i in (event.get("payload") or {}).get("inbox_ids") or ():
+                if i in want:
+                    found[i] = event
+    return found
+
+
 class EventStream:
     def __init__(self, home, session_id):
-        self.path = Path(home) / "data" / "stream" / ("%s.jsonl" % session_id)
+        self.path = path_for(home, session_id)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._seq = 0

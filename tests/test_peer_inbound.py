@@ -160,6 +160,24 @@ class TestAccept(InboundCase):
         with self.assertRaises(peer_inbound.Refused):
             self.accept(message="\x03\x04\x1b", msg_id="m-ctl-00000001")
 
+    def test_an_unsettled_id_whose_message_landed_answers_409(self):
+        """A gate killed after the inbox took the message, before the id was
+        settled: the retry finds the key in the inbox and delivers nothing."""
+        from cousin_lib.runner.inbox import Inbox
+        self.accept(msg_id="m-landed-0001")
+        conn = peer_inbound._db(self.root)
+        conn.execute("UPDATE seen SET settled = 0")
+        conn.close()
+        with self.assertRaises(peer_inbound.Refused) as cm:
+            self.accept(msg_id="m-landed-0001")
+        self.assertEqual(cm.exception.status, 409)
+        home = self.root / "cousins" / "wren"
+        self.assertEqual(len(_messages(home)), 1)
+        self.assertIsNotNone(Inbox(home).keyed_id("peer:mallory-node:m-landed-0001"))
+        conn = peer_inbound._db(self.root)
+        self.assertEqual(conn.execute("SELECT settled FROM seen").fetchone()[0], 1)
+        conn.close()
+
     def test_concurrent_replays_deliver_once(self):
         """The id is claimed before the delivery (BEGIN IMMEDIATE)."""
         import threading

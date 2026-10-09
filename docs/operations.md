@@ -388,7 +388,8 @@ was answering is `claimed` in the copy, and the runner's start puts every
 claim back in the queue (it holds the home's lock, so no other runner owns
 one), then answers it. That is at-least-once, not once: if the turn had
 already replied when the snapshot ran, the restored runner answers that row
-a second time. No message is lost.
+a second time, unless the copied stream already holds that turn's result
+(then the row is closed as the result says). No message is lost.
 
 What it doesn't copy: `cousin.toml`, `notes/`, the other files in `data/`
 (`decisions.jsonl`, `corrections.jsonl`, `handoff.md` and friends), and

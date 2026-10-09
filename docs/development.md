@@ -147,7 +147,11 @@ purpose: `crashpoint("job.exited")` does nothing unless
 that process's environment, read once at import, in any process; then the
 process SIGKILLs itself there. A test runs a real process
 with it, lets it die, starts again and checks the stores
-(`tests/test_crashpoint.py`). A new point goes into `crashpoint.POINTS`
+(`tests/test_crashpoint.py`). Where the thing that dies is not a process
+(the tmux lane's runner, whose pane outlives it), a test calls
+`crashpoint.arm("tmux.handled", kill)` in-process instead: `kill` runs at
+the point (raising `SystemExit` ends the runner's thread silently) and
+returns `False` to wait for a later hit. A new point goes into `crashpoint.POINTS`
 with what it sits between, and a test names it; the registry's own tests
 fail otherwise. A kill proves atomicity between two steps, not
 durability: the page cache survives a SIGKILL, a power loss does not.

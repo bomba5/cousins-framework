@@ -137,7 +137,11 @@ message depends on which:
 
 - **A death.** The next start's sweep finds the rows the dead runner had
   claimed and puts them back in the inbox, so the message is delivered
-  again.
+  again. A row whose turn had ended is the exception: the runner writes a
+  turn's `result` event to its stream before it closes the rows the
+  result names, and a death between the two leaves them claimed. The
+  sweep closes those as the result says (`closed at restart: the turn's
+  result was recorded`) instead of running the turn a second time.
 - **A stop.** The runner interrupts the turn, and an interrupted turn's rows
   are closed as delivered, so the message is not delivered again.
 

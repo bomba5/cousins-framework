@@ -63,6 +63,30 @@ class TestPutAndClaim(InboxCase):
         self.assertEqual(row["message_id"], 42)
 
 
+class TestKeyed(InboxCase):
+    """delivery.keyed: one row per key, whatever happened to the first."""
+
+    def test_a_second_put_under_a_key_is_the_first_row(self):
+        from cousin_lib import delivery
+        first = self.inbox.put(Item("schedule", "schedule", "water the tins"), key="schedule:7")
+        self.inbox.done(first, "delivered")
+        again = self.inbox.put(Item("schedule", "schedule", "water the tins"), key="schedule:7")
+        self.assertEqual(again, first)
+        self.assertEqual(self.inbox.unfinished(), 0)
+        self.assertEqual(self.inbox.keyed_id("schedule:7"), first)
+        with delivery.keyed("schedule:8"):
+            out = delivery.deliver(self.home, Item("schedule", "schedule", "x"), wait=False)
+            again = delivery.deliver(self.home, Item("schedule", "schedule", "x"), wait=False)
+        self.assertEqual((out, again), (delivery.QUEUED, delivery.QUEUED))
+        self.assertEqual(self.inbox.unfinished(), 1)
+
+    def test_unkeyed_puts_never_collide(self):
+        self.inbox.put(Item("schedule", "schedule", "a"))
+        self.inbox.put(Item("schedule", "schedule", "a"))
+        self.assertEqual(self.inbox.unfinished(), 2)
+        self.assertIsNone(self.inbox.keyed_id("schedule:1"))
+
+
 class TestDone(InboxCase):
     def test_done_records_outcome_and_is_idempotent(self):
         i = self.inbox.put(_item())

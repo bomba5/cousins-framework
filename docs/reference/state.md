@@ -111,7 +111,6 @@ built from it.
 | `data/loop-requests.db`, `data/loops-state.json`, `data/loops-fires.jsonl` | transactional + raw event | `loops` | timed flips and fires; the daemon's state |
 | `data/outbox.db`, `data/inbound-seen.db` | transactional | `outbox`, `peer_inbound` | messages to and from other installs, deduplicated by id |
 | `data/trace-ledger.db` | raw event | `trace` | the tool trace the boot packet summarizes |
-| `data/audit-violations.db` | transactional | `audits` | session-end audit findings |
 | `data/health.json` | transactional | `health` | the last health pass |
 | `data/lifecycle/audit.jsonl`, `data/system/audit.jsonl`, `data/accounts/audit.jsonl` | raw event | `lifecycle`, the console | what was done to cousins, the system and accounts |
 | `data/tool-surface.md` | projection | `tool_surface` | from the installed entry points |

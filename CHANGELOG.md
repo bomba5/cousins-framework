@@ -3,6 +3,34 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.49.0 - 2026-10-09
+
+### Changed
+
+- **The self-portrait holds voice and how the cousin works, nothing
+  else.** `synthesize` drafts Temperament, Working Style and Voice. It no
+  longer copies the role, the hard rules ("Operator Calibration",
+  "Identity Invariants") or old decisions ("Recurring Risks"). Those
+  copies went stale beside their sources and loaded at boot with the same
+  weight: a superseded diode pinout, a reversed billing rule. A committed
+  portrait keeps its sections until the operator reviews a new candidate
+  (#298, meeting 11 D).
+- **The CLAUDE.md template carries no lane mechanics.** Chat handling,
+  the memory commands, tools, session bookends and meetings are the
+  generated contract's, per lane, and were stale on the SDK lane (the
+  terminal lane's `cousin-reply`, `(Chat <Name>):` lines). The template
+  keeps Identity, a pointer to the contract, the CLI table (tools first),
+  Hard rules and Voice: 272 lines down to 126.
+
+### Added
+
+- `cousin-spawn <slug> --sync-template --prune-retired`: a section the
+  template retired is reported by the sync and removed only when asked.
+
+### Removed
+
+- `cousin_lib/audits.py`, which nothing imported or ran.
+
 ## 3.48.0 - 2026-10-09
 
 ### Changed

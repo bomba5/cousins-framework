@@ -808,6 +808,25 @@ class TestTemplateSync(unittest.TestCase):
         again = template_sync.sync(self.home, self.root, apply=True)
         self.assertFalse(again["changed"])
 
+    def test_a_retired_section_stays_until_pruned(self):
+        # meeting 11 D: the lane's mechanics left the template for the
+        # contract; an existing home keeps its copy until the operator has
+        # seen the diff and asks for the prune
+        from cousin_lib import template_sync
+        claude = self.home / "CLAUDE.md"
+        claude.write_text(claude.read_text().replace(
+            "## Local extra\n\nkeep me\n\n",
+            "## Local extra\n\nkeep me\n\n## Session bookends\n\nrun cousin-session\n\n"))
+        _old, new, notes = template_sync.plan(self.home, self.root)
+        self.assertIn("run cousin-session", new)
+        self.assertTrue(any("Session bookends: retired" in n and "--prune-retired" in n
+                            for n in notes), notes)
+        _old, new, notes = template_sync.plan(self.home, self.root, prune=True)
+        self.assertNotIn("run cousin-session", new)
+        self.assertIn("keep me", new)
+        self.assertTrue(any("Session bookends: retired from the template; removed" in n
+                            for n in notes), notes)
+
     def test_no_marker_is_refused(self):
         from cousin_lib import template_sync
         (self.home / "CLAUDE.md").write_text("# Wren\n\n## Identity\n\nx\n")

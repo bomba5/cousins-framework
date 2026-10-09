@@ -1039,7 +1039,7 @@ def _repair_settings(root, slug):
     return 0
 
 
-def _sync_template(root, slug, *, apply):
+def _sync_template(root, slug, *, apply, prune=False):
     from cousin_lib import template_sync
 
     home = Path(root) / "cousins" / slug
@@ -1047,8 +1047,8 @@ def _sync_template(root, slug, *, apply):
         print("cousin-spawn: no cousin %r" % slug, file=sys.stderr)
         return 2
     try:
-        text, notes = template_sync.diff(home, root)
-        result = template_sync.sync(home, root, apply=apply)
+        text, notes = template_sync.diff(home, root, prune=prune)
+        result = template_sync.sync(home, root, apply=apply, prune=prune)
     except template_sync.SyncError as err:
         print("cousin-spawn: %s: %s" % (slug, err), file=sys.stderr)
         return 2
@@ -1137,6 +1137,10 @@ def spawn_main(argv=None):
                              " --apply, write it")
     parser.add_argument("--apply", action="store_true",
                         help="with --sync-template: write the sync")
+    parser.add_argument("--prune-retired", action="store_true",
+                        help="with --sync-template: also remove the framework"
+                             " sections the template retired (the lane's"
+                             " mechanics, now only in the contract)")
     parser.add_argument("--repair-settings", action="store_true",
                         help="create nothing: (re)write an EXISTING"
                              " cousin's harness project settings"
@@ -1168,7 +1172,7 @@ def spawn_main(argv=None):
     if args.repair_settings:
         return _repair_settings(root, args.slug)
     if args.sync_template:
-        return _sync_template(root, args.slug, apply=args.apply)
+        return _sync_template(root, args.slug, apply=args.apply, prune=args.prune_retired)
     if exists and not start_existing:
         print("cousin-spawn: cousin %r already exists; to start it:"
               " cousin-spawn %s --start" % (args.slug, args.slug),

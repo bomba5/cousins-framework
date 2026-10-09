@@ -335,10 +335,14 @@ class TestRunnerLaneDoctrine(PromptCase):
         self.assertLess(told, text.index("Reply path: `cousin-reply"))
         self.assertLess(text.index("through the `memory` tool"), text.index("log with `cousin-memory"))
 
-    def test_the_tmux_lane_never_gets_the_runner_lane_section(self):
+    def test_the_template_carries_no_lane_mechanics(self):
+        # meeting 11 D: every lane's contract says how to reply, remember
+        # and hand off; a copy in the template went stale beside it
         flat = " ".join(TEMPLATE.split())
-        self.assertNotIn("the `reply` tool", flat)
-        self.assertIn("cousin-reply --user <their name> <<'REPLY'", TEMPLATE)
+        for mechanic in ("IN-CHARACTER", "cousin-reply --user <their name> <<'REPLY'",
+                         "## Meetings", "## Session bookends"):
+            self.assertNotIn(mechanic, flat)
+        self.assertIn("the contract is right", flat)
 
 
 if __name__ == "__main__":

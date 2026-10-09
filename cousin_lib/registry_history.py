@@ -114,6 +114,12 @@ SHIPPED_BEFORE = {
     ('tools.job.properties', 'artifacts.description'): (
         'files the command builds, relative to your home or absolute (run): on exit 0 each is recorded as an artifact of the job (path, sha256, size); one that is missing fails the job',
     ),
+    ('tools.job.properties', 'commit'): (
+        {'type': 'string', 'optional': True, 'description': 'the git commit the artifacts were built from (run)'},
+    ),
+    ('tools.job.properties', 'commit.description'): (
+        'the git commit the artifacts were built from (run)',
+    ),
     ('tools.job.properties', 'desc'): (
         {'type': 'string', 'description': 'context for the job (start)'},
     ),

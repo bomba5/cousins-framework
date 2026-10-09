@@ -61,6 +61,9 @@ def _db():
     # pid past SPAWN_GRACE_S was never forked; a hook-tracked background
     # shell has a command and never a pid, and is not one (#286)
     add_column(conn, "jobs", "launched", "INTEGER NOT NULL DEFAULT 0")
+    # the git commit the job ran against (--commit): a verdict such as a
+    # test run is about a commit even when it builds no artifact
+    add_column(conn, "jobs", "git_commit", "TEXT")
     conn.commit()
     return conn
 
@@ -70,18 +73,21 @@ def _now():
 
 
 def register_job(*, kind, title, description="", spawned_by=None,
-                 log_path=None, command=None, notify=False, launched=False):
+                 log_path=None, command=None, notify=False, launched=False,
+                 commit=None):
     """Insert a running job row and return its id. `notify`: the owner
-    gets one inbox row when the job closes (notify_owner)."""
+    gets one inbox row when the job closes (notify_owner). `commit`: the
+    git commit the job runs against."""
     slug = spawned_by or CousinConfig.from_env().slug
     conn = _db()
     try:
         cur = conn.execute(
             "INSERT INTO jobs (spawned_by, kind, title, description,"
-            " started_at, log_path, command, notify, launched)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " started_at, log_path, command, notify, launched, git_commit)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (slug, kind, title[:200], description[:500], _now(),
-             log_path, command, 1 if notify else 0, 1 if launched else 0),
+             log_path, command, 1 if notify else 0, 1 if launched else 0,
+             commit or None),
         )
         conn.commit()
         return cur.lastrowid
@@ -767,7 +773,8 @@ def _spawn_tracked(cmd, log_path, job_id, *, artifacts=(), commit=None, owner=No
         # which is the loud version of that failure.
         crashpoint("job.exited")
         status = "done" if rc == 0 else "failed"
-        summary = ""
+        # read before the artifact lines go in: the command's own last word
+        summary = last_log_line(log_path)
         if rc == 0 and artifacts:
             missing = _record_artifacts(job_id, artifacts, commit, owner)
             crashpoint("job.artifacts_recorded")
@@ -781,6 +788,32 @@ def _spawn_tracked(cmd, log_path, job_id, *, artifacts=(), commit=None, owner=No
             finish_job(job_id, status=status, summary=summary, exit_code=rc)
     finally:
         os._exit(0)
+
+
+LAST_LINE_PREFIX = "last log line: "
+_LAST_LINE_CHARS = 200
+
+
+def last_log_line(log_path):
+    """The command's last non-empty output line, as a launched job's
+    summary when it ends (a cousin's own summary at done or fail replaces
+    it): "last log line: OK (skipped=69)". A heuristic, labelled as one;
+    the exit code stays the verdict. Empty when there is none, or only
+    the header cousin-job wrote."""
+    try:
+        with open(log_path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - 8192))
+            tail = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    for line in reversed(tail.splitlines()):
+        line = " ".join(line.split())
+        if line and not line.startswith(("# ", "$ ")):
+            if len(line) > _LAST_LINE_CHARS:
+                line = line[:_LAST_LINE_CHARS - 3] + "..."
+            return LAST_LINE_PREFIX + line
+    return ""
 
 
 def _log_line(text):
@@ -853,18 +886,18 @@ def _cmd_start(args):
     # and builds (the job tool launches from the cousin's home); and only
     # with a command to build it.
     artifacts = [os.path.abspath(os.path.expanduser(p)) for p in (getattr(args, "artifact", None) or [])]
-    if (artifacts or getattr(args, "artifact_commit", None)) and not cmd:
+    if artifacts and not cmd:
         print("cousin-job: --artifact needs a command that builds it", file=sys.stderr)
         return 2
-    if getattr(args, "artifact_commit", None) and not artifacts:
-        print("cousin-job: --artifact-commit names what the artifacts were built from;"
-              " give --artifact too", file=sys.stderr)
-        return 2
+    # --commit (or its older name --artifact-commit): what the job runs
+    # against, on the row and on each artifact it records
+    commit = (getattr(args, "artifact_commit", None) or "").strip() or None
     job_id = register_job(
         kind=args.kind, title=args.title, description=args.desc or "",
         spawned_by=slug, log_path=args.log,
         command=" ".join(cmd) if cmd else None,
         notify=bool(getattr(args, "notify", False)), launched=bool(cmd),
+        commit=commit,
     )
     crashpoint("job.registered")
     log_path = args.log
@@ -877,7 +910,7 @@ def _cmd_start(args):
         _write_log_header(log_path, args.kind, args.title,
                           "$ " + " ".join(cmd))
         pid = _spawn_tracked(cmd, log_path, job_id, artifacts=artifacts,
-                             commit=getattr(args, "artifact_commit", None), owner=slug)
+                             commit=commit, owner=slug)
         record_spawn(job_id, pid)
     elif not log_path:
         # A job with no process of its own (a hand-registered subagent,
@@ -1067,11 +1100,12 @@ def _start_options(p, *, help_text=False):
                             " the working directory, where the command runs: on exit 0 it is recorded as a shared"
                             " artifact row of this job (cousin-artifact); one that is missing"
                             " then fails the job. A private path: cousin-artifact add --private")
-        p.add_argument("--artifact-commit", metavar="SHA",
-                       help="the commit the artifacts were built from")
+        p.add_argument("--commit", "--artifact-commit", dest="artifact_commit", metavar="SHA",
+                       help="the git commit the job runs against: kept on its row and on"
+                            " each artifact it records (--artifact-commit is the older name)")
     else:
         p.add_argument("--artifact", action="append")
-        p.add_argument("--artifact-commit")
+        p.add_argument("--commit", "--artifact-commit", dest="artifact_commit")
 
 
 def _title_after_separator(argv):

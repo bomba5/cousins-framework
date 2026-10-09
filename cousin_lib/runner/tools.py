@@ -235,9 +235,8 @@ def _j_run(ctx, a):
         cli += ["--artifact", output]
     commit = _str(a, "commit")
     if commit:
-        if not outputs:
-            raise ValueError("run: commit names what the artifacts were built from; give artifacts too")
-        cli += ["--artifact-commit", commit]
+        # the commit the command runs against: on the row, and on each artifact
+        cli += ["--commit", commit]
     if a.get("notify"):
         cli += ["--notify"]
     cli += ["--", title] + argv

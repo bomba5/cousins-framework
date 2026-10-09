@@ -228,9 +228,42 @@ class TestBackgroundCommand(JobsCase):
         rc, _, err = self._main(["start", "shell", "nothing", "--artifact", "x.bin"])
         self.assertEqual(rc, 2)
         self.assertIn("needs a command", err)
-        rc, _, err = self._main(["start", "shell", "--artifact-commit", "abc", "--", "t", "true"])
-        self.assertEqual(rc, 2)
-        self.assertIn("give --artifact too", err)
+
+    def test_a_commit_alone_is_kept_on_the_row(self):
+        """A run that builds nothing (a test suite) still names the commit
+        it ran against; --artifact-commit is the older name of --commit."""
+        for flag in ("--commit", "--artifact-commit"):
+            rc, out, err = self._main(["start", "shell", "--json", flag, "abc1234", "--", "suite", "true"])
+            self.assertEqual(rc, 0, err)
+            job = self._wait_status(json.loads(out)["job_id"], ("done", "failed"))
+            self.assertEqual((job["status"], job["git_commit"]), ("done", "abc1234"), flag)
+
+    def test_a_launched_job_ends_with_its_last_log_line(self):
+        """No summary of its own: the command's last non-empty line, said
+        to be that; a header-only log gives none; a later done with a
+        summary replaces it."""
+        from cousin_lib import jobs
+        _, out, _ = self._main(["start", "shell", "suite", "--",
+                                "sh", "-c", "echo running; echo; echo 'OK (skipped=69)'; echo"])
+        job = self._wait_status(int(out.strip()), ("done",))
+        self.assertEqual(job["result_summary"], "last log line: OK (skipped=69)")
+        _, out, _ = self._main(["start", "shell", "silent", "--", "true"])
+        job = self._wait_status(int(out.strip()), ("done",))
+        self.assertFalse(job["result_summary"])
+        _, out, _ = self._main(["start", "shell", "broke", "--", "sh", "-c", "echo 'FAILED (failures=2)'; exit 1"])
+        job = self._wait_status(int(out.strip()), ("failed",))
+        self.assertEqual(job["result_summary"], "last log line: FAILED (failures=2)")
+        jobs.finish_job(job["id"], status="failed", summary="two tests broke on the tmpfs run")
+        self.assertEqual(jobs.get_job(job["id"])["result_summary"], "two tests broke on the tmpfs run")
+
+    def test_a_long_last_line_is_cut(self):
+        from cousin_lib import jobs
+        log = self.root / "long.log"
+        log.write_text("# shell: t\n# started now\n\n$ cmd\n\n" + "x" * 1000 + "\n")
+        line = jobs.last_log_line(str(log))
+        self.assertTrue(line.startswith(jobs.LAST_LINE_PREFIX))
+        self.assertLessEqual(len(line), len(jobs.LAST_LINE_PREFIX) + 200)
+        self.assertEqual(jobs.last_log_line(str(self.root / "nope.log")), "")
 
     def test_a_relative_log_is_recorded_absolute(self):
         # The job tool's `run` passes its `log` relative to the home, the
@@ -297,7 +330,7 @@ class TestBackgroundCommand(JobsCase):
             build(p)
             return sorted(o for a in p._actions for o in a.option_strings)
         self.assertEqual(options(jobs._start_options),
-                         ["--artifact", "--artifact-commit", "--desc", "--home-log",
+                         ["--artifact", "--artifact-commit", "--commit", "--desc", "--home-log",
                           "--json", "--log", "--notify"])
         # the separated shape counts an option given before `--` the same way
         self.assertTrue(jobs._title_after_separator(

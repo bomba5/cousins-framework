@@ -626,10 +626,16 @@ title that looks like a flag is only a title. Its options are `--desc`,
 `--json`, and one of `--log PATH` or `--home-log REL`, a log path relative to
 the cousin's home and confined to it (absolute, `~`, `..` and `.secrets` are
 refused). `--artifact PATH` (repeatable) names a file the command builds,
-relative to where `start` runs (where the command runs and builds), and `--artifact-commit SHA` the commit it
-was built from: on exit 0 each one is recorded as an artifact of the job
-(`cousin-artifact`), and one that is not there fails the job with the
-reason, though the command exited 0. `--notify` puts one row in the
+relative to where `start` runs (where the command runs and builds): on
+exit 0 each one is recorded as an artifact of the job (`cousin-artifact`),
+and one that is not there fails the job with the reason, though the
+command exited 0. `--commit SHA` (older name `--artifact-commit`) names
+the git commit the command runs against: it is kept on the job's row and
+on each artifact it records, so a run that builds nothing, such as a test
+suite, still says which commit it tested. A launched job that ends with no
+summary of its own gets its command's last non-empty output line as one,
+said to be that (`last log line: OK (skipped=69)`); the exit code stays
+the verdict, and a summary given at `done` or `fail` replaces it. `--notify` puts one row in the
 starting cousin's inbox when the job ends (done, failed, or lost when its
 process is gone), with the status, the exit code and the log path; the row's
 source is `job`, on the `system` [thread](glossary.md#thread).
@@ -637,7 +643,8 @@ source is `job`, on the `system` [thread](glossary.md#thread).
 ```
 cousin-job start shell "rebuild the index" -- cousin-memory reindex
 cousin-job start shell --home-log logs/reindex.log -- "rebuild the index" cousin-memory reindex
-cousin-job start shell --artifact out/image.bin --artifact-commit 3f2a9c1 -- "image rev A" make image
+cousin-job start shell --artifact out/image.bin --commit 3f2a9c1 -- "image rev A" make image
+cousin-job start shell --commit bd42aa1 -- "full suite" python3 -m unittest discover -s tests
 ```
 
 A cousin's `job` tool does the same with `run` (`title`, `argv` as an array,

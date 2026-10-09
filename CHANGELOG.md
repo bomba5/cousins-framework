@@ -3,14 +3,28 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## 3.42.6 - 2026-10-09
+## 3.43.0 - 2026-10-09
+
+### Added
+
+- **A job names the commit it ran against.** `cousin-job start --commit
+  SHA` (the job tool's `run` with `commit`) is kept on the job's row,
+  shown on it in the console and by `why job:N`, and still given to each
+  artifact the job records. It no longer needs artifacts: a test suite
+  builds nothing, but its verdict is about a commit. `--artifact-commit`
+  stays as the older name.
+- **A launched job ends with its last log line.** With no summary of its
+  own, the row closes with the command's last non-empty output line,
+  labelled as such (`last log line: OK (skipped=69)`), so a suite's
+  verdict sits on the row instead of only in its log. The exit code
+  stays the verdict; a summary given at `done` or `fail` replaces it.
 
 ### Fixed
 
 - **The job tool's `run` honours `notify`.** The option was in the
-  tool's schema from 3.42.2 on, but it never reached the launcher: every
-  row was stored without it and its owner got no notice when the job
-  ended.
+  tool's schema from 3.42.2 on, but the in-process tool never passed it
+  to the launcher: every row was stored without it and its owner got no
+  notice when the job ended.
 
 ## 3.42.5 - 2026-10-09
 

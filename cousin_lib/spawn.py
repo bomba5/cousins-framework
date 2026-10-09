@@ -147,8 +147,8 @@ def _write_cousin_toml(home, *, slug, name, role, operator=None,
 
 def _write_identity_files(home, *, claude_md, name, role):
     (home / "CLAUDE.md").write_text(claude_md)
-    # The Open-loops section is the seam the session-end baseline
-    # derivation reads (cousin_lib.audits); spawn it empty so the
+    # The Open-loops section is the one list of what is in flight (the
+    # handoff writes it, every reader reads it); spawn it empty so the
     # convention exists from birth.
     (home / "STATUS.md").write_text(
         "# %s - STATUS\n\n## Open loops\n" % name

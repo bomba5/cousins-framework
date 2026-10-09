@@ -61,10 +61,9 @@ _NOT_REMOVABLE_FILES = {"fts_index.db", "vectors.db", "embeddings.json",
                         ".recall-log-archive.jsonl", ".reindexed"}
 _ID_RE = re.compile(r"^[0-9]{8}T[0-9]{6}-[0-9]{6}(-[0-9]+)?$")
 _REWRITE_TRIES = 5
-# A batch whose manifest still says `moving` this long after it was
-# written was left by a process that died mid-move: its reader settles it
-# (_settle). Younger, it may be a move still running.
-MOVING_STALE_S = 60.0
+# A move holds the home's memory write lock from its `moving` manifest to
+# its final one: a reader that gets the lock and still finds `moving` has
+# a batch whose mover died (_settle).
 
 
 def trash_dir(home):
@@ -220,15 +219,21 @@ def trash_lines(home, refs, *, by=None):
         idx = _locate(lines, line_no, sha)
         plan.setdefault(rel, (path, []))[1].append(
             (idx, line_sha(lines[idx]), lines[idx]))
+    with memory_lock.write_lock(home):
+        return _trash_lines(home, plan, by)
+
+
+def _trash_lines(home, plan, by):
     batch_id, batch_dir = _new_batch_dir(home)
     deleted_at = _now().isoformat()
-    # Every line, with its text, is in the manifest before any file
-    # changes: a kill mid-move leaves a `moving` batch (_settle), never a
-    # removed line kept nowhere.
+    # Every line, with its text and how many copies of it its file held, is
+    # in the manifest before any file changes: a kill mid-move leaves a
+    # `moving` batch (_settle), never a removed line kept nowhere.
+    held = {rel: _sha_counts(path) for rel, (path, _t) in plan.items()}
     _write_manifest(batch_dir, {"id": batch_id, "deleted_at": deleted_at, "by": by,
                                 "moving": True, "items": [
                                     {"kind": "line", "path": rel, "line_no": idx + 1,
-                                     "sha": sha, "line": text}
+                                     "sha": sha, "line": text, "held": held[rel].get(sha, 0)}
                                     for rel, (_p, targets) in plan.items()
                                     for idx, sha, text in targets]})
     crashpoint("trash.moving")
@@ -272,6 +277,11 @@ def trash_file(home, rel, *, by=None, allow_legacy=False):
     trash batch, keeping its home-relative path."""
     home = Path(home)
     rel, path = _check_file(home, rel, allow_legacy)
+    with memory_lock.write_lock(home):
+        return _trash_file(home, rel, path, by)
+
+
+def _trash_file(home, rel, path, by):
     batch_id, batch_dir = _new_batch_dir(home)
     dest = batch_dir / "files" / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -297,19 +307,38 @@ def _write_manifest(batch_dir, manifest):
     atomic.write_text(batch_dir / "manifest.json", json.dumps(manifest, indent=1))
 
 
-def _settle(home, batch_dir, manifest, *, now=None):
-    """A `moving` batch left by a process that died mid-move (older than
-    MOVING_STALE_S; a younger one is returned as it is): each item is
-    kept when it did move (the line is gone from its file, the file is in
+def _sha_counts(path):
+    counts = {}
+    if path.is_file():
+        for line in path.read_bytes().decode("utf-8", "replace").splitlines():
+            sha = line_sha(line)
+            counts[sha] = counts.get(sha, 0) + 1
+    return counts
+
+
+def _settle(home, batch_dir, manifest):
+    """A `moving` batch whose mover died: settled under the home's memory
+    write lock, taken without waiting (held, the move may be running, and
+    the batch is returned as it is). Each item is kept when it did move
+    (its file holds fewer copies of the line than before, the file is in
     the batch) and dropped when it did not. The settled manifest is
     written; a batch left with nothing is removed and None returned."""
     if not manifest.get("moving"):
         return manifest
-    import time
-    age = (now or time.time()) - (batch_dir / "manifest.json").stat().st_mtime
-    if age < MOVING_STALE_S:
-        return manifest
-    kept = []
+    with memory_lock.try_write_lock(home) as held:
+        if not held:
+            return manifest
+        try:
+            manifest = json.loads((batch_dir / "manifest.json").read_text())
+        except (OSError, ValueError):
+            return None
+        if not manifest.get("moving"):
+            return manifest         # the mover finished while we waited for nothing
+        return _settle_held(home, batch_dir, manifest)
+
+
+def _settle_held(home, batch_dir, manifest):
+    kept, moved = [], {}
     for item in manifest.get("items") or []:
         try:
             target = resolve_in(home, item["path"])
@@ -319,11 +348,14 @@ def _settle(home, batch_dir, manifest, *, now=None):
             copy = batch_dir / "files" / item["path"]
             if copy.is_file():
                 kept.append(dict(item, size=copy.stat().st_size))
-        else:
-            present = target.read_bytes().decode("utf-8", "replace").splitlines() \
-                if target.is_file() else []
-            if all(line_sha(l) != item["sha"] for l in present):
-                kept.append(item)
+            continue
+        key = (item["path"], item["sha"])
+        if key not in moved:
+            now = _sha_counts(target).get(item["sha"], 0)
+            moved[key] = max(0, int(item.get("held", 1)) - now)
+        if moved[key] > 0:
+            moved[key] -= 1
+            kept.append({k: v for k, v in item.items() if k != "held"})
     if not kept:
         shutil.rmtree(batch_dir, ignore_errors=True)
         return None

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from unittest import mock
 
 from cousin_lib import crashpoint
 from tests._hermetic import HermeticCase
@@ -323,6 +324,13 @@ class TestChatCrashes(ProducerCrashCase):
         finally:
             conn.close()
 
+    def chat_key(self):
+        conn = sqlite3.connect(self.home / "data" / "chat.db")
+        try:
+            return conn.execute("SELECT delivery_key FROM messages").fetchone()[0]
+        finally:
+            conn.close()
+
     def inbox_rows(self):
         if not (self.home / "data" / "inbox.db").exists():
             return []
@@ -341,7 +349,8 @@ class TestChatCrashes(ProducerCrashCase):
         self.assertEqual((state, self.inbox_rows()), ("pending", []))
         swept = self.chat("sweep")
         self.assertEqual(json.loads(swept.stdout), [cid], swept.stderr)
-        self.assertEqual(self.inbox_rows(), [(cid, "chat:%d" % cid)])
+        self.assertTrue(self.chat_key().startswith("chat:"))
+        self.assertEqual(self.inbox_rows(), [(cid, self.chat_key())])
         self.assertEqual(self.chat_rows(), [(cid, "the tins moved", None)])
         self.assertEqual(json.loads(self.chat("sweep").stdout), [])
 
@@ -354,7 +363,7 @@ class TestChatCrashes(ProducerCrashCase):
         self.assertEqual(len(self.inbox_rows()), 1)
         swept = self.chat("sweep")
         self.assertEqual(json.loads(swept.stdout), [cid], swept.stderr)
-        self.assertEqual(self.inbox_rows(), [(cid, "chat:%d" % cid)])
+        self.assertEqual(self.inbox_rows(), [(cid, self.chat_key())])
         self.assertEqual(self.chat_rows()[0][2], None)
 
     def test_a_peer_retry_after_the_row_was_stored_shows_one_line(self):
@@ -486,3 +495,45 @@ class TestChatRedeliveryHealth(ProducerCrashCase):
             self.assertEqual(conn.execute("SELECT delivery FROM messages").fetchone()[0], "pending")
         finally:
             conn.close()
+
+
+class TestTrashSettle(ProducerCrashCase):
+    def setUp(self):
+        super().setUp()
+        self.env["COUSIN_HOME"] = str(self.home)
+
+    def test_a_trashed_line_with_a_twin_left_is_kept_by_the_settle(self):
+        path = self.home / "memory" / "raw" / "2026-10-09.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"n": 1}\n{"n": 2}\n{"n": 2}\n')
+        out = self.py(TRASH.replace("sys.argv[1]", "'trash'"), crash="atomic.written:2")
+        self.assertEqual(out.returncode, -9, out.stderr)
+        self.assertEqual(path.read_text(), '{"n": 1}\n{"n": 2}\n')
+        (batch,) = json.loads(self.py(TRASH.replace("sys.argv[1]", "'list'")).stdout)
+        self.assertEqual([i["line"] for i in batch["items"]], ['{"n": 2}'])
+
+    def test_a_batch_whose_mover_holds_the_lock_is_left_alone(self):
+        import threading
+        from cousin_lib import memory_lock, memory_trash
+        batch = self.home / "memory" / ".trash" / "20261009T000000-000001"
+        batch.mkdir(parents=True)
+        (batch / "manifest.json").write_text(json.dumps(
+            {"id": batch.name, "moving": True, "items": [{"kind": "file", "path": "notes/x.md"}]}))
+        held, release = threading.Event(), threading.Event()
+
+        def mover():
+            with memory_lock.write_lock(self.home):
+                held.set()
+                release.wait(10)
+        t = threading.Thread(target=mover)
+        t.start()
+        try:
+            self.assertTrue(held.wait(10))
+            with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(self.root),
+                                              "COUSIN_HOME": str(self.home)}):
+                listed = memory_trash.list_trash(self.home)
+            self.assertEqual([b.get("moving") for b in listed], [True])
+            self.assertTrue(batch.is_dir())
+        finally:
+            release.set()
+            t.join(10)

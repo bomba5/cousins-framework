@@ -57,6 +57,16 @@ _hits = {}
 
 
 def _sigkill():
+    # COUSIN_CRASH_MARK: a file the kill names its point in first, so a
+    # harness can tell a round whose point fired (in any process that
+    # inherited the variable) from one whose point was never reached
+    mark = os.environ.get("COUSIN_CRASH_MARK")
+    if mark:
+        try:
+            with open(mark, "a") as fh:
+                fh.write("%s %d\n" % (_TARGET[0], os.getpid()))
+        except OSError:
+            pass
     os.kill(os.getpid(), signal.SIGKILL)
 
 

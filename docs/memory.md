@@ -1161,9 +1161,10 @@ Nothing is destroyed. A removal moves the line or file into
 `memory/.trash/<id>/` with a `manifest.json` saying where it came from,
 and appends a line to `memory/.trash/audit.jsonl`. The manifest, with
 every removed line's text, is written before anything moves, marked
-`moving` until the move is done: a removal killed half way is settled
-the next time the trash is read (a minute on), each item kept if it
-moved and dropped if it didn't. When raw changed, the
+`moving` until the move is done, and the move holds the memory write
+lock throughout. A removal killed half way is settled the next time the
+trash is read and the lock is free, each item kept if it moved and
+dropped if it didn't. When raw changed, the
 distilled views are rebuilt right away. Search drops a removed file on
 its next run. If `MEMORY.md` pointed at the file, the explorer flags the
 dead link; fixing the index is up to the cousin.

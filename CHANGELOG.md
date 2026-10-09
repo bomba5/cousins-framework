@@ -9,10 +9,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 - **An inbound chat message is no longer lost to a crash between its
   chat row and its inbox row.** The row is stored pending and its put
-  runs under a key (`chat:<id>`, or the peer's own); the loops daemon
-  puts every row still pending after 30 seconds again, under the same
-  key, so the cousin gets it once. A peer's retry of a message whose row
-  is already stored delivers that row: no second chat line. New health
+  runs under a key (random per row, the peer's own, or the Telegram
+  update's); the loops daemon puts every row still pending after two
+  minutes again, under the same key, so the cousin gets it once. A
+  peer's retry, or Telegram handing the bridge the same update again,
+  delivers the stored row: no second chat line, no second turn. A row
+  the inbox won't take stays pending and fails `chat-redelivery`. New health
   component `chat-redelivery`.
 - **A whole file the framework rewrites is replaced in one step.** The
   handoff tool's STATUS.md, active-threads.md and handoff.md, the
@@ -22,8 +24,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   write; a kill could leave any of them torn or empty.
 - **A memory removal killed half way loses nothing.** The trash batch's
   manifest, with each removed line's text, is written before anything
-  moves, marked `moving`; a removal killed between is settled the next
-  time the trash is read.
+  moves, marked `moving`, and the move holds the memory write lock; a
+  removal killed between is settled by the next reader that gets the
+  lock, by line counts (a removed line with a twin left is kept).
 
 ### Added
 

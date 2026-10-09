@@ -7,6 +7,11 @@ it over `path` in one step. A process killed before the rename leaves
 that nothing reads. A symlinked `path` is written through: its target
 is replaced, the link stays.
 
+The rename makes a new file: a hard link to the old one keeps the old
+text, the file belongs to the writer, extended attributes and ACLs are
+not carried over, and the directory must be writable. Right for the
+files a home owns; not for a file shared by link.
+
 No fsync: a SIGKILL cannot tear a renamed file (the page cache survives
 it); a power loss can, and that is a tier of its own (#286)."""
 import os

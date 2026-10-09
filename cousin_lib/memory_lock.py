@@ -62,3 +62,35 @@ def write_lock(home):
             fcntl.flock(fd, fcntl.LOCK_UN)
     finally:
         os.close(fd)
+
+
+@contextmanager
+def try_write_lock(home):
+    """write_lock without waiting: yields True holding it (reentrant, as
+    write_lock), False when another holder has it, for a reader that
+    would rather leave something alone than wait on a writer."""
+    key = os.path.realpath(str(home))
+    depth = getattr(_held, "depth", None)
+    if depth is None:
+        depth = _held.depth = {}
+    if depth.get(key):
+        with write_lock(home):
+            yield True
+        return
+    path = lock_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDONLY | os.O_CREAT, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        depth[key] = 1
+        try:
+            yield True
+        finally:
+            depth.pop(key, None)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)

@@ -542,6 +542,39 @@ class TestInboundPhoto(_BridgeFixture):
 
 
 class TestRootFromHome(TelegramCase):
+    def test_an_update_handed_again_after_a_crash_is_one_message(self):
+        """The bridge saves its offset after the relay: killed between the
+        stored row and the offset, it is handed the same update again. The
+        row stored for that update is the one delivered (tg:<update_id>)."""
+        from cousin_lib import telegram
+        from cousin_lib.runner.inbox import Inbox
+        from cousin_lib.server import chat_api
+        from tests.runner._home import temp_home
+        home = temp_home(self, runner="fake")
+        cfg = telegram.BridgeConfig(slug="wren", token="unused", operator_ids={42},
+                                    operator_name={42: "Priya"}, port=0, home=home)
+        update = {"update_id": 7001, "message": {"from": {"id": 42}, "text": "tg one"}}
+        real = chat_api.deliver_stored
+        calls = []
+
+        def dies_before_the_put(*a, **k):
+            calls.append(1)
+            if len(calls) == 1:
+                raise SystemExit("the bridge was killed")
+            return real(*a, **k)
+        with mock.patch.object(chat_api, "deliver_stored", dies_before_the_put):
+            with self.assertRaises(SystemExit):
+                relay_inbound(cfg, update=update)
+            relay_inbound(cfg, update=update)
+        import sqlite3
+        conn = sqlite3.connect(home / "data" / "chat.db")
+        try:
+            stored = conn.execute("SELECT message, delivery, delivery_key FROM messages").fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(stored, [("tg one", None, "tg:7001")])
+        self.assertEqual([r["body"] for r in Inbox(home).claim(limit=5)], ["tg one"])
+
     def test_home_alone_finds_the_root(self):
         # FRAMEWORK_ROOT unset, COUSIN_HOME unset: --home must suffice.
         self._token("bottok")

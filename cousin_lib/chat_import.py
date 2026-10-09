@@ -95,12 +95,12 @@ def import_history(old_home, new_home, *, force=False):
     marker = new_home / "data" / MARKER
     if not old_db.is_file():
         raise ImportRefused("no old chat store at %s" % old_db)
-    if not new_db.is_file():
-        # A chat server that never stored a row has not created its
-        # store yet; create it with the server's own schema.
-        from cousin_lib.server.storage import ChatStore
-        new_db.parent.mkdir(parents=True, exist_ok=True)
-        ChatStore(new_db).close()
+    # A chat server that never stored a row has not created its store
+    # yet, and one made by an older framework lacks the newer columns:
+    # opened once with the server's own schema, it has them.
+    from cousin_lib.server.storage import ChatStore
+    new_db.parent.mkdir(parents=True, exist_ok=True)
+    ChatStore(new_db).close()
     if marker.exists() and not force:
         raise ImportRefused("history already imported (%s)" % marker)
 
@@ -159,7 +159,7 @@ def import_history(old_home, new_home, *, force=False):
                 report["media_links_kept"] += 1
         out.append((r["id"], r["chat_user"], r["user"], message, r["timestamp"],
                     r["type"], r.get("archived") or 0, r.get("reply_to"),
-                    r.get("reply_to_user"), kind, path))
+                    r.get("reply_to_user"), kind, path, None, None))
     for r in cur_rows:
         nid = mapping[r["id"]]
         path = r.get("attachment_path")
@@ -170,7 +170,9 @@ def import_history(old_home, new_home, *, force=False):
         out.append((nid, r["chat_user"], r["user"], r["message"], r["timestamp"],
                     r["type"], r.get("archived") or 0,
                     _remap_reply(r.get("reply_to"), mapping),
-                    r.get("reply_to_user"), r.get("attachment_kind"), path))
+                    r.get("reply_to_user"), r.get("attachment_kind"), path,
+                    # a row still waiting for its inbox put keeps its mark and key
+                    r.get("delivery"), r.get("delivery_key")))
 
     rx = [(x["message_id"], x["user"], x["emoji"], x.get("tap_count") or 1,
            x["created"]) for x in old_rx]
@@ -185,7 +187,8 @@ def import_history(old_home, new_home, *, force=False):
             new.executemany(
                 "INSERT INTO messages (id, chat_user, user, message, timestamp,"
                 " type, archived, reply_to, reply_to_user, attachment_kind,"
-                " attachment_path) VALUES (?,?,?,?,?,?,?,?,?,?,?)", out)
+                " attachment_path, delivery, delivery_key)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", out)
             new.executemany(
                 "INSERT OR IGNORE INTO reactions (message_id, user, emoji,"
                 " tap_count, created) VALUES (?,?,?,?,?)", rx)

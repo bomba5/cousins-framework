@@ -29,7 +29,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 # The points this scenario reaches, and the most hits each can have in it
 # (chat.stored and chat.put fire for the chat message and the peer's).
 POINTS = {"chat.stored": 2, "chat.put": 2, "peer.seen": 1, "schedule.delivered": 1,
-          "job.registered": 1, "job.exited": 1}
+          "job.registered": 1, "job.exited": 1, "runner.result_recorded": 2}
 
 SCENARIO = r"""
 import os, pathlib, sys, time
@@ -79,8 +79,12 @@ def environ(root, crash=None):
     env = dict(os.environ, FRAMEWORK_ROOT=str(root), COUSIN_HOME=str(root / "cousins" / "wren"),
                PYTHONPATH=str(ROOT))
     env.pop("COUSIN_CRASH_AT", None)
+    env.pop("COUSIN_CRASH_MARK", None)
     if crash:
+        # every process that inherits it (a job's own runner too) names the
+        # point in the mark before it dies: a round can tell it fired
         env["COUSIN_CRASH_AT"] = crash
+        env["COUSIN_CRASH_MARK"] = str(root / "crash-mark")
     return env
 
 
@@ -160,6 +164,26 @@ def check(root):
     open_rows = [(s, b[:30], st) for s, b, st in inbox if st != "done"]
     if open_rows:
         broke.append("rows not answered: %r" % open_rows)
+    # answered once: every inbox row is named by exactly one turn's result
+    answered = {}
+    for path in (home / "data" / "stream").glob("*.jsonl"):
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if event.get("kind") == "result":
+                for i in (event.get("payload") or {}).get("inbox_ids") or ():
+                    answered[i] = answered.get(i, 0) + 1
+    ids = [r[0] for r in _rows(home / "data" / "inbox.db",
+                               "SELECT id FROM inbox WHERE outcome='delivered'"
+                               " AND detail NOT LIKE 'closed at restart%'")]
+    twice = {i: n for i, n in answered.items() if n > 1}
+    if twice:
+        broke.append("rows answered more than once: %r" % twice)
+    unanswered = [i for i in ids if i not in answered]
+    if unanswered:
+        broke.append("rows closed with no result naming them: %r" % unanswered)
     fired = _rows(root / "data" / "scheduled.db", "SELECT status FROM scheduled_jobs")
     if fired != [("fired",)]:
         broke.append("the one-shot reads %r" % fired)
@@ -185,11 +209,16 @@ def one_round_at(crash):
         root = pathlib.Path(tmp)
         setup(root)
         first = run(root, "all", crash=crash)
+        mark = root / "crash-mark"
+        fired = mark.read_text().split()[0] if mark.exists() else None
         failed = recover(root)
         broke = check(root)
+        if fired is None:
+            broke.append("the point never fired: the round proved nothing")
         for p in failed:
             broke.append("a recovery step failed (%d): %s" % (p.returncode, p.stderr[-400:]))
-        return {"crash_at": crash, "killed": first.returncode == -9, "broke": broke}
+        return {"crash_at": crash, "killed": first.returncode == -9, "fired": fired,
+                "broke": broke}
 
 
 def main(argv=None):

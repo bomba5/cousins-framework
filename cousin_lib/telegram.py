@@ -190,16 +190,16 @@ def _refuse_unless_runner(cfg):
         raise TelegramConfigError(delivery.lane_refusal(cfg.home))
 
 
-def _default_chat_send(cfg, *, user, message, attachment=None):
+def _default_chat_send(cfg, *, user, message, attachment=None, key=None):
     """One inbound message into the runner cousin's chat: the bridge
     stores the row and delivers it itself (_store_and_deliver). A cousin
     with no runner kind is refused before anything is stored."""
     _refuse_unless_runner(cfg)
     return _store_and_deliver(cfg, user=user, message=message,
-                              attachment=attachment)
+                              attachment=attachment, key=key)
 
 
-def _store_and_deliver(cfg, *, user, message, attachment=None):
+def _store_and_deliver(cfg, *, user, message, attachment=None, key=None):
     """Store the row and ride `deliver()`, the steps chat_api.send takes,
     with the bridge's own image folder. `attachment`
     is a data: URI (as relay_inbound built it); it is decoded to
@@ -216,19 +216,30 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
         finally:
             store.close()
         return
-    path = save_data_uri(cfg.home, attachment, folder="images") \
-        if attachment else None
+    # `key` names the Telegram update (tg:<update_id>): the bridge saves its
+    # offset after the relay, so one killed in between is handed the update
+    # again, and the row it stored then is the one delivered, never a second
+    key = key or chat_api.new_key()
     store = ChatStore(cfg.home / "data" / "chat.db")
     try:
-        row = store.add_message(
-            chat_user=normalize_chat_user(user), user=user, message=message,
-            msg_type="user",
-            attachment_kind="image" if path else None,
-            attachment_path=str(path) if path else None,
-            pending=True,
-        )
+        row = store.by_delivery_key(key)
     finally:
         store.close()
+    path = (Path(row["attachment_path"]) if row and row.get("attachment_path") else
+            save_data_uri(cfg.home, attachment, folder="images") if attachment and not row
+            else None)
+    if row is None:
+        store = ChatStore(cfg.home / "data" / "chat.db")
+        try:
+            row = store.add_message(
+                chat_user=normalize_chat_user(user), user=user, message=message,
+                msg_type="user",
+                attachment_kind="image" if path else None,
+                attachment_path=str(path) if path else None,
+                pending=True, delivery_key=key,
+            )
+        finally:
+            store.close()
 
     def deliver(*, user, message, message_id, attachments=()):
         source = "hook" if user == chat_hooks.HOOK_SENDER else "chat"
@@ -240,7 +251,7 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
         return delivery.deliver(cfg.home, item, wait=False)
 
     outcome = chat_api.deliver_stored(config, row["id"], deliver, user=user, message=message,
-                                      attachments=(str(path),) if path else ())
+                                      attachments=(str(path),) if path else (), key=key)
     if outcome == delivery.FAILED:
         # the runner will never see it: keep nothing, fire nothing, and
         # relay_inbound tells the sender instead of leaving them waiting
@@ -283,7 +294,10 @@ def relay_inbound(cfg, *, update, chat_send=None, tg_send=None,
         except Exception:
             pass
         return  # silent on the wire, logged above
-    chat_send = chat_send or (lambda **kw: _default_chat_send(cfg, **kw))
+    # the update's own key: handed the same update again (the bridge died
+    # before saving its offset), the row stored for it is the one delivered
+    key = "tg:%s" % update["update_id"] if update.get("update_id") is not None else None
+    chat_send = chat_send or (lambda **kw: _default_chat_send(cfg, key=key, **kw))
     user = _thread_name(cfg, sender["id"])
     chat_id = (message.get("chat") or {}).get("id", sender["id"])
     try:

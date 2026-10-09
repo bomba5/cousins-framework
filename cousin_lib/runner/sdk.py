@@ -1754,6 +1754,7 @@ class SdkRunner:
         try:
             with self._waiting_at("send"):
                 await self._client.query(gen)
+            crashpoint("sdk.written")
         except Exception as exc:
             if not yielded or _nothing_written(sdk, exc):
                 raise _NotWritten(row, exc) from exc
@@ -2487,6 +2488,7 @@ class SdkRunner:
                                           "is_error": is_error, "num_turns": msg.num_turns,
                                           "total_cost_usd": msg.total_cost_usd,
                                           "session_id": msg.session_id, "usage": msg.usage})
+            crashpoint("runner.result_recorded")
         finally:
             while closing:
                 self.inbox.done(closing[0]["id"], outcome,

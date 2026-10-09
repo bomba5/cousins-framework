@@ -29,6 +29,7 @@ import time
 import uuid
 from pathlib import Path
 
+from cousin_lib.crashpoint import crashpoint
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
 from cousin_lib.runner import blocks, restart_note, transcript, tmux_hook, tmux_turn, wake
 from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, RunnerError
@@ -1086,6 +1087,7 @@ class TmuxRunner:
             key = (e.end, k)
             try:
                 self._handle(e)
+                crashpoint("tmux.handled")
                 if self._line_fails:
                     self._line_fails.pop(key, None)
             except Exception as exc:  # noqa: BLE001 - replayed, then skipped

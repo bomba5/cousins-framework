@@ -10,7 +10,12 @@ What `accept` enforces, for every caller:
   time (`sent_at`, epoch seconds) within WINDOW_S of this host's clock;
 - an (identity, msg_id) pair is delivered at most once: the id is kept for
   SEEN_KEEP_S (longer than the window, so a replay is either stale or
-  seen); a delivery that fails frees it, so the sender may retry;
+  seen); a delivery that fails frees it, so the sender may retry; an id
+  whose delivery never returned (the gate was killed in between) is
+  delivered by the retry, under the key `peer:<identity>:<msg_id>`, unless
+  the cousin's inbox already holds that key (then it answers 409); a
+  replay while the id's delivery is still running, or while the inbox
+  cannot be read, answers 503 (retry);
 - at most RATE_PER_MIN messages per identity in any minute, at most
   MAX_MESSAGE characters each, never empty;
 - the destination is one the route allows (`allowed(slug)`: a hive node
@@ -43,6 +48,9 @@ import time
 import unicodedata
 from pathlib import Path
 
+from cousin_lib.crashpoint import crashpoint
+from cousin_lib.sqlite_util import add_column
+
 WINDOW_S = 300.0          # how far a send time may be from this host's clock
 SEEN_KEEP_S = 900.0       # how long a delivered id is remembered (> 2 x WINDOW_S)
 RATE_PER_MIN = 30         # messages per identity in any 60 s
@@ -73,7 +81,25 @@ def _db(root):
     conn = sqlite3.connect(path, timeout=10, isolation_level=None)
     conn.execute("CREATE TABLE IF NOT EXISTS seen (identity TEXT NOT NULL, msg_id TEXT NOT NULL,"
                  " at REAL NOT NULL, PRIMARY KEY (identity, msg_id))")
+    # 0 from the id's record until its delivery returned (or timed out): a
+    # gate killed in between leaves 0, and the sender's retry delivers it
+    # (under its key) instead of hearing "already delivered" for a message
+    # that never landed
+    add_column(conn, "seen", "settled", "INTEGER NOT NULL DEFAULT 1")
     return conn
+
+
+def _key(identity, msg_id):
+    return "peer:%s:%s" % (identity, msg_id)
+
+
+# keys this process is delivering now: an unsettled id in here is in
+# flight (a concurrent replay answers 503, retry), one not in here was left
+# by a gate that died. One gate process per root (the console) is assumed:
+# a second one would read the first's in-flight ids as orphans, and the
+# keyed put would still keep the inbox to one row (only the chat.db line
+# would repeat).
+_IN_FLIGHT = set()
 
 
 def _target(root, to, allowed):
@@ -100,6 +126,27 @@ def _target(root, to, allowed):
 _LATIN_EXTRA = {"ø": "o", "Ø": "O", "æ": "ae", "Æ": "AE", "œ": "oe", "Œ": "OE",
                 "ß": "ss", "ł": "l", "Ł": "L", "đ": "d", "Đ": "D", "þ": "th",
                 "Þ": "TH", "ð": "d", "Ð": "D"}
+
+
+def _landed(target, key):
+    """True when the target's inbox holds the row put under `key`: a first
+    delivery that landed before its gate died. None when the inbox cannot
+    be read: unknown, answered 503 (the sender retries), never a 409 the
+    sender would count delivered."""
+    from cousin_lib.runner.inbox import Inbox
+    try:
+        return Inbox(target.home).keyed_id(key) is not None
+    except (OSError, sqlite3.Error):
+        return None
+
+
+def _settle(conn, identity, msg_id):
+    conn.execute("UPDATE seen SET settled = 1 WHERE identity = ? AND msg_id = ?",
+                 (identity, msg_id))
+
+
+def _free(conn, identity, msg_id):
+    conn.execute("DELETE FROM seen WHERE identity = ? AND msg_id = ?", (identity, msg_id))
 
 
 def _ascii_base(char):
@@ -166,8 +213,6 @@ def check_display(root, target, display):
 def accept(root, *, identity, display, to, message, msg_id, sent_at, allowed, now=None):
     """Deliver one authenticated message or raise Refused. Returns the
     delivery's body ({"ok", "id", ...})."""
-    from cousin_lib import chat
-    from cousin_lib.server import chat_api
     now = time.time() if now is None else now
     if not isinstance(msg_id, str) or not _ID.match(msg_id):
         raise Refused(400, "msg_id must be 8-128 letters, digits, '-' or '_'")
@@ -189,6 +234,7 @@ def accept(root, *, identity, display, to, message, msg_id, sent_at, allowed, no
         raise Refused(400, "message is longer than %d characters" % MAX_MESSAGE)
     target = _target(root, to, allowed)
     check_display(root, target, display)
+    key = _key(identity, msg_id)
     conn = _db(root)
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -199,36 +245,72 @@ def accept(root, *, identity, display, to, message, msg_id, sent_at, allowed, no
             conn.execute("COMMIT")
             raise Refused(429, "more than %d messages a minute from %s" % (RATE_PER_MIN, identity))
         try:
-            conn.execute("INSERT INTO seen (identity, msg_id, at) VALUES (?, ?, ?)",
+            conn.execute("INSERT INTO seen (identity, msg_id, at, settled) VALUES (?, ?, ?, 0)",
                          (identity, msg_id, now))
         except sqlite3.IntegrityError:
-            conn.execute("COMMIT")
-            raise Refused(409, "message %s from %s was already delivered" % (msg_id, identity))
+            settled = conn.execute("SELECT settled FROM seen WHERE identity = ? AND msg_id = ?",
+                                   (identity, msg_id)).fetchone()[0]
+            if settled:
+                conn.execute("COMMIT")
+                raise Refused(409, "message %s from %s was already delivered" % (msg_id, identity))
+            if key in _IN_FLIGHT:
+                # its delivery may still fail and free the id: a 409 now
+                # would read as delivered to a sender that stops listening
+                conn.execute("COMMIT")
+                raise Refused(503, "message %s from %s is being delivered; retry" % (msg_id, identity))
+            # unsettled and in no delivery of this process: the gate that
+            # recorded it died before its delivery returned. Delivered now,
+            # unless the cousin's inbox holds the key (it landed first).
+            landed = _landed(target, key)
+            if landed is None:
+                conn.execute("COMMIT")
+                raise Refused(503, "the cousin's inbox cannot be read; retry")
+            if landed:
+                _settle(conn, identity, msg_id)
+                conn.execute("COMMIT")
+                raise Refused(409, "message %s from %s was already delivered" % (msg_id, identity))
+        _IN_FLIGHT.add(key)         # under the write lock: a replay now reads it in flight
         conn.execute("COMMIT")
         try:
-            return chat.deliver_to(target, {"user": display, "message": message})
-        except (TimeoutError, socket.timeout) as err:
-            # it may have landed: keep the id, so a retry is not a duplicate
-            print("peer_inbound: delivery of %s from %s to %s timed out: %s"
-                  % (msg_id, identity, target.slug, err), file=sys.stderr)
-            raise Refused(504, "delivery timed out; the message may have landed")
-        except chat.DeliveryRefused as err:
-            # the cousin has no runner kind: absent, as to anyone outside,
-            # and final (a 5xx would have the sender retry for nothing)
-            conn.execute("DELETE FROM seen WHERE identity = ? AND msg_id = ?", (identity, msg_id))
-            print("peer_inbound: delivery of %s from %s to %s refused: %s"
-                  % (msg_id, identity, target.slug, err), file=sys.stderr)
-            raise Refused(404, "no cousin %r here" % to)
-        except chat_api.NotDelivered as err:
-            # nothing was kept: free the id so the sender's retry delivers it
-            conn.execute("DELETE FROM seen WHERE identity = ? AND msg_id = ?", (identity, msg_id))
-            print("peer_inbound: delivery of %s from %s to %s: %s"
-                  % (msg_id, identity, target.slug, err), file=sys.stderr)
-            raise Refused(502, "not delivered: the cousin's inbox did not take it; retry")
-        except Exception as err:  # noqa: BLE001 - answered as a 502, logged here
-            conn.execute("DELETE FROM seen WHERE identity = ? AND msg_id = ?", (identity, msg_id))
-            print("peer_inbound: delivery of %s from %s to %s failed: %s: %s"
-                  % (msg_id, identity, target.slug, type(err).__name__, err), file=sys.stderr)
-            raise Refused(502, "delivery failed; the message was not delivered")
+            crashpoint("peer.seen")
+            return _deliver(conn, target, identity, display, to, message, msg_id, key)
+        finally:
+            _IN_FLIGHT.discard(key)
     finally:
         conn.close()
+
+
+def _deliver(conn, target, identity, display, to, message, msg_id, key):
+    """The delivery of one recorded id, under its key; the id is settled
+    (kept) when it landed or may have, freed when nothing was kept."""
+    from cousin_lib import chat, delivery
+    from cousin_lib.server import chat_api
+    try:
+        with delivery.keyed(key):
+            out = chat.deliver_to(target, {"user": display, "message": message})
+        _settle(conn, identity, msg_id)
+        return out
+    except (TimeoutError, socket.timeout) as err:
+        # it may have landed: keep the id, so a retry is not a duplicate
+        _settle(conn, identity, msg_id)
+        print("peer_inbound: delivery of %s from %s to %s timed out: %s"
+              % (msg_id, identity, target.slug, err), file=sys.stderr)
+        raise Refused(504, "delivery timed out; the message may have landed")
+    except chat.DeliveryRefused as err:
+        # the cousin has no runner kind: absent, as to anyone outside,
+        # and final (a 5xx would have the sender retry for nothing)
+        _free(conn, identity, msg_id)
+        print("peer_inbound: delivery of %s from %s to %s refused: %s"
+              % (msg_id, identity, target.slug, err), file=sys.stderr)
+        raise Refused(404, "no cousin %r here" % to)
+    except chat_api.NotDelivered as err:
+        # nothing was kept: free the id so the sender's retry delivers it
+        _free(conn, identity, msg_id)
+        print("peer_inbound: delivery of %s from %s to %s: %s"
+              % (msg_id, identity, target.slug, err), file=sys.stderr)
+        raise Refused(502, "not delivered: the cousin's inbox did not take it; retry")
+    except Exception as err:  # noqa: BLE001 - answered as a 502, logged here
+        _free(conn, identity, msg_id)
+        print("peer_inbound: delivery of %s from %s to %s failed: %s: %s"
+              % (msg_id, identity, target.slug, type(err).__name__, err), file=sys.stderr)
+        raise Refused(502, "delivery failed; the message was not delivered")

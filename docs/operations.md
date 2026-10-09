@@ -376,19 +376,23 @@ session, resets its generation and mines turns again. Search indexes are
 skipped; they're rebuilt on the next search. A second run on the same day
 overwrites that day's snapshot.
 
-The order is fixed: `inbox.db` first, then the other databases, then the
-streams, then the state files. A turn commits its reply to `chat.db`
-before it marks its row `done` in `inbox.db`, so with the inbox copied first
-a row that is `done` in the snapshot has its reply in the snapshot too. The
-other way round, a reply written while `chat.db` was being copied could be
-missing while its row reads `done`, and nothing would answer it again.
+The order is fixed: `inbox.db` first, then the streams, then the other
+databases, then the state files. A turn commits its reply to `chat.db`,
+then writes its result to the stream, then marks its row `done` in
+`inbox.db`, and each copy is taken before the store written ahead of it. So
+a row that is `done` in the snapshot has its result and its reply in the
+snapshot too. In another order, a reply written while `chat.db` was being
+copied could be missing while its row reads `done`, and nothing would
+answer it again.
 
 A snapshot taken while the runner is mid-turn restores cleanly: the row it
 was answering is `claimed` in the copy, and the runner's start puts every
 claim back in the queue (it holds the home's lock, so no other runner owns
 one), then answers it. That is at-least-once, not once: if the turn had
 already replied when the snapshot ran, the restored runner answers that row
-a second time. No message is lost.
+a second time. A row whose result is in the copied stream is closed instead,
+and its reply is in the copy: the streams are copied before `chat.db`, and a
+turn writes its reply before its result. No message is lost.
 
 What it doesn't copy: `cousin.toml`, `notes/`, the other files in `data/`
 (`decisions.jsonl`, `corrections.jsonl`, `handoff.md` and friends), and

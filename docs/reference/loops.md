@@ -110,7 +110,7 @@ What the cousin gets:
 - a one-shot: `[cousin-schedule] #<id>, set <time>, due <time>, fired <time> (on time | N min late). ...`, a blank line, then the prompt (see [One-shots](#one-shots));
 - a flip warning: `[cousin-flip] wrap up tool calls - flip in 5 minutes`, and so on.
 
-Nothing is recorded as fired until the row is in the inbox. If the put fails (the inbox can't be opened or written), the loops stay due, the heartbeat's file changes stay unreported, the trigger file stays, the one-shot stays pending, and the next tick tries again. The flip side: if the daemon dies between the put and saving its state, the same thing is delivered again. So everything here is at least once. Write loop prompts that don't mind running twice now and then; heartbeats already don't.
+Nothing is recorded as fired until the row is in the inbox. If the put fails (the inbox can't be opened or written), the loops stay due, the heartbeat's file changes stay unreported, the trigger file stays, the one-shot stays pending, and the next tick tries again. The flip side: if the daemon dies between the put and saving its state, the same thing is delivered again. So everything here is at least once. Write loop prompts that don't mind running twice now and then; heartbeats already don't. A one-shot is the exception for a runner cousin: its put carries the key `schedule:<id>`, the inbox keeps one row per key, and the repeat after a crash finds the first row and marks the job fired without a second delivery.
 
 ## Context heartbeats
 

@@ -135,3 +135,12 @@ class JobsAndArtifactsFollowTheHiddenToggle(unittest.TestCase):
         self.assertIn("hiddenSlugs={hiddenSlugs} showHidden={showHidden} />", self.view)
         self.assertIn("visibleJobs(allJobs", self.jobs)
         self.assertIn("data-jobs-hidden", self.jobs)
+
+
+class JobRowShowsItsCommit(unittest.TestCase):
+    """A job run against a commit (a test suite) says which, on its row."""
+
+    def test_the_row_names_the_commit(self):
+        jobs = _component(_read("views.jsx"), "JobsList")
+        self.assertIn("data-job-commit", jobs)
+        self.assertIn("j.git_commit.slice(0, 12)", jobs)

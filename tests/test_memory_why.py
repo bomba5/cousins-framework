@@ -345,6 +345,23 @@ class TestTypedRefs(HomeCase):
         self.assertIn("commit 3f2a9c1", text)
         self.assertIn("image rev A - built", text)
 
+    def test_a_verdict_walks_to_the_commit_its_job_ran_against(self):
+        """A test run builds no artifact; its job row carries the commit
+        and the verdict, and `why` shows both."""
+        from cousin_lib import jobs
+        suite = jobs.register_job(kind="shell", title="full suite", spawned_by="wren",
+                                  commit="bd42aa1")
+        jobs.finish_job(suite, status="done", summary="last log line: OK (skipped=69)",
+                        exit_code=0)
+        memory.remember(self.home, "suite", "the suite is green at bd42aa1",
+                        derived_from=["job:%d" % suite])
+        (c,) = self.ids("suite")
+        out = memory.why(self.home, c)
+        (job,) = out["derived_from"]
+        self.assertEqual(job["git_commit"], "bd42aa1")
+        self.assertIn("full suite at commit bd42aa1 - last log line: OK (skipped=69)",
+                      memory.format_why(out))
+
     def test_a_job_or_artifact_that_does_not_exist_is_refused(self):
         with self.assertRaisesRegex(ValueError, "names no job"):
             memory.check_derived(["job:999999"], home=self.home)

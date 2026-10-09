@@ -275,6 +275,10 @@ function JobsList({ tabs, hiddenSlugs, showHidden }) {
                 $ {j.command}
               </div>
             )}
+            {j.git_commit && (
+              <div style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--fg-3)", marginBottom: 4 }}
+                   title={j.git_commit} data-job-commit>at commit {j.git_commit.slice(0, 12)}</div>
+            )}
             {!j.log_path && (
               <div style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--fg-3)", marginBottom: 4 }}>no log attached</div>
             )}

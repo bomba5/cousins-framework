@@ -36,7 +36,12 @@ cousin-job tail 15 -f
 With a command after `--`, the job runs detached, writes its output to
 `data/job-logs/job-<id>.log` under the framework root (or wherever
 `--log` says), and closes itself as `done` or `failed` with the
-command's exit code. You don't call `done` for those. A job started
+command's exit code, and with the command's last non-empty output line
+as its summary (`last log line: OK (skipped=69)`), a hint beside the
+exit code, which stays the verdict (only this run's output counts, and
+the line is copied into the store, so a command that prints a secret
+last spreads it). You don't call `done` for those; a `done` or `fail`
+with a summary still replaces the line. A job started
 without a command still gets a log in the same place: its title and
 `--desc` at start, its outcome and summary at `done`, `fail` or
 `cancel`. Don't point
@@ -55,9 +60,11 @@ is refused.
 A cousin does the same through its `job` tool without a shell: `run`
 with `title` and `argv` (the command as an array, never a shell string),
 and optionally `desc`, `log` (relative to its home, passed as
-`--home-log`), and `artifacts` with `commit`: the files the command
-builds, relative to its home, recorded as artifacts of the job when it
-exits 0 (passed as `--artifact` and `--artifact-commit`), and `notify`: when
+`--home-log`), `artifacts`: the files the command builds, relative to
+its home, recorded as artifacts of the job when it exits 0 (passed as
+`--artifact`), `commit`: the git commit the command runs against, kept
+on the row and on each artifact (passed as `--commit`; a test run gives
+it with no artifacts), and `notify`: when
 the job ends (done, failed or lost) one row lands in the cousin's
 [inbox](glossary.md#inbox) with
 its status, exit code and log path, so it waits for the job instead of
@@ -148,7 +155,7 @@ its sha256, size and mtime, measured then, with the producing job (it
 must exist in the jobs store), the commit it was built from and a
 one-line note. A file still being written while it is hashed is refused;
 record it when the build is done. A job can record its own: `cousin-job
-start shell --artifact PATH [--artifact-commit SHA] -- TITLE CMD` (the
+start shell --artifact PATH [--commit SHA] -- TITLE CMD` (the
 job tool's `run` with `artifacts` and `commit`) records each named file
 for the job once the command exits 0, before the row closes, with a line
 per file in the job's log; a named file that is not there fails the job

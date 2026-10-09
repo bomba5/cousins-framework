@@ -124,7 +124,7 @@ active = { type = "boolean", description = "(list)" }
 json = { type = "boolean", description = "machine output (start, list, show)" }
 argv = { type = "array", items = "string", description = "the command as a list, one element per argument, never a shell string (run)" }
 artifacts = { type = "array", items = "string", optional = true, description = "files the command builds, relative to your home (where run starts the command) or absolute (run): on exit 0 each is recorded as a shared artifact row of the job (path, sha256, size, readable by every cousin); one that is missing fails the job. A private path goes through cousin-artifact add --private instead" }
-commit = { type = "string", optional = true, description = "the git commit the artifacts were built from (run)" }
+commit = { type = "string", optional = true, description = "the git commit the command runs against, kept on the job row and on each artifact it records: a test run names the commit it tested (run)" }
 log = { type = "string", optional = true, description = "log file, relative to your home (not absolute, no .., not in .secrets); default: the job's own log under data/job-logs (run)" }
 notify = { type = "boolean", optional = true, description = "when the job ends, one row in your inbox with its status, exit code and log, so you need not poll it (run)" }
 
@@ -139,7 +139,7 @@ options = { desc = "--desc", json = "--json" }
 # title after it, so a title such as "--json" is never read as an option.
 # --home-log confines the log to the home.
 argv = ["start", "shell", "--json", "--", "{title}", "{argv}"]
-options = { desc = "--desc", log = "--home-log", artifacts = "--artifact", commit = "--artifact-commit", notify = "--notify" }
+options = { desc = "--desc", log = "--home-log", artifacts = "--artifact", commit = "--commit", notify = "--notify" }
 
 [tools.job.commands.done]
 argv = ["done", "{id}", "{summary}"]

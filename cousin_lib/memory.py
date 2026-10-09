@@ -581,6 +581,8 @@ def typed_node(ref):
             if row.get("exit_code") is not None:
                 head += " (exit %s)" % row["exit_code"]
             text = " ".join(str(row.get("title") or "").split())
+            if row.get("git_commit"):
+                text += " at commit %s" % row["git_commit"]
             if row.get("result_summary"):
                 text += " - " + " ".join(str(row["result_summary"]).split())
             built = artifacts.list_rows(job_id=int(num))
@@ -588,7 +590,8 @@ def typed_node(ref):
                 text += "; artifacts %s" % ", ".join("artifact:%s" % a["id"] for a in built)
             return {"id": ref, "kind": "job", "truth_level": "L2_TOOL", "topic": head,
                     "content": text, "status": row.get("status"),
-                    "exit_code": row.get("exit_code"), "spawned_by": row.get("spawned_by")}
+                    "exit_code": row.get("exit_code"), "spawned_by": row.get("spawned_by"),
+                    "git_commit": row.get("git_commit")}
         from cousin_lib import artifacts
         row = artifacts.get(int(num))
         if not row:

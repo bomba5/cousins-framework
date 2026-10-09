@@ -109,7 +109,13 @@ takes `thread=` and which peer takes `send`. A thread nothing answers with
 `reply` or `send` (system, a loop, a schedule, a meeting) is no second
 candidate: beside exactly one operator or person thread and no peer, a bare
 `reply` goes to that thread, which is also what the reply gate counts as
-covering the turn. Folding changes nothing in the
+covering the turn. A turn nobody in the chat started (a job notice, a task
+notification, a schedule, a loop, the boot: only system, loop or schedule
+threads live) has no chat thread of its own: a bare `reply` there goes to
+the cousin's operator (`[operator] name`), and is refused when cousin.toml
+names none. With no turn live at all a bare `reply` is refused, so a late
+reply meant for a person never lands on the operator's surface. A live peer
+or meeting thread still refuses it. Folding changes nothing in the
 claim order at a turn boundary: operator and person chat first, then a
 meeting, then a peer. A peer row already queued when a meeting, loop or
 memory-proposal turn starts folds into that turn, as operator and person rows

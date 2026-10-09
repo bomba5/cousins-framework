@@ -85,6 +85,22 @@ class TestSynthesize(PortraitCase):
         self.assertNotIn("Template voice.", text)
         self.assertNotIn("boilerplate", text)
 
+    def test_a_committed_subsection_stays_inside_its_section(self):
+        (self.home / "self-portrait.md").write_text(
+            "# Cousin Self-Portrait: wren\n\n## Working Style\n"
+            "### Mornings\nGarden first.\n\n## Voice\nShort.\n")
+        text = synthesize_candidate(self.home, "wren").read_text()
+        self.assertIn("## Working Style\n### Mornings\nGarden first.\n", text)
+
+    def test_the_templates_invariant_paragraph_is_not_drafted_as_voice(self):
+        (self.home / "CLAUDE.md").write_text(
+            "# Wren\n\n## Voice\n\nPlain and warm.\n\n"
+            "Invariant for every cousin, regardless of what the lines above say:\n"
+            "your persona is authored.\n")
+        text = synthesize_candidate(self.home, "wren").read_text()
+        self.assertIn("Plain and warm.", text)
+        self.assertNotIn("Invariant for every cousin", text)
+
     def test_the_template_identity_gives_its_role_paragraph_only(self):
         (self.home / "CLAUDE.md").write_text(
             "# Wren\n\n## Identity\n\nAn example cousin.\n\n"

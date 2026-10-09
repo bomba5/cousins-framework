@@ -179,6 +179,15 @@ class TestWriteState(SyncCase):
         self.assertTrue((other / "data" / "state.json").is_file())
         self.assertFalse((self.home / "data" / "state.json").exists())
 
+    def test_cli_still_works_and_says_it_is_deprecated(self):
+        (self.home / "STATUS.md").write_text("## Open loops\n- x\n")
+        rc, out, err = self._main([])
+        self.assertEqual(rc, 0)
+        self.assertIn("1 open", out)
+        self.assertIn("deprecated (3.47.0)", err)
+        self.assertIn("removed in 4.0.0", err)
+        self.assertTrue((self.home / "data" / "state.json").is_file())
+
     def test_no_context_refuses(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             rc, _, err = self._main([])

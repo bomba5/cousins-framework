@@ -29,44 +29,37 @@ class CheckpointCase(HermeticCase):
         return path
 
 
-class TestSessionCheckpoint(CheckpointCase):
-    def test_writes_the_three_headings_and_the_activity_line(self):
-        self._write("data/last-activity.txt", "2026-09-23T09:58: wiring the kettle sensor\n")
-        path = checkpoints.write_session_checkpoint(self.home, slug="wren", now=NOW)
-        self.assertEqual(path, self.home / "data" / "session-checkpoint.md")
-        text = path.read_text()
-        self.assertTrue(text.startswith("# Session checkpoint - wren - 2026-09-23T10:00:00+0000"))
-        for heading in ("## What was happening", "## Open work (from STATUS.md)",
-                        "## Last decisions"):
-            self.assertIn(heading, text)
-        self.assertIn("wiring the kettle sensor", text)
+class TestOpenWork(CheckpointCase):
+    """Meeting 11 A: STATUS.md is the one copy of the open loops. The
+    per-turn session checkpoint is gone, and a stray data/state.json (an
+    older framework wrote one) is never read."""
 
-    def test_open_work_comes_from_state_json_else_the_status_open_loops_block(self):
+    def test_the_session_checkpoint_is_gone(self):
+        self.assertFalse(hasattr(checkpoints, "write_session_checkpoint"))
+
+    def test_open_work_comes_from_the_status_open_loops_block_only(self):
         self._write("STATUS.md", "# Wren - STATUS\n\n## Open loops\n"
                     "- **Toki's printer queue** stalls on job 3\n- [x] closed item\n\n"
                     "## Parked\n- nothing here\n\n## Open loops (gen 3)\n- old history\n")
-        text = checkpoints.write_session_checkpoint(self.home, slug="wren", now=NOW).read_text()
+        self._write("data/state.json", json.dumps({"open_loops": [
+            {"text": "Sam's backup rotation", "done": False, "partial": True}]}))
+        text = checkpoints.write_pre_compact_checkpoint(self.home, slug="wren", now=NOW).read_text()
         self.assertIn("Toki's printer queue", text)
         self.assertNotIn("old history", text); self.assertNotIn("nothing here", text)
-        self._write("data/state.json", json.dumps({"open_loops": [
-            {"text": "Sam's backup rotation", "done": False, "partial": True},
-            {"text": "finished thing", "done": True, "partial": False}]}))
-        text = checkpoints.write_session_checkpoint(self.home, slug="wren", now=NOW).read_text()
-        self.assertIn("- [~] Sam's backup rotation", text)
-        self.assertNotIn("finished thing", text); self.assertNotIn("Toki's printer queue", text)
+        self.assertNotIn("Sam's backup rotation", text)
 
     def test_includes_the_last_five_decisions(self):
         lines = [json.dumps({"topic": "t%d" % i, "decision": "choice %d" % i,
                              "reasoning": "because %d" % i}) for i in range(7)]
         self._write("data/decisions.jsonl", "\n".join(lines) + "\n")
-        text = checkpoints.write_session_checkpoint(self.home, slug="wren", now=NOW).read_text()
+        text = checkpoints.write_pre_compact_checkpoint(self.home, slug="wren", now=NOW).read_text()
         for i in range(2, 7):
             self.assertIn("- [t%d] choice %d (why: because %d)" % (i, i, i), text)
         self.assertNotIn("choice 1", text)
         # The script's `tail -n 5` then parse: a torn line in the tail is skipped.
         with open(self.home / "data" / "decisions.jsonl", "a") as fh:
             fh.write("not json\n")
-        text = checkpoints.write_session_checkpoint(self.home, slug="wren", now=NOW).read_text()
+        text = checkpoints.write_pre_compact_checkpoint(self.home, slug="wren", now=NOW).read_text()
         self.assertNotIn("not json", text); self.assertIn("choice 6", text)
 
 
@@ -114,10 +107,6 @@ class TestEmptyHome(HermeticCase):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         home = pathlib.Path(tmp.name) / "wren"
         home.mkdir()
-        session = checkpoints.write_session_checkpoint(home, now=NOW).read_text()
-        self.assertIn("# Session checkpoint - wren - ", session)
-        for missing in ("No activity recorded.", "No STATUS.md.", "None recorded."):
-            self.assertIn(missing, session)
         pre = checkpoints.write_pre_compact_checkpoint(home, now=NOW).read_text()
         for missing in ("Unknown.", "None recorded.", "No STATUS.md.", "No event stream."):
             self.assertIn(missing, pre)

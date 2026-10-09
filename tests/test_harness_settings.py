@@ -58,9 +58,9 @@ class TestFreshWrite(SettingsCase):
     def test_shell_hooks_are_absolute_and_carry_the_home(self):
         self._apply()
         data = self._read()
+        self.assertEqual(self._commands(data, "Stop"), [])     # retired in 3.47.0
         for event, script in (("SessionStart", "session_init.sh"),
-                              ("PreCompact", "pre_compact.sh"),
-                              ("Stop", "session_checkpoint.sh")):
+                              ("PreCompact", "pre_compact.sh")):
             cmds = self._commands(data, event)
             self.assertEqual(len(cmds), 1, event)
             argv = shlex.split(cmds[0])
@@ -73,14 +73,14 @@ class TestFreshWrite(SettingsCase):
         self.home = self.root / "cousins" / "with space"
         self.home.mkdir(parents=True)
         self._apply()
-        cmd = self._commands(self._read(), "Stop")[0]
+        cmd = self._commands(self._read(), "PreCompact")[0]
         self.assertEqual(shlex.split(cmd)[1], str(self.home))
 
     def test_no_hooks_dir_skips_the_shell_hooks_and_says_so(self):
         out = self._apply(hooks_root=self.root / "nowhere")
         data = self._read()
-        self.assertEqual(self._commands(data, "Stop"), [])
-        self.assertIn("session_checkpoint.sh", " ".join(out["missing"]))
+        self.assertEqual(self._commands(data, "PreCompact"), [])
+        self.assertIn("pre_compact.sh", " ".join(out["missing"]))
 
 
 class TestJobHooks(SettingsCase):
@@ -142,8 +142,7 @@ class TestMerge(SettingsCase):
         self.assertEqual(data["model"], "kept")
         self.assertEqual(data["enabledMcpjsonServers"], ["other", "cousin"])
         cmds = self._commands(data, "Stop")
-        self.assertIn("/opt/mine.sh", cmds)
-        self.assertEqual(len(cmds), 2)
+        self.assertEqual(cmds, ["/opt/mine.sh"])
 
     def test_a_second_run_changes_nothing(self):
         self._apply()
@@ -154,13 +153,23 @@ class TestMerge(SettingsCase):
     def test_an_entry_from_a_moved_checkout_is_replaced_not_doubled(self):
         path = settings_path(self.home)
         path.parent.mkdir()
-        path.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [
+        path.write_text(json.dumps({"hooks": {"PreCompact": [{"hooks": [
             {"type": "command",
-             "command": "/old/checkout/hooks/session_checkpoint.sh /x"}]}]}}))
+             "command": "/old/checkout/hooks/pre_compact.sh /x"}]}]}}))
         self._apply()
-        cmds = self._commands(self._read(), "Stop")
+        cmds = self._commands(self._read(), "PreCompact")
         self.assertEqual(len(cmds), 1)
         self.assertNotIn("/old/checkout", cmds[0])
+
+    def test_the_retired_stop_checkpoint_is_stripped_from_an_old_home(self):
+        # 3.47.0 dropped it (meeting 11 A): an apply removes it, foreign hooks stay
+        path = settings_path(self.home)
+        path.parent.mkdir()
+        path.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [
+            {"type": "command", "command": "/old/checkout/hooks/session_checkpoint.sh /x"},
+            {"type": "command", "command": "/opt/mine.sh"}]}]}}))
+        self._apply()
+        self.assertEqual(self._commands(self._read(), "Stop"), ["/opt/mine.sh"])
 
     def test_unreadable_settings_are_refused_not_clobbered(self):
         path = settings_path(self.home)

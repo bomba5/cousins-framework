@@ -94,8 +94,8 @@ class Hysteresis:
 def handoff_request_text(reason):
     reason = str(reason or "rollover").strip()
     ask = ("Call the `handoff` tool now, exactly once, with position, next_action and"
-           " status, plus active_threads (a list of one-line strings) and learned (a list"
-           " of objects, each with topic and fact) when you have them. The next"
+           " status, plus learned (a list of objects, each with topic and fact) when you"
+           " have it. The next"
            " generation starts from what you write; nothing else is needed from you"
            " in this turn.")
     if is_bequest(reason):                       # a bequest: quoted whole, answered in the tool
@@ -211,8 +211,7 @@ def clear_journal(home):
 def archive_generation(home, generation):
     arch = Path(home) / "data" / "generations" / ("gen-%04d" % generation)
     arch.mkdir(parents=True, exist_ok=True)
-    for src in (Path(home) / "STATUS.md", Path(home) / "data" / "handoff.md",
-                Path(home) / "data" / "active-threads.md"):
+    for src in (Path(home) / "STATUS.md", Path(home) / "data" / "handoff.md"):
         if src.exists():
             shutil.copyfile(src, arch / src.name)
     return arch

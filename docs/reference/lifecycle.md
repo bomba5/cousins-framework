@@ -13,11 +13,11 @@ STATE DIGEST FOR COUSIN: wren
 Generation: 12
 state_hash: 7c21e9aa0b13
 memory_snapshot: 2026-09-18T07:30:02+00:00
-DEGRADED layers: task_packet
+DEGRADED layers: active_state
 
 ## 1. Operator Calibration
 ...
-## 5. Retrieved Memories
+## 4. Retrieved Memories
 ...
 ## 6. Shared Reference
 ...
@@ -35,7 +35,6 @@ DEGRADED layers: task_packet
 | Standing instructions | system prompt | the cousin's L0 entries whose topic carries a preferences word ("rule:", "feedback", "preference", "prefers", "tone", "register", "style"; `distill.standing_instruction`), the newest entry per topic in full, sorted by topic, under "# Your operator's standing instructions" | left out |
 | Operator Calibration | digest | the curated text above the marker in `memory/distilled/operator-calibration.md`, the other L0 entries (one line per topic, the view's line) newest first. Standing instructions are not repeated here. The portrait's own calibration section is in the identity already | left out |
 | Active State | digest | the live `## Open loops` section of STATUS.md, the bare heading the handoff writes (a suffixed `## Open loops (...)` heading is history; see [memory](../memory.md)) (or the first 1500 characters when there's no such section), then the first 1500 characters of `data/handoff.md`. A stale warning goes on top when decisions were logged after STATUS.md was last changed | `(no active state - degraded boot)`, **degraded** |
-| Current Task Packet | digest | `data/active-threads.md` (first 1500 characters) and the last three reasoning capsules from `memory/distilled/reasoning-capsules.md` | `(no in-flight tasks - check STATUS.md)`. Only **degraded** if Active State is empty too |
 | Recent Tool Trace Summary | digest | the cousin's traced CLI calls from the last 24 hours, newest first, up to 30 | `(no substantive tool traces in last 24h)`, fine |
 | Retrieved Memories | digest | the [distilled](../glossary.md#distilled) files in `memory/distilled/` (preferences, project facts, decisions, known failures, glossary; calibration has its own layer), the last five capsule conclusions from `memory/capsules.jsonl`, the last 60 entries from the newest 14 files in `memory/raw/` (standing instructions left out: the system prompt has them), and the first 1000 characters of MEMORY.md | empty, fine: a new cousin has no memories |
 | Shared Reference | digest | every other canonical shared entry as one line (file and description), with how to read one (`cousin-shared read <file>`) | left out, fine |
@@ -56,12 +55,11 @@ The system prompt is never cut. The digest has to fit in 8000 tokens, counted as
 |---|---|---|
 | calibration | 800 | 2000 |
 | active_state | 500 | 1500 |
-| task_packet | 500 | 2000 |
 | trace_summary | 500 | 1500 |
 | memories | 1000 | 4000 |
 | shared (the Shared Reference) | 400 | 1500 |
 
-First every layer is cut to its ceiling. The ceilings add up to more than the total, so if the digest is still too big, layers are cut to their floor one at a time in this order until it fits: memories, trace_summary, calibration, task_packet, active_state, shared. That is `boot.TRUNCATE_ORDER` (memories, trace_summary, calibration, task_packet, active_state, shared, self_portrait) without the layers the digest doesn't carry. A cut layer ends with `... (truncated, <layer>, budget hit)` and the marker counts inside the budget. The calibration layer is the exception: it gives way by whole entries, newest kept, and ends with `- ... N more not shown` for what it left out.
+First every layer is cut to its ceiling. The ceilings add up to more than the total, so if the digest is still too big, layers are cut to their floor one at a time in this order until it fits: memories, trace_summary, calibration, active_state, shared. That is `boot.TRUNCATE_ORDER` (memories, trace_summary, calibration, active_state, shared, self_portrait) without the layers the digest doesn't carry. A cut layer ends with `... (truncated, <layer>, budget hit)` and the marker counts inside the budget. The calibration layer is the exception: it gives way by whole entries, newest kept, and ends with `- ... N more not shown` for what it left out.
 
 Degraded is decided before any cutting, from each layer's own rule in the table, never by searching the text.
 
@@ -80,9 +78,9 @@ The row's body is the reason, and the model reads it in its handoff request: `co
 
 What the runner does with the row, on the `sdk` kind (the other kinds follow the same shape; [runners](runners.md) lists where they differ):
 
-1. **Handoff.** Ask the model for its handoff through the `handoff` tool, which writes STATUS.md's open loops, `data/active-threads.md`, what the session learned, and LAST `data/handoff.md`. If the model doesn't call it within 300 seconds, ends its turn without it, or the turn fails, the runner writes an emergency handoff itself (`# EMERGENCY HANDOFF (framework-generated)`, `degraded_state: true`, the reason, and the last 2000 characters of the session) and the generation still ends. A rate limit or a needed login postpones the rollover instead.
+1. **Handoff.** Ask the model for its handoff through the `handoff` tool, which writes STATUS.md's open loops, what the session learned, and LAST `data/handoff.md`. If the model doesn't call it within 300 seconds, ends its turn without it, or the turn fails, the runner writes an emergency handoff itself (`# EMERGENCY HANDOFF (framework-generated)`, `degraded_state: true`, the reason, and the last 2000 characters of the session) and the generation still ends. A rate limit or a needed login postpones the rollover instead.
 2. **End hooks.** Run the `[session]` end hooks (see [session hooks](#inside-a-generation-session-hooks)).
-3. **Archive.** Copy STATUS.md, `data/handoff.md` and `data/active-threads.md` to `data/generations/gen-NNNN/` for the generation that's ending.
+3. **Archive.** Copy STATUS.md and `data/handoff.md` to `data/generations/gen-NNNN/` for the generation that's ending.
 4. **Final mine.** Mine what is left of the old session's transcript into raw memory (the runner mines every [turn](../glossary.md#turn); the opencode kind does not mine yet, see [runners](runners.md#known-gaps)).
 5. **New session.** Start a fresh session on the same system prompt. If that fails, the rollover fails: the old session is kept and the row is closed `failed`, naming where it stopped.
 6. **Generation.** Add one to `data/generation.txt` (a missing file counts as 0). From here nothing fails the rollover: a step that goes wrong is named in the answer and the row still closes as done.
@@ -170,7 +168,7 @@ Two smaller things run at the edges of a session, not between generations.
 [session]
 start_hooks = ["cousin-cycle inc --start",
                {name = "activity", cmd = "cousin-memory activity 'session opened'"}]
-end_hooks = [{name = "sync-state", cmd = "cousin-sync-state"}]
+end_hooks = [{name = "activity", cmd = "cousin-memory activity 'session closed'"}]
 ```
 
 ```sh
@@ -181,15 +179,14 @@ cousin-session status
 
 It needs `COUSIN_HOME`. Each entry is a command string (named `step-N` by position) or a table with `cmd` and an optional `name`. They run in order through `sh`, in the home, with `COUSIN_HOME`, `COUSIN_SLUG` and `SESSION_PHASE` set, 300 seconds each at most (a timeout is rc 124). A failing hook is reported and the rest still run; the exit is 1 if any failed. An entry without `cmd` or a broken cousin.toml is exit 2 and nothing runs. The last run is saved in `data/session.json`.
 
-**Harness hooks** are three shell scripts in `hooks/` that spawn wires into the cousin's `.claude/settings.json` (`cousin-spawn <slug> --repair-settings` redoes it):
+**Harness hooks** are two shell scripts in `hooks/` that spawn wires into the cousin's `.claude/settings.json` (`cousin-spawn <slug> --repair-settings` redoes it):
 
 | script | harness event | what it does |
 |---|---|---|
 | `session_init.sh` | SessionStart | prints a banner: slug, home, time, which identity files and checkpoints exist |
 | `pre_compact.sh` | PreCompact | writes `data/pre-compact-checkpoint.md` (current activity, last five decisions, identity file sizes) |
-| `session_checkpoint.sh` | Stop | writes `data/session-checkpoint.md` (activity, open and in-progress STATUS items, last five decisions) |
 
-They take the home as their first argument (else `COUSIN_HOME`), write only under `<home>/data/`, and always exit 0. The boot packet doesn't read these checkpoints; they're for the cousin to read after a compaction or at the next start.
+They take the home as their first argument (else `COUSIN_HOME`), write only under `<home>/data/`, and always exit 0. The boot packet doesn't read the checkpoint; it's for the cousin to read after a compaction. (The per-turn Stop checkpoint, `session_checkpoint.sh`, was retired in 3.47.0: it was one more copy of STATUS.md's open loops. The script stays one release as a no-op, and the next settings apply removes it from a home.)
 
 ## Keeping MEMORY.md small
 

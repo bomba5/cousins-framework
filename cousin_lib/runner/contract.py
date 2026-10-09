@@ -101,9 +101,9 @@ never as the first choice.
 Your session ends at a rollover: on context pressure, or at the
 operator's daily cadence. When a system message asks for your handoff,
 call `handoff` exactly once, with `position`, `next_action` and
-`status`, plus `active_threads` (a list of one-line strings) and
-`learned` (a list of objects, each with `topic` and `fact`) when you
-have them. The framework writes STATUS.md's open loops, your thread list, your new
+`status`, plus `learned` (a list of objects, each with `topic` and
+`fact`) when you have it. STATUS.md's open loops are the one list of
+what is in flight. The framework writes STATUS.md's open loops, your new
 memories and the handoff file from that one call, in that order. The
 next generation starts from a digest of that state as its first
 message. A new generation is not announced; the work continues."""

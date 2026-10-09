@@ -2,6 +2,11 @@
 form, for a cold session that wants instant context without parsing
 markdown.
 
+Deprecated (3.47.0, meeting 11 A): STATUS.md is the one copy of the open
+loops, the handoff no longer writes state.json and nothing in the
+framework reads it. The command still writes it on demand, and says it
+is deprecated, until it is removed in 4.0.0.
+
 The open loops are the live section the handoff writes, read with the
 one shared definition (cousin_lib.status_sections): the first bare
 `## Open loops` heading; a suffixed `## Open loops (...)` heading is
@@ -114,6 +119,10 @@ def write_state(home):
     return state
 
 
+DEPRECATED = ("cousin-sync-state is deprecated (3.47.0): STATUS.md's open loops are the one"
+              " copy, and nothing reads data/state.json. It is removed in 4.0.0.")
+
+
 @traced_cli("cousin-sync-state")
 def sync_state_main(argv=None):
     parser = argparse.ArgumentParser(
@@ -121,6 +130,7 @@ def sync_state_main(argv=None):
         description="render STATUS.md into data/state.json")
     parser.add_argument("--home")
     args = parser.parse_args(argv)
+    print(DEPRECATED, file=sys.stderr)
     try:
         home = _home(args)
     except _NoContext as err:

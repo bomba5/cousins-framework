@@ -249,7 +249,7 @@ class TestOffTheLoop(HooksCase):
             await cbs["Stop"](self._base("Stop", stop_hook_active=False), None, {})
             await cbs["PreCompact"](self._base("PreCompact", trigger="auto"), None, {})
         _run(drive())
-        for key in ("record", "stop", "precompact"):
+        for key in ("record", "precompact"):
             self.assertIn(key, seen)
             self.assertNotEqual(seen[key], seen["loop"], key)
 
@@ -425,16 +425,17 @@ class TestRecorderBudget(HooksCase):
 
 
 class TestCheckpointsAndState(HooksCase):
-    def test_stop_and_precompact_write_the_checkpoint_files(self):
+    def test_only_precompact_writes_a_checkpoint_file(self):
+        # meeting 11 A: the per-turn Stop checkpoint was a fourth copy of
+        # the open loops; the pre-compact one is the compaction safety net
         (self.home / "data" / "last-activity.txt").write_text("2026-09-23T10:00: testing hooks\n")
         _run(self.cbs["Stop"](self._base("Stop", stop_hook_active=False), None, {}))
-        text = (self.home / "data" / "session-checkpoint.md").read_text()
-        self.assertIn("testing hooks", text); self.assertIn("## What was happening", text)
+        self.assertFalse((self.home / "data" / "session-checkpoint.md").exists())
         out = _run(self.cbs["PreCompact"](self._base("PreCompact", trigger="auto",
                                                      custom_instructions=None), None, {}))
         self.assertIn("checkpoint", out.get("systemMessage", "").lower())
         self.assertTrue((self.home / "data" / "pre-compact-checkpoint.md").exists())
-        self.assertEqual(sum(e["kind"] == "checkpoint" for e in self.stream.tail()), 2)
+        self.assertEqual(sum(e["kind"] == "checkpoint" for e in self.stream.tail()), 1)
 
     def test_a_side_sessions_precompact_reads_its_own_stream_never_the_primarys(self):
         """Privacy between sessions: the pre-compact checkpoint's stream tail

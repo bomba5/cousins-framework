@@ -290,16 +290,15 @@ class TestRecording(OpencodeCase):
 
 
 class TestCheckpoints(OpencodeCase):
-    def test_every_turn_ends_with_a_session_checkpoint(self):
-        """The SDK lane's Stop hook: data/session-checkpoint.md at a turn's end."""
+    def test_a_turn_end_writes_no_session_checkpoint(self):
+        """STATUS.md is the one copy of the open loops (3.47.0): the Stop
+        hook no longer writes data/session-checkpoint.md."""
         r = self.started(self.runner())
         a = r.enqueue(_op("hi"))
         self.assertTrue(_wait(lambda: self.outcome(r, a) is not None))
-        path = r.home / "data" / "session-checkpoint.md"
-        self.assertTrue(_wait(path.exists))
-        self.assertTrue(path.read_text().startswith("# Session checkpoint - wren - "))
-        self.assertTrue(_wait(lambda: {"kind": "session", "path": str(path)}
-                              in self.payloads(r, "checkpoint")))     # after the file
+        self.assertFalse((r.home / "data" / "session-checkpoint.md").exists())
+        self.assertEqual([p for p in self.payloads(r, "checkpoint")
+                          if p.get("kind") == "session"], [])
 
     def test_a_compaction_writes_the_pre_compact_checkpoint_and_asks_for_a_rollover(self):
         """`session.compacted` -> the pre-compact checkpoint, and (the SDK

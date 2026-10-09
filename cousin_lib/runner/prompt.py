@@ -235,8 +235,7 @@ def system_prompt_option(home, *, root, registry, version=None):
 
 # ---------------------------------------------------------------- the digest
 
-DIGEST_LAYERS = ("calibration", "active_state", "task_packet", "trace_summary",
-                 "memories", "shared_index")
+DIGEST_LAYERS = ("calibration", "active_state", "trace_summary", "memories", "shared_index")
 DIGEST_BUDGETS = {name: boot.LAYER_BUDGETS["shared" if name == "shared_index" else name]
                   for name in DIGEST_LAYERS}
 DIGEST_ORDER = [("shared_index" if v == "shared" else v) for v in boot.TRUNCATE_ORDER
@@ -251,7 +250,7 @@ DIGEST_MAX_CHARS = boot.TOTAL_MAX_CHARS - DIGEST_HEADER_ALLOWANCE
 _OMIT_WHEN_EMPTY = ("calibration", "shared_index")
 
 _TITLES = (("Operator Calibration", "calibration"), ("Active State", "active_state"),
-           ("Current Task Packet", "task_packet"), ("Recent Tool Trace Summary", "trace_summary"),
+           ("Recent Tool Trace Summary", "trace_summary"),
            ("Retrieved Memories", "memories"), ("Shared Reference", "shared_index"))
 
 
@@ -351,12 +350,11 @@ def state_digest(home, *, root, slug, generation=None):
     sections = {
         "calibration": pack_calibration(calibration),
         "active_state": boot._active_state(home, open_loops=_open_loops),
-        "task_packet": boot._task_packet(home),
         "trace_summary": trace.summary_for_boot(slug, root=root),
         "memories": boot._memories(home, DIGEST_BUDGETS["memories"][1]),
         "shared_index": _shared_index(root),
     }
-    degraded = [k for k in ("active_state", "task_packet", "trace_summary", "memories")
+    degraded = [k for k in ("active_state", "trace_summary", "memories")
                 if boot._is_degraded(k, sections[k], sections)]
     if authored_identity(home, root=root)[1]:
         degraded.append("identity")

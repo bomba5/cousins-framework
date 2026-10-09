@@ -72,4 +72,4 @@ for line in sys.stdin:
   done
 } > "$CHECKPOINT"
 
-echo "{\"systemMessage\":\"Context compaction imminent. After compaction read data/pre-compact-checkpoint.md and data/session-checkpoint.md, then cousin-memory search <topic>.\"}"
+echo "{\"systemMessage\":\"Context compaction imminent. After compaction read data/pre-compact-checkpoint.md, then cousin-memory search <topic>.\"}"

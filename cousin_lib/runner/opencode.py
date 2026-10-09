@@ -1808,10 +1808,9 @@ class OpencodeRunner:
                                         % (type(exc).__name__, exc)})
 
     def _checkpoint(self, kind, **extra):
-        """The SDK lane's Stop (`session`) and PreCompact (`pre_compact`)
-        checkpoint files; a failure is a `hook` event, never the turn's."""
-        write = (checkpoints.write_session_checkpoint if kind == "session"
-                 else checkpoints.write_pre_compact_checkpoint)
+        """The SDK lane's PreCompact (`pre_compact`) checkpoint file; a
+        failure is a `hook` event, never the turn's."""
+        write = checkpoints.write_pre_compact_checkpoint
         try:
             path = write(self.home, slug=self.tool_context.slug)
         except Exception as exc:  # noqa: BLE001 - never the turn's failure
@@ -1968,7 +1967,6 @@ class OpencodeRunner:
             return False
         ok = self._drive(run)
         self._end_turn(run)
-        self._checkpoint("session")             # the SDK lane's Stop hook
         if ok and not self._interrupt_requested and run.tokens:
             self._pressure(run)
         return ok

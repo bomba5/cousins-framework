@@ -18,7 +18,7 @@ import re
 import tempfile
 import unittest
 
-from cousin_lib import audits, boot, status_sections, sync_state
+from cousin_lib import audits, boot, status_sections
 from cousin_lib.runner import checkpoints, prompt
 from cousin_lib.runner.tools import _with_open_loops
 
@@ -91,10 +91,6 @@ def _digest(text):
     return _bullets(prompt._open_loops(text))
 
 
-def _sync_state(text):
-    return [i["text"] for i in sync_state.parse_status(text)["open_loops"]]
-
-
 def _audits(text):
     return _bullets("\n".join(audits._extract_open_loops(text)))
 
@@ -112,7 +108,7 @@ def _shared(text):
 
 
 READERS = {"shared": _shared, "boot": _boot, "digest": _digest,
-           "sync_state": _sync_state, "audits": _audits, "checkpoints": _checkpoints}
+           "audits": _audits, "checkpoints": _checkpoints}
 
 
 class TestEveryReaderAgrees(unittest.TestCase):

@@ -423,8 +423,9 @@ needs a person asks for one instead of inventing it:
 ## Hidden cousins
 
 `hidden = true` under `[cousin]` in `cousin.toml` (or hide/unhide in the
-inspector) takes a cousin out of the console's sidebar and Cousins page until
-someone turns on "show hidden". That's all it does: a hidden cousin still
+inspector) takes a cousin out of the console's sidebar, Cousins page, meeting pool
+and Jobs view (its jobs and artifacts) until someone turns on "show
+hidden". That's all it does: a hidden cousin still
 runs, fires its loops and can be messaged by any cousin that knows its slug.
 It is a way to keep the page tidy, not access control. The template tells
 every cousin to answer a cousin it doesn't recognise normally.

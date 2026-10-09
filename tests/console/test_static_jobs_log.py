@@ -70,13 +70,68 @@ class JobsArtifactsTab(unittest.TestCase):
         self.assertIn("data-jobs-tabs", self.view)
         self.assertIn('["jobs", "jobs"]', self.view)
         self.assertIn('"artifacts"', self.view)
-        self.assertIn("<ArtifactsPanel />", self.view)
+        self.assertIn("<ArtifactsPanel ", self.view)
 
     def test_the_job_list_no_longer_carries_the_panel(self):
-        self.assertNotIn("<ArtifactsPanel />", self.jobs)
+        self.assertNotIn("<ArtifactsPanel", self.jobs)
 
     def test_an_empty_list_says_how_rows_get_there(self):
         panel = _component(_read("views.jsx"), "ArtifactsPanel")
         self.assertIn("data-artifacts-empty", panel)
         self.assertIn("cousin-job start --artifact", panel)
 
+
+
+class JobsAndArtifactsFollowTheHiddenToggle(unittest.TestCase):
+    """A hidden cousin's jobs and artifacts stayed listed with the
+    show-hidden toggle off, while its sidebar row and its loops went."""
+
+    def setUp(self):
+        src = _read("views.jsx")
+        self.view = _component(src, "JobsView")
+        self.panel = _component(src, "ArtifactsPanel")
+        self.filter = _component(src, "visibleArtifacts")
+        self.jobs = _component(src, "JobsList")
+        self.job_filter = _component(src, "visibleJobs")
+
+    def test_rows_of_hidden_cousins_go_unless_the_toggle_shows_them(self):
+        self.assertIn("if (showHidden) return rows", self.filter)
+        self.assertIn("hiddenSlugs.has(r.created_by)", self.filter)
+
+    def test_the_view_reads_the_toggle_and_the_hidden_flag(self):
+        self.assertIn('useSetting("showHidden")', self.view)
+        self.assertIn("c.hidden", self.view)
+        self.assertIn("hiddenSlugs={hiddenSlugs} showHidden={showHidden}", self.view)
+
+    def test_the_tab_count_and_the_panel_both_filter(self):
+        self.assertIn("visibleArtifacts(artifactRows", self.view)
+        self.assertIn("visibleArtifacts(allRows", self.panel)
+
+    def test_the_panel_says_how_many_it_hides(self):
+        self.assertIn("data-artifacts-hidden", self.panel)
+        self.assertIn("from hidden cousins", self.panel)
+        self.assertIn("data-artifacts-all-hidden", self.panel)
+
+    def test_nothing_hidden_flashes_before_the_cousins_answer(self):
+        # null until /api/cousins answers; the filters hold rows back
+        self.assertIn("React.useState(null)", self.view)
+        self.assertIn(": [];", self.filter)
+        self.assertIn(": [];", self.job_filter)
+        self.assertIn("!hiddenSlugs && !showHidden", self.panel)
+
+    def test_the_hidden_flags_are_polled_not_read_once(self):
+        self.assertIn("setInterval(pull", self.view)
+
+    def test_a_failed_poll_keeps_the_hidden_set(self):
+        self.assertIn("if (cancelled || !d || !Array.isArray(d.cousins)) return;", self.view)
+
+    def test_a_cousin_going_hidden_takes_its_pick_and_open_log(self):
+        self.assertIn('hiddenSlugs.has(spawnedBy)) setSpawnedBy("all")', self.jobs)
+        self.assertIn("hiddenSlugs.has(o.spawned_by) ? null", self.jobs)
+
+    def test_jobs_of_hidden_cousins_go_unless_the_toggle_shows_them(self):
+        self.assertIn("if (showHidden) return rows", self.job_filter)
+        self.assertIn("hiddenSlugs.has(j.spawned_by)", self.job_filter)
+        self.assertIn("hiddenSlugs={hiddenSlugs} showHidden={showHidden} />", self.view)
+        self.assertIn("visibleJobs(allJobs", self.jobs)
+        self.assertIn("data-jobs-hidden", self.jobs)

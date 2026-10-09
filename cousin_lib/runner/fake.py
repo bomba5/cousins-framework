@@ -15,6 +15,7 @@ import time
 import uuid
 from pathlib import Path
 
+from cousin_lib.crashpoint import crashpoint
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
 from cousin_lib.runner import cost_cap, wake
 from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, folds_into_turn
@@ -262,6 +263,7 @@ class FakeRunner:
             self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
                                           "interrupted": interrupted,
                                           "is_error": False})
+            crashpoint("runner.result_recorded")
         finally:
             for row in consumed:
                 self.inbox.done(row["id"], outcome, "turn %s" % self.session_id)

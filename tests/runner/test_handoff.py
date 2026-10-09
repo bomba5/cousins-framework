@@ -49,12 +49,17 @@ class TestHandoff(HermeticCase):
         self.assertNotIn("demoted", text)
 
     def test_the_handoff_file_is_written_last(self):
+        from cousin_lib import atomic
         ctx = _ctx(self); order = []
-        real_write = type(ctx.home).write_text
+        real_write, real_atomic = type(ctx.home).write_text, atomic.write_text
 
         def spy(path, *a, **k):
             order.append(path.name); return real_write(path, *a, **k)
-        with mock.patch.object(type(ctx.home), "write_text", spy):
+
+        def atomic_spy(path, *a, **k):
+            order.append(path.name); return real_atomic(path, *a, **k)
+        with mock.patch.object(type(ctx.home), "write_text", spy), \
+                mock.patch.object(atomic, "write_text", atomic_spy):
             tools.call(ctx, "handoff", dict(ARGS))
         self.assertEqual(order[-1], "handoff.md")
         self.assertLess(order.index("STATUS.md"), order.index("active-threads.md"))

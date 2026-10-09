@@ -81,6 +81,8 @@ class TestNoBareAppends(HermeticCase):
         ("cousin_lib/capsule.py", "archive"),
         # Markdown, not a line log: the mirror and a transplant's merge guard their own newline
         ("cousin_lib/capsule.py", "path"), ("cousin_lib/lifecycle.py", "dst"),
+        # a test harness's crash mark: one short line written just before a SIGKILL
+        ("cousin_lib/crashpoint.py", "mark"),
     }
 
     def test_append_mode_opens_are_the_listed_ones(self):

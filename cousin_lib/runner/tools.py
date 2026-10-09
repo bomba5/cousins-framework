@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from cousin_lib import atomic
 from cousin_lib import mcp_server
 from cousin_lib.delivery import parse_thread, thread_for_chat
 from cousin_lib.runner.base import SURFACE_KINDS, RunnerError
@@ -827,16 +828,17 @@ def handoff(ctx, args):
     if status_path.exists():
         with open(status_path, newline="") as fh:
             old = fh.read()
-    status_path.write_text(_with_open_loops(old, ctx.name, str(args["status"])), newline="")
+    atomic.write_text(status_path, _with_open_loops(old, ctx.name, str(args["status"])),
+                      newline="")
     written.append("STATUS.md (open loops)")
     try:
         sync_state.write_state(home)
     except Exception as err:  # noqa: BLE001 - state.json is a view; STATUS is written
         errors.append("state.json: %s" % err)
     if threads:
-        (home / "data" / "active-threads.md").write_text(
-            "# Active threads - %s\n\n%s\n" % (ctx.name, "\n".join("- %s" % t.strip()
-                                                                   for t in threads)))
+        atomic.write_text(home / "data" / "active-threads.md",
+                          "# Active threads - %s\n\n%s\n" % (ctx.name, "\n".join(
+                              "- %s" % t.strip() for t in threads)))
         written.append("data/active-threads.md")
     for item in items or []:
         try:
@@ -848,7 +850,8 @@ def handoff(ctx, args):
                       for n in str(line or "").splitlines()[1:] if n.startswith("demoted:")]
         except (ValueError, AttributeError) as err:
             errors.append("memory %r: %s" % ((item or {}).get("topic"), err))
-    (home / "data" / "handoff.md").write_text(
+    atomic.write_text(
+        home / "data" / "handoff.md",
         "# Handoff - %s, written %s\n\ndegraded_state: false\n\n## Position\n\n%s\n\n"
         "## Next action\n\n%s\n"
         % (ctx.name, datetime.now().astimezone().isoformat(timespec="minutes"),

@@ -1129,7 +1129,8 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     firing), `delivery:<slug>` a delivery to the cousin, `distill:<slug>`,
     `requests`, `schedules`, `index-refresh` and `index:<slug>`,
     `dream-due:<slug>` and `dreaming:<slug>` (a finished pass: error or
-    lost fails, done, no_change and budget are ok), `outbox`, `meetings`."""
+    lost fails, done, no_change and budget are ok), `outbox`, `meetings`,
+    `chat-redelivery`."""
     now = now or time.time()
     state = _load_state()
     report = {"fired": [], "errors": [], "requests": 0, "flips": [],
@@ -1270,6 +1271,15 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     else:
         _health(report, "outbox", True)
     try:
+        report["redelivered"] = _redeliver_chat(report)
+    except Exception as err:
+        # A broken chat store never costs the loops their tick.
+        report["errors"].append("chat redelivery: %s" % err)
+        _health(report, "chat-redelivery", False, err)
+    else:
+        failed = [e for e in report["errors"] if e.startswith("chat redelivery")]
+        _health(report, "chat-redelivery", not failed, failed[0] if failed else None)
+    try:
         from cousin_lib import meetings
         report["meetings"] = meetings.tick(deliver=deliver, now=now)
     except Exception as err:
@@ -1281,6 +1291,32 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     state["last_tick"] = now
     _save_state(state)
     return report
+
+
+def _redeliver_chat(report):
+    """Every runner cousin's inbound chat rows still waiting for their
+    inbox put (chat_api.redeliver_pending): the console or a bridge died
+    between storing a message and handing it over. [(slug, [ids])] of the
+    rows put; one cousin's broken store is an error, never the walk's end,
+    and so is a row its inbox did not take (it stays pending, tried again
+    every tick, and `chat-redelivery` fails until it lands)."""
+    from cousin_lib.server import chat_api
+    out = []
+    for config in FrameworkConfig.from_env().list_cousins():
+        if config.type == "worker":
+            continue
+        failed = []
+        try:
+            ids = chat_api.redeliver_pending(config, failed=failed)
+        except Exception as err:  # noqa: BLE001 - per-cousin isolation
+            report["errors"].append("chat redelivery: %s: %s" % (config.slug, err))
+            continue
+        if failed:
+            report["errors"].append("chat redelivery: %s: chat rows %s still pending: the"
+                                    " inbox did not take them" % (config.slug, failed))
+        if ids:
+            out.append((config.slug, ids))
+    return out
 
 
 def _default_is_alive(slug):

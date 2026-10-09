@@ -25,6 +25,8 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cousin_lib import atomic
+
 TOKEN_RE = re.compile(r"^\d{5,15}:[A-Za-z0-9_-]{30,64}$")
 PENDING_KEEP = 5
 _MARKER = "cousin_lib.telegram"
@@ -188,11 +190,7 @@ def set_token(home, root, slug, token):
                                  " (<digits>:<35 or so characters>)")
     path = token_path(root, slug)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        os.write(fd, token.encode())
-    finally:
-        os.close(fd)
+    atomic.write_text(path, token, mode=0o600)
     os.chmod(path, 0o600)
     section = _current(home)
     section["token_file"] = str(path.relative_to(Path(root)))

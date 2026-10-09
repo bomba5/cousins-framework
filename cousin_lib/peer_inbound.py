@@ -283,11 +283,10 @@ def accept(root, *, identity, display, to, message, msg_id, sent_at, allowed, no
 def _deliver(conn, target, identity, display, to, message, msg_id, key):
     """The delivery of one recorded id, under its key; the id is settled
     (kept) when it landed or may have, freed when nothing was kept."""
-    from cousin_lib import chat, delivery
+    from cousin_lib import chat
     from cousin_lib.server import chat_api
     try:
-        with delivery.keyed(key):
-            out = chat.deliver_to(target, {"user": display, "message": message})
+        out = chat.deliver_to(target, {"user": display, "message": message}, key=key)
         _settle(conn, identity, msg_id)
         return out
     except (TimeoutError, socket.timeout) as err:

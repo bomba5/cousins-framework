@@ -23,6 +23,7 @@ import tempfile
 import tomllib
 from datetime import datetime, timezone
 
+from cousin_lib import atomic
 from cousin_lib.config import FrameworkConfig, MissingConfigError, harness_config
 
 DEFAULT_CEILING = 12
@@ -933,12 +934,12 @@ def provision_mcp(home, *, root, slug, operator=None):
     if not registry.exists():
         text = render_registry(shipped_default_registry(root),
                                [operator] if operator else [])
-        registry.write_text(text)
+        atomic.write_text(registry, text)
         written.append(registry)
     registration = home / ".mcp.json"
     if not registration.exists():
-        registration.write_text(
-            json.dumps(mcp_json(home, slug, root), indent=2) + "\n")
+        atomic.write_text(registration,
+                          json.dumps(mcp_json(home, slug, root), indent=2) + "\n")
         written.append(registration)
     return written
 

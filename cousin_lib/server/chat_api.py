@@ -17,9 +17,12 @@ body of a 200, or raises BadRequest, whose message is the 400 body's
 notice) are passed in: `make_deliver` and `make_notify` build them.
 """
 import json
+import sqlite3
+import uuid
 from pathlib import Path
 
 from cousin_lib import chat_hooks, delivery
+from cousin_lib.crashpoint import crashpoint
 from cousin_lib.server.inbound import after_inbound_stored, divert_login_code
 from cousin_lib.server.storage import ChatStore, normalize_chat_user, save_data_uri
 
@@ -139,7 +142,71 @@ def _attachment(home, message_id, image):
     return str(path) if path is not None else "[image attached, decode failed]"
 
 
-def send(config, body, *, deliver=None):
+def deliver_stored(config, row_id, deliver, *, user, message, key, attachments=()):
+    """Deliver a stored inbound row and mark it delivered. The row was
+    stored `pending`: a process killed before the mark leaves it so, and
+    `redeliver_pending` (the loops daemon) puts it again. Every put of a
+    row runs under one key (`key`, else `chat:<id>`), so a put that
+    happened before the kill and the one after it are one inbox row. The
+    row's key is its `delivery_key` (new_key, or a producer's own).
+    Returns the outcome; a FAILED row stays pending for the caller to drop."""
+    crashpoint("chat.stored")
+    with delivery.keyed(key):
+        outcome = deliver(user=user, message=message, message_id=row_id,
+                          attachments=attachments)
+    if outcome != delivery.FAILED:
+        crashpoint("chat.put")
+        try:
+            _with_store(config.home, lambda store: store.mark_delivered(row_id))
+        except sqlite3.Error:
+            pass    # delivered: the row stays pending, and the sweep's put is a no-op
+    return outcome
+
+
+def new_key():
+    """A stored row's delivery key: random, so a chat.db restored or
+    rebuilt on its own (its ids starting over) can never name an inbox
+    row of another message."""
+    return "chat:%s" % uuid.uuid4().hex
+
+
+# Past Inbox's 30 s busy timeout, with room: a put still waiting on the
+# lock is never taken for a dead one.
+REDELIVER_AFTER_S = 120.0
+
+
+def redeliver_pending(config, *, older_than_s=REDELIVER_AFTER_S, now=None, failed=None):
+    """Put again every inbound row of this home still `pending` after
+    `older_than_s`: the process that stored it died before its put
+    returned (deliver_stored). Under the row's own key, so a put that did
+    land is the same inbox row. The message reaches the cousin; the chat
+    hooks and the correction capture that run after a delivery are not
+    run for it. Returns the ids put; a row the inbox did not take stays
+    pending, tried again next time, and its id goes into `failed` (a
+    list, when given): never dropped, never quiet."""
+    from datetime import datetime, timedelta, timezone
+    if not db_path(config.home).exists():
+        return []
+    at = now or datetime.now(timezone.utc)
+    cutoff = (at - timedelta(seconds=older_than_s)).isoformat()
+    rows = _with_store(config.home, lambda store: store.pending_rows(cutoff))
+    deliver = make_deliver(config)
+    done = []
+    for row in rows:
+        attachments = ([row["attachment_path"]] if row.get("attachment_path") else
+                       [str(p) for p in sorted((Path(config.home) / "chat" / "inbound")
+                                               .glob("%d.*" % row["id"]))])
+        outcome = deliver_stored(config, row["id"], deliver, user=row["user"],
+                                 message=row["message"], attachments=attachments,
+                                 key=row.get("delivery_key") or "chat:%d" % row["id"])
+        if outcome != delivery.FAILED:
+            done.append(row["id"])
+        elif failed is not None:
+            failed.append(row["id"])
+    return done
+
+
+def send(config, body, *, deliver=None, key=None):
     """One inbound chat message: divert a login code, store the row,
     deliver it (`deliver(user=, message=, message_id=, attachments=)`),
     touch the presence marker and capture a correction, then fire the
@@ -147,7 +214,10 @@ def send(config, body, *, deliver=None):
     nothing and raises NotDelivered: the sender learns the cousin will
     not see it, and a send again leaves one row, not two. A runner
     recalls in its own prompt hook, so the delivered
-    item carries no recall line."""
+    item carries no recall line. The row is stored `pending` and the put
+    runs under `key` (else new_key()): deliver_stored. A `key` a stored
+    row already carries (a peer's retry after a crash) delivers that row,
+    never a second one."""
     user = body.get("user")
     message = body.get("message")
     if not user or not message:
@@ -160,15 +230,19 @@ def send(config, body, *, deliver=None):
             msg_type="user"))
         return {"ok": True, "id": row["id"], "timestamp": row["timestamp"], "diverted": True}
     reply_to = body.get("reply_to")
-    row = _with_store(home, lambda store: store.add_message(
-        chat_user=normalize_chat_user(user), user=user, message=message, msg_type="user",
-        reply_to=json.dumps(reply_to) if reply_to is not None else None))
+    row = key and _with_store(home, lambda store: store.by_delivery_key(key))
+    key = key or new_key()
+    if not row:
+        row = _with_store(home, lambda store: store.add_message(
+            chat_user=normalize_chat_user(user), user=user, message=message, msg_type="user",
+            reply_to=json.dumps(reply_to) if reply_to is not None else None,
+            pending=deliver is not None, delivery_key=key))
     attachments = []
     if body.get("image"):
         attachments.append(_attachment(home, row["id"], body["image"]))
     if deliver is not None:
-        outcome = deliver(user=user, message=message, message_id=row["id"],
-                          attachments=attachments)
+        outcome = deliver_stored(config, row["id"], deliver, user=user, message=message,
+                                 attachments=attachments, key=key)
         if outcome == delivery.FAILED:
             # the runner will never see it: keep nothing, fire nothing
             drop_undelivered(home, row["id"], [a for a in attachments if a.startswith("/")])

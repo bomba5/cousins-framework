@@ -16,6 +16,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from cousin_lib import atomic
 from cousin_lib import jsonl
 from cousin_lib.trace import traced_cli
 
@@ -68,7 +69,7 @@ def tag(home, text, *, cycle=None, category=None):
     path = library_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
-        path.write_text(HEADER)
+        atomic.write_text(path, HEADER)
     stamp = datetime.now().replace(microsecond=0).isoformat()
     line = "- %s | cycle %s | %s | %s\n" % (
         stamp, cycle if cycle is not None else "-",

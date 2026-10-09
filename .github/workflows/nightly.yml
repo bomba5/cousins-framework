@@ -1,0 +1,46 @@
+# The nightly crash run (#294): tests/crash_nightly.py drives one scenario
+# through every producer of a cousin's home (a chat message, a peer's
+# message, a one-shot, a job, the runner answering them), killed at a crash
+# point and hit picked by the seed, then checks the stores after a restart
+# and a retry. 40 rounds, a new seed every night (the run id), every
+# temporary file on tmpfs. A failing round prints its seed and round:
+# `python tests/crash_nightly.py --seed <seed> --round <n>` replays it.
+#
+# Not a required check: it gates no merge. A red night is a finding.
+name: nightly
+
+on:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "seed (empty: the run id)"
+        required: false
+
+jobs:
+  crash:
+    name: crash rounds
+    runs-on: ubuntu-latest
+    # 40 rounds take ~6 min; a hung round must not hold a runner for hours
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install (no third-party dependencies)
+        run: |
+          set -euo pipefail
+          pip install -e .
+      - name: 40 rounds with TMPDIR on /dev/shm
+        env:
+          SEED: ${{ inputs.seed || github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p /dev/shm/cf-tmp
+          echo "seed: $SEED"
+          TMPDIR=/dev/shm/cf-tmp python tests/crash_nightly.py --seed "$SEED" --rounds 40

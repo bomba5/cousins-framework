@@ -35,6 +35,7 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cousin_lib import atomic
 from cousin_lib.backup import MEMORY_SKIP
 from cousin_lib.config import FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
@@ -255,8 +256,8 @@ def reincarnate(slug, *, new_role, root, do_flip=None):
 
     claude = home / "CLAUDE.md"
     if claude.is_file():
-        claude.write_text(rewrite_role(claude.read_text(), name=config.name,
-                                       new_role=new_role))
+        atomic.write_text(claude, rewrite_role(claude.read_text(), name=config.name,
+                                               new_role=new_role))
     _set_cousin_keys(home, role=new_role.strip())
     _event(home, "role", "reincarnated: role rewritten to %r"
            % new_role.strip())
@@ -370,9 +371,9 @@ def _merge_memory(donor, recipient):
     r_md = recipient.home / "MEMORY.md"
     if d_md.is_file():
         recipient_text = r_md.read_text() if r_md.is_file() else ""
-        r_md.write_text(braid_memory(donor_md=d_md.read_text(),
-                                     recipient_md=recipient_text,
-                                     donor_name=donor.name))
+        atomic.write_text(r_md, braid_memory(donor_md=d_md.read_text(),
+                                             recipient_md=recipient_text,
+                                             donor_name=donor.name))
     return _union_raw(donor.home / "memory" / "raw",
                       recipient.home / "memory" / "raw")
 

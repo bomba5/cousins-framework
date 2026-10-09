@@ -299,6 +299,7 @@ was last seen. One ok result resets the streak.
 | `dreaming` | queueing the dreaming passes |
 | `outbox` | the outbox step: sending again what external peers did not confirm ([chat](chat.md#cousins-on-another-install)) |
 | `meetings` | the meetings step |
+| `chat-redelivery` | putting again the inbound chat rows whose sender died before their inbox put returned ([chat API](reference/chat-api.md)); fails when a cousin's chat store could not be read, or a row its inbox won't take stays pending |
 | `harness:<slug>` | written by the cousin's runner at its start, not by the daemon: whether what it runs (the Agent SDK and its CLI, `claude` on PATH, opencode) is the version `config/harness.lock.toml` names; failing names the installed and the locked version ([configuration](configuration.md#agent-strict_harness)) |
 | `cap:<slug>` | written by the cousin's runner at each turn start while `[agent] daily_cost_cap_usd` is set: ok under the cap, failing at or over it (`daily cost cap reached: spent $X.XX of $Y.YY today (UTC)`) or when the value is not a number of dollars ([configuration](configuration.md#agent-daily_cost_cap_usd)) |
 

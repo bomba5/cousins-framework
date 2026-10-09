@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from unittest import mock
 
 from cousin_lib import crashpoint
 from tests._hermetic import HermeticCase
@@ -291,3 +292,248 @@ class TestScheduleCrashes(ProducerCrashCase):
             self.assertEqual(conn.execute("SELECT status FROM scheduled_jobs").fetchone()[0], "fired")
         finally:
             conn.close()
+
+
+CHAT = r"""
+import json, os, pathlib, sys
+from cousin_lib import chat
+from cousin_lib.config import CousinConfig
+from cousin_lib.server import chat_api
+wren = CousinConfig.load(pathlib.Path(os.environ["FRAMEWORK_ROOT"]) / "cousins" / "wren")
+if sys.argv[1] == "send":
+    print(json.dumps(chat.deliver_local(wren, {"user": "Priya", "message": "the tins moved"})))
+else:
+    print(json.dumps(chat_api.redeliver_pending(wren, older_than_s=0)))
+"""
+
+
+class TestChatCrashes(ProducerCrashCase):
+    """(#294, point 7) an inbound chat row and its inbox row are two
+    stores: a sender killed between them used to leave a message shown in
+    the chat that the cousin never got."""
+
+    def chat(self, what, crash=None):
+        env = dict(self.env, **({"COUSIN_CRASH_AT": crash} if crash else {}))
+        return subprocess.run([sys.executable, "-c", CHAT, what], env=env,
+                              capture_output=True, text=True, timeout=60)
+
+    def chat_rows(self):
+        conn = sqlite3.connect(self.home / "data" / "chat.db")
+        try:
+            return conn.execute("SELECT id, message, delivery FROM messages").fetchall()
+        finally:
+            conn.close()
+
+    def chat_key(self):
+        conn = sqlite3.connect(self.home / "data" / "chat.db")
+        try:
+            return conn.execute("SELECT delivery_key FROM messages").fetchone()[0]
+        finally:
+            conn.close()
+
+    def inbox_rows(self):
+        if not (self.home / "data" / "inbox.db").exists():
+            return []
+        conn = sqlite3.connect(self.home / "data" / "inbox.db")
+        try:
+            return conn.execute("SELECT message_id, dedup_key FROM inbox"
+                                " WHERE source='chat'").fetchall()
+        finally:
+            conn.close()
+
+    def test_a_sender_killed_before_the_put_is_delivered_by_the_sweep(self):
+        # COUSIN_CRASH_AT=chat.stored
+        first = self.chat("send", crash="chat.stored")
+        self.assertEqual(first.returncode, -9, first.stderr)
+        ((cid, _m, state),) = self.chat_rows()
+        self.assertEqual((state, self.inbox_rows()), ("pending", []))
+        swept = self.chat("sweep")
+        self.assertEqual(json.loads(swept.stdout), [cid], swept.stderr)
+        self.assertTrue(self.chat_key().startswith("chat:"))
+        self.assertEqual(self.inbox_rows(), [(cid, self.chat_key())])
+        self.assertEqual(self.chat_rows(), [(cid, "the tins moved", None)])
+        self.assertEqual(json.loads(self.chat("sweep").stdout), [])
+
+    def test_a_sender_killed_after_the_put_leaves_one_inbox_row(self):
+        # COUSIN_CRASH_AT=chat.put
+        first = self.chat("send", crash="chat.put")
+        self.assertEqual(first.returncode, -9, first.stderr)
+        ((cid, _m, state),) = self.chat_rows()
+        self.assertEqual(state, "pending")
+        self.assertEqual(len(self.inbox_rows()), 1)
+        swept = self.chat("sweep")
+        self.assertEqual(json.loads(swept.stdout), [cid], swept.stderr)
+        self.assertEqual(self.inbox_rows(), [(cid, self.chat_key())])
+        self.assertEqual(self.chat_rows()[0][2], None)
+
+    def test_a_peer_retry_after_the_row_was_stored_shows_one_line(self):
+        # the gate died after the chat row, before the put: the retry
+        # delivers that row, never a second line
+        first = self.py(ACCEPT, crash="chat.stored")
+        self.assertEqual(first.returncode, -9, first.stderr)
+        retry = self.py(ACCEPT)
+        self.assertEqual(json.loads(retry.stdout), {"ok": True}, retry.stderr)
+        ((cid, message, state),) = self.chat_rows()
+        self.assertEqual((message, state), ("the tins moved", None))
+        self.assertEqual(self.inbox_rows(), [(cid, "peer:kestrel:m-crash-0001")])
+        self.assertEqual(json.loads(self.chat("sweep").stdout), [])
+
+
+HANDOFF = r"""
+import os, pathlib
+from cousin_lib.runner import tools
+from cousin_lib.runner.policy import Policy
+from cousin_lib.runner.turn import Turn
+root = pathlib.Path(os.environ["FRAMEWORK_ROOT"])
+home = root / "cousins" / "wren"
+ctx = tools.ToolContext(home=home, slug="wren", name="Wren", root=root, turn=Turn(),
+                        policy=Policy.load(home), stream=None)
+print(tools.call(ctx, "handoff", {"position": "new position", "next_action": "new next",
+                                  "status": "- [ ] new loop", "active_threads": ["new thread"]}))
+"""
+
+TRASH = r"""
+import os, pathlib, sys
+from cousin_lib import memory_trash
+home = pathlib.Path(os.environ["COUSIN_HOME"])
+if sys.argv[1] == "trash":
+    memory_trash.trash_lines(home, [("memory/raw/2026-10-09.jsonl", 2, None)], by="test")
+else:
+    import json
+    print(json.dumps(memory_trash.list_trash(home)))
+"""
+
+
+class TestWholeFileCrashes(ProducerCrashCase):
+    """(#294, point 8) a file rewritten whole is replaced in one step: a
+    kill leaves the old file or the new one, never a torn one."""
+
+    def setUp(self):
+        super().setUp()
+        self.env["COUSIN_HOME"] = str(self.home)
+        (self.home / "STATUS.md").write_text("# Status\n\n## Open loops\n\n- [ ] old loop\n")
+        (self.home / "data" / "handoff.md").write_text("# Handoff - old\n")
+
+    def test_a_handoff_killed_mid_write_leaves_whole_files(self):
+        old_status = (self.home / "STATUS.md").read_bytes()
+        # COUSIN_CRASH_AT=atomic.written:1: STATUS.md's new text is in its
+        # temp file, not yet over STATUS.md
+        out = self.py(HANDOFF, crash="atomic.written:1")
+        self.assertEqual(out.returncode, -9, out.stderr)
+        self.assertEqual((self.home / "STATUS.md").read_bytes(), old_status)
+        self.assertEqual((self.home / "data" / "handoff.md").read_text(), "# Handoff - old\n")
+        self.assertEqual(len(list(self.home.glob(".STATUS.md.*.tmp"))), 1)
+        # the third: STATUS.md and the threads are new, handoff.md still whole
+        out = self.py(HANDOFF, crash="atomic.written:3")
+        self.assertEqual(out.returncode, -9, out.stderr)
+        self.assertIn("new loop", (self.home / "STATUS.md").read_text())
+        self.assertEqual((self.home / "data" / "handoff.md").read_text(), "# Handoff - old\n")
+        out = self.py(HANDOFF)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("new position", (self.home / "data" / "handoff.md").read_text())
+
+    def raw(self):
+        path = self.home / "memory" / "raw" / "2026-10-09.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"n": 1}\n{"n": 2}\n{"n": 3}\n')
+        return path
+
+    def age_batches(self):
+        for manifest in (self.home / "memory").rglob("manifest.json"):
+            os.utime(manifest, (time.time() - 3600, time.time() - 3600))
+
+    def test_a_trash_killed_before_the_move_leaves_the_line_and_no_batch(self):
+        # COUSIN_CRASH_AT=trash.moving: the moving manifest holds the line,
+        # nothing moved yet
+        path = self.raw()
+        out = self.py(TRASH.replace("sys.argv[1]", "'trash'"), crash="trash.moving")
+        self.assertEqual(out.returncode, -9, out.stderr)
+        self.age_batches()
+        listed = self.py(TRASH.replace("sys.argv[1]", "'list'"))
+        self.assertEqual(json.loads(listed.stdout), [], listed.stderr)
+        self.assertIn('{"n": 2}', path.read_text())
+
+    def test_a_trash_killed_after_the_move_keeps_the_line_in_the_batch(self):
+        # the line is out of its file, the final manifest not yet written
+        # (the second atomic write): before #294 the line was kept nowhere
+        path = self.raw()
+        out = self.py(TRASH.replace("sys.argv[1]", "'trash'"), crash="atomic.written:2")
+        self.assertEqual(out.returncode, -9, out.stderr)
+        self.assertNotIn('{"n": 2}', path.read_text())
+        self.age_batches()
+        listed = self.py(TRASH.replace("sys.argv[1]", "'list'"))
+        (batch,) = json.loads(listed.stdout)
+        self.assertNotIn("moving", batch)
+        self.assertEqual([i["line"] for i in batch["items"]], ['{"n": 2}'])
+        from cousin_lib import memory_trash
+        memory_trash.restore(self.home, batch["id"])
+        self.assertEqual(path.read_text(), '{"n": 1}\n{"n": 2}\n{"n": 3}\n')
+
+
+class TestChatRedeliveryHealth(ProducerCrashCase):
+    def test_a_row_the_inbox_will_not_take_stays_pending_and_fails_the_health_line(self):
+        from unittest import mock
+        from cousin_lib import delivery, loops
+        from cousin_lib.server.storage import ChatStore
+        store = ChatStore(self.home / "data" / "chat.db")
+        try:
+            row = store.add_message(chat_user="priya", user="Priya", message="stuck",
+                                    msg_type="user", pending=True)
+        finally:
+            store.close()
+        conn = sqlite3.connect(self.home / "data" / "chat.db")
+        conn.execute("UPDATE messages SET timestamp='2026-01-01T00:00:00+00:00'")
+        conn.commit(); conn.close()
+        report = {"errors": []}
+        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(self.root)}), \
+                mock.patch.object(delivery.InboxBackend, "send", return_value=delivery.FAILED):
+            self.assertEqual(loops._redeliver_chat(report), [])
+        self.assertEqual(len(report["errors"]), 1, report)
+        self.assertIn("chat rows [%d] still pending" % row["id"], report["errors"][0])
+        conn = sqlite3.connect(self.home / "data" / "chat.db")
+        try:
+            self.assertEqual(conn.execute("SELECT delivery FROM messages").fetchone()[0], "pending")
+        finally:
+            conn.close()
+
+
+class TestTrashSettle(ProducerCrashCase):
+    def setUp(self):
+        super().setUp()
+        self.env["COUSIN_HOME"] = str(self.home)
+
+    def test_a_trashed_line_with_a_twin_left_is_kept_by_the_settle(self):
+        path = self.home / "memory" / "raw" / "2026-10-09.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"n": 1}\n{"n": 2}\n{"n": 2}\n')
+        out = self.py(TRASH.replace("sys.argv[1]", "'trash'"), crash="atomic.written:2")
+        self.assertEqual(out.returncode, -9, out.stderr)
+        self.assertEqual(path.read_text(), '{"n": 1}\n{"n": 2}\n')
+        (batch,) = json.loads(self.py(TRASH.replace("sys.argv[1]", "'list'")).stdout)
+        self.assertEqual([i["line"] for i in batch["items"]], ['{"n": 2}'])
+
+    def test_a_batch_whose_mover_holds_the_lock_is_left_alone(self):
+        import threading
+        from cousin_lib import memory_lock, memory_trash
+        batch = self.home / "memory" / ".trash" / "20261009T000000-000001"
+        batch.mkdir(parents=True)
+        (batch / "manifest.json").write_text(json.dumps(
+            {"id": batch.name, "moving": True, "items": [{"kind": "file", "path": "notes/x.md"}]}))
+        held, release = threading.Event(), threading.Event()
+
+        def mover():
+            with memory_lock.write_lock(self.home):
+                held.set()
+                release.wait(10)
+        t = threading.Thread(target=mover)
+        t.start()
+        try:
+            self.assertTrue(held.wait(10))
+            with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(self.root),
+                                              "COUSIN_HOME": str(self.home)}):
+                listed = memory_trash.list_trash(self.home)
+            self.assertEqual([b.get("moving") for b in listed], [True])
+            self.assertTrue(batch.is_dir())
+        finally:
+            release.set()
+            t.join(10)

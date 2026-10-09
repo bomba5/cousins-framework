@@ -35,6 +35,10 @@ POINTS = {
     "peer.seen": "a peer message's id is recorded as seen, the message not yet delivered",
     "outbox.sent": "the outbox: a retry reached the peer, its row not yet finished",
     "schedule.delivered": "a due schedule is delivered, not yet marked fired",
+    "chat.stored": "an inbound chat row is stored pending, its inbox put not yet made",
+    "chat.put": "an inbound chat row is in the inbox, not yet marked delivered",
+    "atomic.written": "an atomic write: the temp file is written, not yet renamed over its target",
+    "trash.moving": "a trash batch's manifest is written moving, its lines or file not yet moved",
 }
 
 
@@ -53,6 +57,16 @@ _hits = {}
 
 
 def _sigkill():
+    # COUSIN_CRASH_MARK: a file the kill names its point in first, so a
+    # harness can tell a round whose point fired (in any process that
+    # inherited the variable) from one whose point was never reached
+    mark = os.environ.get("COUSIN_CRASH_MARK")
+    if mark:
+        try:
+            with open(mark, "a") as fh:
+                fh.write("%s %d\n" % (_TARGET[0], os.getpid()))
+        except OSError:
+            pass
     os.kill(os.getpid(), signal.SIGKILL)
 
 

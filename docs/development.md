@@ -151,7 +151,15 @@ with it, lets it die, starts again and checks the stores
 (the tmux lane's runner, whose pane outlives it), a test calls
 `crashpoint.arm("tmux.handled", kill)` in-process instead: `kill` runs at
 the point (raising `SystemExit` stops the runner's loop without a trace) and
-returns `False` to wait for a later hit. A new point goes into `crashpoint.POINTS`
+returns `False` to wait for a later hit. `tests/crash_nightly.py` runs one
+scenario through every producer of a home (a chat message, a peer's
+message, a one-shot, a job, the runner answering them), killed at a point
+and hit its seed picks, then checks the stores after the restart; the
+suite runs a few fixed rounds (`tests/test_crash_nightly.py`) and
+`.github/workflows/nightly.yml` runs 40 on tmpfs every night with a new
+seed (`--seed S --round N` replays one). A whole file the framework
+rewrites goes through `cousin_lib/atomic.py` (`write_text`: a temp file,
+then one rename), so a kill leaves the old file or the new one. A new point goes into `crashpoint.POINTS`
 with what it sits between, and a test names it; the registry's own tests
 fail otherwise. A kill proves atomicity between two steps, not
 durability: the page cache survives a SIGKILL, a power loss does not.

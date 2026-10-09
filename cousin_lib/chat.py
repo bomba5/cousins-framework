@@ -351,12 +351,13 @@ def _resolve(fw, dest_slug):
     raise NoContextError("no cousin %r in the registry" % dest_slug)
 
 
-def deliver_local(target, payload):
+def deliver_local(target, payload, key=None):
     """One message to a local runner-lane cousin, in this process:
     chat_api.send with the inbox delivery. `payload` is /api/send's body
-    ({user, message}). Returns its body."""
+    ({user, message}); `key`, the producer's idempotency key
+    (chat_api.send). Returns its body."""
     from cousin_lib.server import chat_api
-    return chat_api.send(target, payload, deliver=chat_api.make_deliver(target))
+    return chat_api.send(target, payload, deliver=chat_api.make_deliver(target), key=key)
 
 
 def is_local_runner(target):
@@ -400,12 +401,12 @@ def send_message(fw, sender, dest_slug, text, policy=None, display_name=None,
     return deliver_to(target, payload)
 
 
-def deliver_to(target, payload):
+def deliver_to(target, payload, key=None):
     """One /api/send body to a local cousin, in-process (deliver_local).
     A cousin with no runner kind is DeliveryRefused with
     delivery.lane_refusal's line: nothing is opened or stored."""
     if is_local_runner(target):
-        return deliver_local(target, payload)
+        return deliver_local(target, payload, key=key)
     from cousin_lib import delivery
     raise DeliveryRefused(delivery.lane_refusal(target.home))
 

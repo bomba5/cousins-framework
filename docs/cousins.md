@@ -83,6 +83,7 @@ Every option:
 | `--start` | start it after creating; on an existing cousin without `--role`/`--voice`, only start it. The start asks the running [supervisor](glossary.md#supervisor); with none the start fails, exit 1. A cousin with no `[agent] runner` is refused, exit 2 |
 | `--sync-template` | create nothing; show how an existing cousin's CLAUDE.md framework part differs from the current template (see [the CLAUDE.md template](#the-claudemd-template)) |
 | `--apply` | with `--sync-template`: write the sync |
+| `--prune-retired` | with `--sync-template`: also remove the framework sections the template retired |
 | `--repair-settings` | create nothing; rewrite an existing cousin's `.claude/settings.json` and the `cousin` entry in `.mcp.json` |
 
 An option you leave out writes no key, so the default applies and can change
@@ -162,7 +163,11 @@ reaches every cousin, not only the ones spawned after it:
   make there is replaced at the next start: put your own rules below the
   marker.
 - A section above the marker that the template doesn't have is kept, at the
-  end of the framework part.
+  end of the framework part. A section the template retired (3.49.0 moved
+  the lane's mechanics out: chat handling, the memory commands, tools,
+  session bookends, meetings; the generated contract in the system prompt
+  carries them) is kept and reported until you prune it with
+  `--prune-retired`.
 - Below the marker nothing changes, except a leftover copy of a framework
   section that is word for word the template's, which is removed.
 - The old file goes to `data/claude-md-backups/` whenever the sync changes
@@ -178,6 +183,8 @@ To see what the next start would change, or to apply it now:
 ```
 cousin-spawn wren --sync-template           # the diff, nothing written
 cousin-spawn wren --sync-template --apply
+cousin-spawn wren --sync-template --prune-retired           # the diff with the retired sections gone
+cousin-spawn wren --sync-template --apply --prune-retired
 ```
 
 ## Starting, stopping, restarting
@@ -285,7 +292,11 @@ Ways to trigger one:
 
 The runner's system prompt includes the committed self-portrait: a description of the
 cousin drafted from its real sources and reviewed by a person before it
-counts. The runner hands the composed prompt to the agent CLI as a private
+counts. It holds the cousin's voice and how it works (Temperament, Working
+Style, Voice) and nothing else: the role lives in `CLAUDE.md` and
+`cousin.toml`, the rules in the law and L0 memory, the lane's mechanics in
+the generated contract. A copy of any of those in the portrait went stale
+beside its source. The runner hands the composed prompt to the agent CLI as a private
 file (`data/run/system-prompt.md`, readable by the cousin's user only), never
 on its command line, where every local user could read it
 ([runners](reference/runners.md#the-system-prompt-is-a-private-file)).

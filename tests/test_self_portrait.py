@@ -33,33 +33,24 @@ class PortraitCase(unittest.TestCase):
 
 
 class TestSynthesize(PortraitCase):
-    def test_candidate_carries_every_section(self):
-        path = synthesize_candidate(str(self.home), "wren")
-        text = path.read_text()
-        for section in ("Role", "Temperament", "Operator Calibration",
-                        "Working Style", "Recurring Risks", "Voice",
-                        "Identity Invariants"):
-            self.assertIn("## %s" % section, text)
-
-    def test_sources_feed_their_sections(self):
+    def test_candidate_carries_voice_and_working_style_only(self):
+        # meeting 11 D: no copies of the role, the rules or old decisions,
+        # which went stale beside their sources
         text = synthesize_candidate(str(self.home), "wren").read_text()
-        self.assertIn("example cousin", text)      # role from cousin.toml
-        self.assertIn("Plain and warm.", text)     # voice verbatim
-        self.assertIn("follow the operator", text)  # hard rules
+        for section in ("Temperament", "Working Style", "Voice"):
+            self.assertIn("## %s" % section, text)
+        for gone in ("Role", "Operator Calibration", "Recurring Risks", "Identity Invariants"):
+            self.assertNotIn("## %s" % gone, text)
 
-    def test_risks_mine_failure_language_not_prohibitions(self):
+    def test_sources_feed_their_sections_and_the_rules_are_not_copied(self):
         import json
         with open(self.home / "data" / "decisions.jsonl", "w") as fh:
-            fh.write(json.dumps({
-                "topic": "verify window", "decision": "the guard was wrong",
-                "reasoning": "false positive on echo"}) + "\n")
-            fh.write(json.dumps({
-                "topic": "style", "decision": "do not use tabs",
-                "reasoning": "convention"}) + "\n")
+            fh.write(json.dumps({"topic": "verify window", "decision": "the guard was wrong",
+                                 "reasoning": "false positive on echo"}) + "\n")
         text = synthesize_candidate(str(self.home), "wren").read_text()
-        self.assertIn("verify window", text)
-        risks = text.split("## Recurring Risks", 1)[1].split("## ", 1)[0]
-        self.assertNotIn("style", risks)
+        self.assertIn("Plain and warm.", text)          # voice verbatim
+        self.assertNotIn("follow the operator", text)   # hard rules stay in CLAUDE.md
+        self.assertNotIn("verify window", text)         # no frozen decisions
 
 
 class TestSynthesizeNeverWritesThroughALink(PortraitCase):

@@ -101,11 +101,25 @@ def _render(text, values):
     return text
 
 
-def plan(home, root=None, *, template=None):
+# Sections a past template carried and the current one does not: the
+# lane's mechanics, now only in the generated contract (meeting 11 D,
+# 3.49.0). Above the marker they are reported, and removed with `prune`
+# (cousin-spawn --sync-template --apply --prune-retired); a section with
+# another title stays the cousin's own.
+RETIRED_SECTIONS = (
+    "Chat handling - IN-CHARACTER vs OUT-OF-CHARACTER",
+    "Memory",
+    "Tools: MCP first, CLIs as the fallback",
+    "Session bookends",
+    "Meetings",
+)
+
+
+def plan(home, root=None, *, template=None, prune=False):
     """(old_text, new_text, notes) for one cousin; new == old when it is
     in step. `template` is the template's text (default: the install's,
-    _template_text). Raises SyncError when the file cannot be synced
-    safely."""
+    _template_text). A retired framework section is removed only with
+    `prune`. Raises SyncError when the file cannot be synced safely."""
     home = Path(home)
     root = Path(root) if root else FrameworkConfig.root_from_home(home)
     old = (home / "CLAUDE.md").read_text()
@@ -138,6 +152,14 @@ def plan(home, root=None, *, template=None):
     known = {t for t, _ in tpl_secs}
     for title, body in secs:
         if title not in known:
+            if title.lstrip("#").strip() in RETIRED_SECTIONS:
+                if prune:
+                    notes.append("%s: retired from the template; removed" % title)
+                    continue
+                new_secs.append((title, body))
+                notes.append("%s: retired from the template (the contract carries it);"
+                             " kept until --prune-retired" % title)
+                continue
             new_secs.append((title, body))
             notes.append("%s: not in the template; kept" % title)
     marker_line, _, below = rest.partition("\n")
@@ -157,8 +179,8 @@ def plan(home, root=None, *, template=None):
     return old, new, notes
 
 
-def diff(home, root=None, *, template=None):
-    old, new, notes = plan(home, root, template=template)
+def diff(home, root=None, *, template=None, prune=False):
+    old, new, notes = plan(home, root, template=template, prune=prune)
     text = "".join(difflib.unified_diff(
         old.splitlines(keepends=True), new.splitlines(keepends=True),
         fromfile="CLAUDE.md", tofile="CLAUDE.md (synced)"))
@@ -431,12 +453,12 @@ def _registry_sync(home, root, *, apply=False, theirs=None, base=None,
             "retired": retired, "pruned": pruned}
 
 
-def sync(home, root=None, *, apply=False):
+def sync(home, root=None, *, apply=False, prune=False):
     """Plan, and with apply write, one cousin. Returns {"changed",
     "notes", "backup", "registry_added", "registry_corrected"}."""
     home = Path(home)
     root = Path(root) if root else FrameworkConfig.root_from_home(home)
-    old, new, notes = plan(home, root)
+    old, new, notes = plan(home, root, prune=prune)
     reg_result = _registry_sync(home, root, apply=apply)
     out = {"changed": new != old, "notes": notes, "backup": None,
            "registry_added": reg_result["added"],

@@ -331,18 +331,59 @@ def _distilled_body(path):
     return distill.strip_auto_marker(text)
 
 
+_LINE_LEVEL = re.compile(r"^- \[(L\d)_")
+# The trailing "(N entries, ..., YYYY-MM-DD; topic: T)" of a view line; a
+# topic may hold parentheses of its own ("HA transport (not MQTT)").
+_LINE_META = re.compile(r"\([^()]*?(\d{4}-\d{2}-\d{2})(?:; topic: (.*))?\)\s*$")
+
+
+def _order_view(body, cited=""):
+    """A distilled view's lines in the order the packet reads them: a line
+    whose topic an open loop names first, then the levels the operator,
+    the framework or a tool vouch for (L0-L2), then the rest newest first.
+    Nothing is dropped: the budget cut falls on old conclusions, never on
+    this week's. The lines before the first entry stay where they are."""
+    lines = body.splitlines()
+    head = []
+    while lines and not lines[0].startswith("- ["):
+        head.append(lines.pop(0))
+    cited = cited.lower()
+
+    def rank(line):
+        meta = _LINE_META.search(line)
+        topic = ((meta and meta.group(2)) or "").strip().lower()
+        # a whole-word match: "rule" is not cited by "rules", nor "air" by
+        # "airtoy"
+        if topic and re.search(r"(?<!\w)%s(?!\w)" % re.escape(topic), cited):
+            return 0
+        level = _LINE_LEVEL.match(line)
+        return 1 if level and level.group(1) in ("L0", "L1", "L2") else 2
+
+    def date(line):
+        meta = _LINE_META.search(line)
+        return meta.group(1) if meta else ""
+
+    # two stable sorts: newest first, then by rank; equal keys keep the
+    # distiller's order
+    entries = sorted(sorted(lines, key=date, reverse=True), key=rank)
+    return "\n".join(head + entries)
+
+
 def _memories(home, max_chars):
     """The durable floor (memory/distilled, regenerated from raw by
     its consumer, the state digest), the newest reasoning capsules, recent raw-memory
     entries (the decide bridge is their producer) and the memory index
     head. Empty is the legitimate
-    starting condition of a new cousin."""
+    starting condition of a new cousin. Each view is ordered (_order_view)
+    so the budget cut falls on old conclusions."""
     parts = []
+    loops = status_sections.open_loops_body(_read(Path(home) / "STATUS.md") or "")
     for fname in memory.DISTILLED_FILES:
         if fname == "operator-calibration.md":
             continue  # the calibration layer carries it
         body = _distilled_body(Path(home) / "memory" / "distilled" / fname)
         if body:
+            body = _order_view(body, loops)
             parts.append("## %s" % fname)
             parts.append(body)
     # Newest conclusions as one line each, read from the jsonl record
@@ -371,10 +412,13 @@ def _memories(home, max_chars):
                     entry = json.loads(line)
                 except ValueError:
                     continue
-                # a standing instruction is in the system prompt, whole
+                # a standing instruction is in the system prompt, whole; the
+                # framework's own log (episodes, job closes, handoffs) is not
+                # memory the packet has room for
                 if not isinstance(entry, dict) or memory.view_noise(entry) \
                         or memory.entry_id(entry) in hidden \
-                        or distill.standing_instruction(entry):
+                        or distill.standing_instruction(entry) \
+                        or str(entry.get("topic", "")).startswith(distill.MACHINE_PREFIXES):
                     continue
                 lines.append("- [%s] %s"
                              % (entry.get("topic", "?"),

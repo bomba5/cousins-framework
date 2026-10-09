@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.45.0 - 2026-10-09
+
+### Changed
+
+- **The boot packet's memories spare this week's conclusions.** Each
+  distilled view's lines are ordered: what an open loop in STATUS.md
+  names, then operator, framework and tool lines, then the rest newest
+  first. Old closed conclusions no longer push recent ones past the budget
+  cut. Nothing is dropped (#299, meeting 11 E).
+- **The recent raw lines leave out the framework's own log.** Episode,
+  job-close and handoff entries (`episode:`, `job:`, `framework:`) no
+  longer fill the packet's recent raw memory (meeting 11 B5).
+
 ## 3.44.0 - 2026-10-09
 
 ### Changed

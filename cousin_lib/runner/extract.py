@@ -166,8 +166,9 @@ _FIND_WRITES = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fp
                 "-fprintf", "-fls"}
 # a command run inside the line: $(...), `...`, <(...), >(...)
 _SUBSTITUTION = re.compile(r"\$\(|`|[<>]\(")
-# a sed script that writes (the w command, the s///w flag) or runs (e)
-_SED_WRITES = re.compile(r"(?:^|[;{}\s'\"])[we]\s|/[gpIiMm0-9]*[we]\b")
+# a sed script that writes (the w command, after an address too, the
+# s///w flag) or runs (e)
+_SED_WRITES = re.compile(r"(?:^|[;{}\s'\"\d$!])[we]\s|/[gpIiMm0-9]*[we]\b")
 # words that make an otherwise reading command write or run something
 _WRITE_WORDS = {"sort": ("-o", "--output"), "git": ("--output",), "rg": ("--pre",),
                 "awk": ("-i",)}
@@ -195,6 +196,9 @@ def _writes(head, words, segment):
         return True
     if head == "uniq" and len([w for w in args if not w.startswith("-")]) > 1:
         return True                         # uniq IN OUT writes OUT
+    if head == "sort" and any(w.startswith("-") and not w.startswith("--") and "o" in w
+                              for w in args):
+        return True                         # -o bundled, as in -uo out
     for flag in _WRITE_WORDS.get(head, ()):
         if any(w == flag or w.startswith(flag + "=")
                or (len(flag) == 2 and w.startswith(flag)) for w in args):

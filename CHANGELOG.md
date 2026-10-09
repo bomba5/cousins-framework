@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.42.3 - 2026-10-08
+
+### Changed
+
+- **Artifacts have their own tab in the Jobs view**, with their count,
+  instead of a panel under the job list that nobody scrolled to. An
+  empty list says how rows get there (a job started with artifacts, a
+  media render from 3.42.2 on, `cousin-artifact add`). Past the list's
+  100 rows the tab says "100+".
+
 ## 3.42.2 - 2026-10-08
 
 ### Fixed

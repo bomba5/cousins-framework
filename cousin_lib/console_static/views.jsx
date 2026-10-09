@@ -17,18 +17,29 @@ function JobsView() {
   // under every job row where nobody scrolled to it
   const [tab, setTab] = React.useState("jobs");
   const [artifactRows, setArtifactRows] = React.useState(null);
-  const [hiddenSlugs, setHiddenSlugs] = React.useState(() => new Set());
+  // null until /api/cousins answers: the lists show nothing hidden-blind
+  // meanwhile. Polled, so hiding a cousin shows here without a tab switch.
+  const [hiddenSlugs, setHiddenSlugs] = React.useState(null);
   const showHidden = (window.useSetting && window.useSetting("showHidden")) || false;
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([apiGet("/api/artifacts"), fetchCousins()]).then(([d, cs]) => {
-      if (cancelled) return;
-      setArtifactRows(d && d.artifacts ? d.artifacts : []);
-      setHiddenSlugs(new Set((cs || []).filter(c => c.hidden).map(c => c.slug)));
+    apiGet("/api/artifacts").then(d => {
+      if (!cancelled) setArtifactRows(d && d.artifacts ? d.artifacts : []);
     });
     return () => { cancelled = true; };
   }, [tab]);
-  const artifactCount = artifactRows
+  React.useEffect(() => {
+    let cancelled = false;
+    const pull = () => fetchCousins().then(cs => {
+      if (cancelled) return;
+      const next = (cs || []).filter(c => c.hidden).map(c => c.slug).sort();
+      setHiddenSlugs(cur => cur && [...cur].sort().join() === next.join() ? cur : new Set(next));
+    });
+    pull();
+    const id = setInterval(pull, 10000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+  const artifactCount = artifactRows && hiddenSlugs
     ? visibleArtifacts(artifactRows, hiddenSlugs, showHidden).length : null;
   const tabs = (
     <div className="pane-tabs" role="tablist" data-jobs-tabs style={{ marginBottom: 12 }}>
@@ -49,19 +60,23 @@ function JobsView() {
 
 // A hidden cousin's jobs and artifacts go with it: the show-hidden toggle
 // reveals them, as it does its sidebar row and its loops.
+// hiddenSlugs null (not loaded yet) holds every row back unless the
+// toggle is on.
 function visibleArtifacts(rows, hiddenSlugs, showHidden) {
-  return showHidden ? rows : rows.filter(r => !hiddenSlugs.has(r.created_by));
+  if (showHidden) return rows;
+  return hiddenSlugs ? rows.filter(r => !hiddenSlugs.has(r.created_by)) : [];
 }
 function visibleJobs(rows, hiddenSlugs, showHidden) {
-  return showHidden ? rows : rows.filter(j => !hiddenSlugs.has(j.spawned_by));
+  if (showHidden) return rows;
+  return hiddenSlugs ? rows.filter(j => !hiddenSlugs.has(j.spawned_by)) : [];
 }
 
 function JobsList({ tabs, hiddenSlugs, showHidden }) {
   const [allJobs, setJobs] = React.useState([]);
   const jobs = React.useMemo(
-    () => visibleJobs(allJobs, hiddenSlugs || new Set(), showHidden),
+    () => visibleJobs(allJobs, hiddenSlugs, showHidden),
     [allJobs, hiddenSlugs, showHidden]);
-  const hiddenJobs = allJobs.length - jobs.length;
+  const hiddenJobs = hiddenSlugs ? allJobs.length - jobs.length : 0;
   // Default to "last24h" so an idle dashboard shows recent activity
   // instead of an empty 'active' tab when nothing is running NOW.
   // Order: active | last24h | done | failed | lost | all.
@@ -69,6 +84,13 @@ function JobsList({ tabs, hiddenSlugs, showHidden }) {
   const [spawnedBy, setSpawnedBy] = React.useState("all");  // all | <slug>
   const [kind, setKind] = React.useState("all");            // all | <kind>
   const [openJob, setOpenJob] = React.useState(null);
+  // A cousin that goes hidden takes its "spawned by" pick and its open
+  // log with it; otherwise the list stays empty or the log stays up.
+  React.useEffect(() => {
+    if (showHidden || !hiddenSlugs) return;
+    if (hiddenSlugs.has(spawnedBy)) setSpawnedBy("all");
+    setOpenJob(o => o && hiddenSlugs.has(o.spawned_by) ? null : o);
+  }, [hiddenSlugs, showHidden, spawnedBy]);
 
   // Poll /api/jobs every 2s.
   React.useEffect(() => {
@@ -299,8 +321,8 @@ function JobsList({ tabs, hiddenSlugs, showHidden }) {
 // private row shows only its label and verifies only for its owner.
 function ArtifactsPanel({ hiddenSlugs, showHidden }) {
   const [allRows, setRows] = React.useState(null);
-  const rows = allRows && visibleArtifacts(allRows, hiddenSlugs || new Set(), showHidden);
-  const hiddenCount = allRows ? allRows.length - rows.length : 0;
+  const rows = allRows && visibleArtifacts(allRows, hiddenSlugs, showHidden);
+  const hiddenCount = allRows && hiddenSlugs ? allRows.length - rows.length : 0;
   const [checked, setChecked] = React.useState(false);
   const [hashed, setHashed] = React.useState({});
   const load = React.useCallback(async (verify) => {
@@ -321,7 +343,7 @@ function ArtifactsPanel({ hiddenSlugs, showHidden }) {
     if (!r.ok) { alert("remove failed: " + (d.error || r.status)); return; }
     load(checked);
   };
-  if (!rows) return null;
+  if (!rows || (!hiddenSlugs && !showHidden)) return null;
   const tone = { ok: "green", unchanged: "green", touched: "amber", changed: "amber",
                  missing: "red", unreadable: "red" };
   const place = r => r.private ? `[private] ${r.label}`
@@ -337,7 +359,7 @@ function ArtifactsPanel({ hiddenSlugs, showHidden }) {
         {rows.length > 0 && <button className="btn ghost" onClick={() => load(true)}
           title="size and mtime of each file, no hashing">check files</button>}
       </div>
-      {rows.length === 0 && hiddenCount > 0 ? <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+      {rows.length === 0 && hiddenCount > 0 ? <div className="muted" style={{ fontSize: 12, marginTop: 6 }} data-artifacts-all-hidden>
         every recorded artifact is a hidden cousin's; show hidden cousins to list them.
       </div> : rows.length === 0 ? <div className="muted" style={{ fontSize: 12, marginTop: 6 }} data-artifacts-empty>
         none recorded yet. A job records what it builds when it is started with

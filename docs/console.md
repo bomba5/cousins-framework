@@ -77,7 +77,8 @@ version the console is running: `v0.1.0 0a119f6`. In a git checkout with a
 browsable `origin` remote, the version links to the repository and the
 commit hash to that commit. The version is read when the console starts, so
 after a `git pull` it shows the old one until you restart it. On the right
-are an eye toggle that shows or hides hidden cousins and loops, the logged-in
+are an eye toggle that shows or hides hidden cousins (with their jobs and
+artifacts) and loops, the logged-in
 user, and a clock.
 
 The sidebar lists the pages (Ctrl/Cmd + 1 to 7, 0 for Settings) and below
@@ -218,8 +219,9 @@ Click a card to open the inspector drawer. From top to bottom:
   timed flip with a cancel button.
 - **Buttons.** start / stop, kill (does the same as stop), flip and restart
   (only while running), and hide / unhide. A hidden cousin drops out of the
-  sidebar and the Cousins page until you turn on "show hidden" (the eye in
-  the top bar, or Settings). Hiding changes nothing else.
+  sidebar, the Cousins page, the meeting pool and the Jobs view (its jobs
+  and its artifacts) until you turn on "show hidden" (the eye in the top
+  bar, or Settings). Hiding changes nothing else.
 
 On a tmux-legacy cousin, model and effort are identity rows (`[runtime]`).
 On a runner cousin they are in the agent panel, where its runner reads them.
@@ -646,7 +648,9 @@ its own filter), within seconds while the console runs; jobs still
 cousins recorded with `cousin-artifact`: "check files" compares each
 file's size and mtime with the recorded ones (no hashing), "hash" checks
 one file against its recorded sha256, and "remove" drops a row (the file
-stays). A private row shows only its label.
+stays). A private row shows only its label. A hidden cousin's jobs and
+artifacts show only with "show hidden" on; each list says how many it
+leaves out, and the tab count counts what it shows.
 
 ## Memory
 
@@ -861,7 +865,8 @@ The install as a whole, in six tabs. The routes are in [the API reference](refer
 - **cosmetic**: accent hue and saturation, chat reveal speed (off, slow,
   normal, fast) and effect (plain, glitch, matrix, typewriter, boot), font
   scale. Stored in your browser.
-- **visibility**: show hidden cousins and loops.
+- **visibility**: show hidden cousins (with their jobs and artifacts) and
+  loops.
 - **process control**: "restart console". The console exits and expects its
   service manager to start it again (about 4 seconds). Logins survive the
   restart. If it isn't running under a supervisor, it warns you that restart

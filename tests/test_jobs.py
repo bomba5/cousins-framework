@@ -23,28 +23,33 @@ from cousin_lib.jobs import (
 
 
 def _wait_children_gone(root, timeout=15.0):
-    """Wait until no process launched under this test's FRAMEWORK_ROOT is
-    alive. A job's detached runner commits the row's status first, then
-    writes the owner's raw memory and close notice into the home: a test
-    that returns at "done" can have its temp root removed under those
-    writes ("Directory not empty")."""
-    mark = ("FRAMEWORK_ROOT=%s" % root).encode()
+    """Wait until no other process holds a file under this test's root. A
+    job's detached runner (a fork, never exec'd: its /proc environ is its
+    parent's at exec, so it cannot be told by FRAMEWORK_ROOT) commits the
+    row's status first, then writes the owner's raw memory and close notice
+    into the home, holding the job log open until it exits: a test that
+    returns at "done" can have its temp root removed under those writes
+    ("Directory not empty")."""
+    prefix = str(pathlib.Path(root).resolve()) + "/"
     deadline = time.time() + timeout
     while time.time() < deadline:
-        alive = False
+        busy = False
         for proc in pathlib.Path("/proc").iterdir():
             if not proc.name.isdigit() or int(proc.name) == os.getpid():
                 continue
             try:
-                env = (proc / "environ").read_bytes().split(b"\0")
+                links = [os.readlink(fd) for fd in (proc / "fd").iterdir()]
             except OSError:
                 continue
-            if mark in env:
-                alive = True
+            if any(link.startswith(prefix) for link in links):
+                busy = True
                 break
-        if not alive:
+        if not busy:
             return
         time.sleep(0.05)
+    import warnings
+    warnings.warn("a process still holds files under %s after %ss: a leaked job runner?"
+                  % (root, timeout))
 
 
 class JobsCase(unittest.TestCase):

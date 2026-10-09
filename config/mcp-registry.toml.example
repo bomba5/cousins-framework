@@ -139,7 +139,7 @@ options = { desc = "--desc", json = "--json" }
 # title after it, so a title such as "--json" is never read as an option.
 # --home-log confines the log to the home.
 argv = ["start", "shell", "--json", "--", "{title}", "{argv}"]
-options = { desc = "--desc", log = "--home-log", artifacts = "--artifact", commit = "--artifact-commit", notify = "--notify" }
+options = { desc = "--desc", log = "--home-log", artifacts = "--artifact", commit = "--commit", notify = "--notify" }
 
 [tools.job.commands.done]
 argv = ["done", "{id}", "{summary}"]

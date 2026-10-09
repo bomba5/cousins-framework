@@ -763,6 +763,8 @@ def _spawn_tracked(cmd, log_path, job_id, *, artifacts=(), commit=None, owner=No
         os.dup2(fd, 1)
         os.dup2(fd, 2)
         os.close(fd)
+        # where this run's output begins: the summary reads only past it
+        started_at = os.fstat(1).st_size
         try:
             rc = subprocess.call(cmd)
         except Exception as err:
@@ -774,7 +776,7 @@ def _spawn_tracked(cmd, log_path, job_id, *, artifacts=(), commit=None, owner=No
         crashpoint("job.exited")
         status = "done" if rc == 0 else "failed"
         # read before the artifact lines go in: the command's own last word
-        summary = last_log_line(log_path)
+        summary = last_log_line(log_path, start=started_at)
         if rc == 0 and artifacts:
             missing = _record_artifacts(job_id, artifacts, commit, owner)
             crashpoint("job.artifacts_recorded")
@@ -792,24 +794,27 @@ def _spawn_tracked(cmd, log_path, job_id, *, artifacts=(), commit=None, owner=No
 
 LAST_LINE_PREFIX = "last log line: "
 _LAST_LINE_CHARS = 200
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
-def last_log_line(log_path):
+def last_log_line(log_path, start=0):
     """The command's last non-empty output line, as a launched job's
     summary when it ends (a cousin's own summary at done or fail replaces
     it): "last log line: OK (skipped=69)". A heuristic, labelled as one;
-    the exit code stays the verdict. Empty when there is none, or only
-    the header cousin-job wrote."""
+    the exit code stays the verdict. Only what follows `start` (the log's
+    size when the command began) is read, so a reused log never lends
+    this run an earlier run's line. Colour codes are dropped. Empty when
+    the command printed nothing."""
     try:
         with open(log_path, "rb") as fh:
             fh.seek(0, os.SEEK_END)
-            fh.seek(max(0, fh.tell() - 8192))
+            fh.seek(max(start, fh.tell() - 8192))
             tail = fh.read().decode("utf-8", "replace")
     except OSError:
         return ""
     for line in reversed(tail.splitlines()):
-        line = " ".join(line.split())
-        if line and not line.startswith(("# ", "$ ")):
+        line = " ".join(_ANSI.sub("", line).split())
+        if line:
             if len(line) > _LAST_LINE_CHARS:
                 line = line[:_LAST_LINE_CHARS - 3] + "..."
             return LAST_LINE_PREFIX + line

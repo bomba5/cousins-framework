@@ -236,7 +236,8 @@ def _j_run(ctx, a):
     commit = _str(a, "commit")
     if commit:
         # the commit the command runs against: on the row, and on each artifact
-        cli += ["--commit", commit]
+        # one argument, so a value that starts with '-' is never an option
+        cli += ["--commit=" + commit]
     if a.get("notify"):
         cli += ["--notify"]
     cli += ["--", title] + argv

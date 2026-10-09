@@ -18,6 +18,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   labelled as such (`last log line: OK (skipped=69)`), so a suite's
   verdict sits on the row instead of only in its log. The exit code
   stays the verdict; a summary given at `done` or `fail` replaces it.
+- The job tool's `run` passes `commit` as `--commit` on every lane (the
+  registry's options said `--artifact-commit`, the same option).
+
+## 3.42.6 - 2026-10-09
 
 ### Fixed
 

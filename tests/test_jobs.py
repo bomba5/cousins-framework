@@ -256,6 +256,25 @@ class TestBackgroundCommand(JobsCase):
         jobs.finish_job(job["id"], status="failed", summary="two tests broke on the tmpfs run")
         self.assertEqual(jobs.get_job(job["id"])["result_summary"], "two tests broke on the tmpfs run")
 
+    def test_a_reused_log_never_lends_an_earlier_runs_line(self):
+        """Two runs into one --log: the second, silent and failing, must
+        not close with the first one's "OK" (review of #292)."""
+        log = str(self.root / "shared.log")
+        _, out, _ = self._main(["start", "shell", "--log", log, "--", "first",
+                                "sh", "-c", "echo 'OK all green'"])
+        self._wait_status(int(out.strip()), ("done",))
+        _, out, _ = self._main(["start", "shell", "--log", log, "--", "second",
+                                "sh", "-c", "exit 3"])
+        job = self._wait_status(int(out.strip()), ("failed",))
+        self.assertEqual(job["exit_code"], 3)
+        self.assertFalse(job["result_summary"])
+
+    def test_colour_codes_do_not_reach_the_summary(self):
+        _, out, _ = self._main(["start", "shell", "colour", "--",
+                                "printf", "\\033[32mOK\\033[0m (3 passed)\\n"])
+        job = self._wait_status(int(out.strip()), ("done",))
+        self.assertEqual(job["result_summary"], "last log line: OK (3 passed)")
+
     def test_a_long_last_line_is_cut(self):
         from cousin_lib import jobs
         log = self.root / "long.log"

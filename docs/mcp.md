@@ -79,13 +79,14 @@ its error says no operator is configured.
 job without a shell of its own: it takes `title`, `argv` (the command as
 an array, one element per argument, never a shell string), and
 optionally `desc`, `log` (a path relative to the cousin's home;
-without it, the job's own log under `data/job-logs/`), and `artifacts`
-with `commit` (the files it builds, recorded for the job on exit 0), and
+without it, the job's own log under `data/job-logs/`), `artifacts` (the
+files it builds, recorded for the job on exit 0), `commit` (the git
+commit the command runs against, kept on the job's row and on each
+artifact; it needs no artifacts, so a test run names what it tested), and
 `notify` (when the job ends, one row in the cousin's [inbox](glossary.md#inbox) with its status,
 exit code and log, so it waits instead of polling). It runs
 `cousin-job start shell --json [--desc D] [--home-log L] [--artifact P]...
-[--artifact-commit C] [--notify] -- TITLE ARGV...` (`--artifact-commit`
-is the older name of `--commit`), so it's the same launcher. The title comes after `--`, so a
+[--commit C] [--notify] -- TITLE ARGV...`, so it's the same launcher. The title comes after `--`, so a
 title like `--json` is only a title. `--home-log` confines the log to
 the home: an absolute path, `~`, `..` or anything under `.secrets` is
 refused before a row exists. From there it's the usual launcher: the command runs detached in its own process group, from the

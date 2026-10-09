@@ -38,8 +38,10 @@ With a command after `--`, the job runs detached, writes its output to
 `--log` says), and closes itself as `done` or `failed` with the
 command's exit code, and with the command's last non-empty output line
 as its summary (`last log line: OK (skipped=69)`), a hint beside the
-exit code, which stays the verdict. You don't call `done` for those; a
-`done` or `fail` with a summary still replaces the line. A job started
+exit code, which stays the verdict (only this run's output counts, and
+the line is copied into the store, so a command that prints a secret
+last spreads it). You don't call `done` for those; a `done` or `fail`
+with a summary still replaces the line. A job started
 without a command still gets a log in the same place: its title and
 `--desc` at start, its outcome and summary at `done`, `fail` or
 `cancel`. Don't point
@@ -61,8 +63,8 @@ and optionally `desc`, `log` (relative to its home, passed as
 `--home-log`), `artifacts`: the files the command builds, relative to
 its home, recorded as artifacts of the job when it exits 0 (passed as
 `--artifact`), `commit`: the git commit the command runs against, kept
-on the row and on each artifact (passed as `--artifact-commit`, the
-older name of `--commit`; a test run gives it with no artifacts), and `notify`: when
+on the row and on each artifact (passed as `--commit`; a test run gives
+it with no artifacts), and `notify`: when
 the job ends (done, failed or lost) one row lands in the cousin's
 [inbox](glossary.md#inbox) with
 its status, exit code and log path, so it waits for the job instead of

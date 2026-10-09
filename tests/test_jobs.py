@@ -38,11 +38,18 @@ def _wait_children_gone(root, timeout=15.0):
             if not proc.name.isdigit() or int(proc.name) == os.getpid():
                 continue
             try:
-                links = [os.readlink(fd) for fd in (proc / "fd").iterdir()]
+                fds = list((proc / "fd").iterdir())
             except OSError:
-                continue
-            if any(link.startswith(prefix) for link in links):
-                busy = True
+                continue            # gone, a zombie, or another user's
+            for fd in fds:
+                try:
+                    link = os.readlink(fd)
+                except OSError:
+                    continue        # closed since the listing: the rest still count
+                if link.startswith(prefix):
+                    busy = True
+                    break
+            if busy:
                 break
         if not busy:
             return

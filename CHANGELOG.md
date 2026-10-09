@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.48.0 - 2026-10-09
+
+### Changed
+
+- **A heartbeat with nothing to say is not sent.** When no identity file
+  (STATUS.md, CLAUDE.md, MEMORY.md) changed, the scheduled context beat
+  is skipped and the next tick looks again. Those beats were 70-100% of
+  a quiet cousin's spend: a turn to read the inbox, find nothing and
+  write that down. A change, an operator's edit included, still reaches
+  the cousin as soon as the period has passed. A beat fired by hand is
+  always sent (#297, meeting 11 C).
+
 ## 3.47.0 - 2026-10-09
 
 ### Changed

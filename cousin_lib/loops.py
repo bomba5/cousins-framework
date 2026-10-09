@@ -468,9 +468,12 @@ def _beat_entry(name, path, text):
             " read it if you need what changed ---" % (name, path, len(text)))
 
 
-def _compose_beat(home, now):
+def _compose_beat(home, now, *, only_changes=False):
     """(prompt, commit) for the context beat, or (None, None) when
-    composition fails. The mtime state is captured here but WRITTEN
+    composition fails, or, with `only_changes` (the scheduled beat), when
+    no identity file changed: a beat that says "nothing changed" was most
+    of a quiet cousin's spend (meeting 11 C), and the next tick looks
+    again. A manual fire is always delivered. The mtime state is captured here but WRITTEN
     only by commit() - which the tick calls after delivery succeeded.
     The source wrote state before injecting; a failed inject lost the
     delta and the next beat reported 'no changes' over real ones.
@@ -495,6 +498,8 @@ def _compose_beat(home, now):
             changed.append(_beat_entry(name, path, path.read_text(errors="replace")))
     if changed:
         delta = "What changed since the last heartbeat:\n\n" + "\n\n".join(changed)
+    elif only_changes:
+        return None, None
     else:
         delta = ("No identity files changed since the last heartbeat;"
                  " use cousin-memory search for anything older.")
@@ -1166,7 +1171,7 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
             interval = config.heartbeat_seconds
             last_beat = state["last_beat"].get(slug, 0)
             if interval > 0 and (now - last_beat) >= interval:
-                beat_prompt, beat_commit = _compose_beat(home, now)
+                beat_prompt, beat_commit = _compose_beat(home, now, only_changes=True)
                 if beat_prompt:
                     sections.append(("context-heartbeat", beat_prompt))
             due = []

@@ -299,13 +299,25 @@ class TestHeartbeat(LoopsCase):
         _, text = self.delivered[0]
         self.assertIn("cut at %d characters" % loops._BEAT_INLINE_CAP, text)
 
-    def test_unchanged_files_yield_the_no_changes_note(self):
+    def test_an_unchanged_beat_is_not_sent_and_a_later_change_is(self):
+        # meeting 11 C: a beat saying "nothing changed" was most of a quiet
+        # cousin's spend; the next tick looks again, so a change still lands
         home = self._beat_cousin()
         base = time.time()
         self._tick(now=base)
         self._tick(now=base + 10)
-        _, text = self.delivered[1]
-        self.assertNotIn("CHANGED", text)
+        self.assertEqual(len(self.delivered), 1)
+        (home / "STATUS.md").write_text("## Open loops\n\n- [ ] a new loop\n")
+        os.utime(home / "STATUS.md", (base + 15, base + 15))
+        self._tick(now=base + 20)
+        self.assertEqual(len(self.delivered), 2)
+        self.assertIn("a new loop", self.delivered[1][1])
+
+    def test_a_manual_fire_with_nothing_changed_still_says_so(self):
+        from cousin_lib import loops
+        home = self._beat_cousin()
+        self._tick()
+        text, _commit = loops._compose_beat(home, time.time())
         self.assertIn("No identity files changed", text)
 
     def test_delta_state_commits_after_delivery_not_before(self):

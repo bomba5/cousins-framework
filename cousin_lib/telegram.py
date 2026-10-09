@@ -225,6 +225,7 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
             msg_type="user",
             attachment_kind="image" if path else None,
             attachment_path=str(path) if path else None,
+            pending=True,
         )
     finally:
         store.close()
@@ -238,8 +239,8 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
                              message_id=message_id)
         return delivery.deliver(cfg.home, item, wait=False)
 
-    outcome = deliver(user=user, message=message, message_id=row["id"],
-                      attachments=(str(path),) if path else ())
+    outcome = chat_api.deliver_stored(config, row["id"], deliver, user=user, message=message,
+                                      attachments=(str(path),) if path else ())
     if outcome == delivery.FAILED:
         # the runner will never see it: keep nothing, fire nothing, and
         # relay_inbound tells the sender instead of leaving them waiting

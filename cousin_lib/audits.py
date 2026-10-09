@@ -17,6 +17,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from cousin_lib import atomic
 from cousin_lib import status_sections
 from cousin_lib.config import FrameworkConfig
 
@@ -211,7 +212,7 @@ def write_active_threads_baseline(home, *, since_ts=0.0, force=False):
         return {"wrote": False, "reason": "no-open-loops",
                 "path": str(path), "chars": 0}
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body)
+    atomic.write_text(path, body)
     if force and fresh:
         reason = "forced"
     elif cur_mtime == 0.0:

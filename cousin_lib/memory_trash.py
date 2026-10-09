@@ -48,7 +48,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import memory_lock, perimeter
+from cousin_lib import atomic, memory_lock, perimeter
+from cousin_lib.crashpoint import crashpoint
 from cousin_lib.home_files import PathRefused, resolve_in
 from cousin_lib import jsonl
 
@@ -60,6 +61,10 @@ _NOT_REMOVABLE_FILES = {"fts_index.db", "vectors.db", "embeddings.json",
                         ".recall-log-archive.jsonl", ".reindexed"}
 _ID_RE = re.compile(r"^[0-9]{8}T[0-9]{6}-[0-9]{6}(-[0-9]+)?$")
 _REWRITE_TRIES = 5
+# A batch whose manifest still says `moving` this long after it was
+# written was left by a process that died mid-move: its reader settles it
+# (_settle). Younger, it may be a move still running.
+MOVING_STALE_S = 60.0
 
 
 def trash_dir(home):
@@ -216,6 +221,17 @@ def trash_lines(home, refs, *, by=None):
         plan.setdefault(rel, (path, []))[1].append(
             (idx, line_sha(lines[idx]), lines[idx]))
     batch_id, batch_dir = _new_batch_dir(home)
+    deleted_at = _now().isoformat()
+    # Every line, with its text, is in the manifest before any file
+    # changes: a kill mid-move leaves a `moving` batch (_settle), never a
+    # removed line kept nowhere.
+    _write_manifest(batch_dir, {"id": batch_id, "deleted_at": deleted_at, "by": by,
+                                "moving": True, "items": [
+                                    {"kind": "line", "path": rel, "line_no": idx + 1,
+                                     "sha": sha, "line": text}
+                                    for rel, (_p, targets) in plan.items()
+                                    for idx, sha, text in targets]})
+    crashpoint("trash.moving")
     items = []
     for rel, (path, targets) in plan.items():
         wanted = {sha for _i, sha, _l in targets}
@@ -241,9 +257,8 @@ def trash_lines(home, refs, *, by=None):
         for line_no, text in removed:
             items.append({"kind": "line", "path": rel, "line_no": line_no,
                           "sha": line_sha(text), "line": text})
-    manifest = {"id": batch_id, "deleted_at": _now().isoformat(),
-                "by": by, "items": items}
-    (batch_dir / "manifest.json").write_text(json.dumps(manifest, indent=1))
+    manifest = {"id": batch_id, "deleted_at": deleted_at, "by": by, "items": items}
+    _write_manifest(batch_dir, manifest)
     for item in items:
         _audit(home, {"ts": manifest["deleted_at"], "action": "trash",
                       "trash_id": batch_id, "kind": "line",
@@ -260,17 +275,61 @@ def trash_file(home, rel, *, by=None, allow_legacy=False):
     batch_id, batch_dir = _new_batch_dir(home)
     dest = batch_dir / "files" / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
+    deleted_at = _now().isoformat()
+    _write_manifest(batch_dir, {"id": batch_id, "deleted_at": deleted_at, "by": by,
+                                "moving": True, "items": [{"kind": "file", "path": rel}]})
+    crashpoint("trash.moving")
     try:
         os.replace(path, dest)
     except OSError:
         shutil.move(str(path), str(dest))
-    manifest = {"id": batch_id, "deleted_at": _now().isoformat(), "by": by,
+    manifest = {"id": batch_id, "deleted_at": deleted_at, "by": by,
                 "items": [{"kind": "file", "path": rel,
                            "size": dest.stat().st_size}]}
-    (batch_dir / "manifest.json").write_text(json.dumps(manifest, indent=1))
+    _write_manifest(batch_dir, manifest)
     _audit(home, {"ts": manifest["deleted_at"], "action": "trash",
                   "trash_id": batch_id, "kind": "file", "path": rel,
                   "by": by})
+    return manifest
+
+
+def _write_manifest(batch_dir, manifest):
+    atomic.write_text(batch_dir / "manifest.json", json.dumps(manifest, indent=1))
+
+
+def _settle(home, batch_dir, manifest, *, now=None):
+    """A `moving` batch left by a process that died mid-move (older than
+    MOVING_STALE_S; a younger one is returned as it is): each item is
+    kept when it did move (the line is gone from its file, the file is in
+    the batch) and dropped when it did not. The settled manifest is
+    written; a batch left with nothing is removed and None returned."""
+    if not manifest.get("moving"):
+        return manifest
+    import time
+    age = (now or time.time()) - (batch_dir / "manifest.json").stat().st_mtime
+    if age < MOVING_STALE_S:
+        return manifest
+    kept = []
+    for item in manifest.get("items") or []:
+        try:
+            target = resolve_in(home, item["path"])
+        except PathRefused:
+            continue
+        if item["kind"] == "file":
+            copy = batch_dir / "files" / item["path"]
+            if copy.is_file():
+                kept.append(dict(item, size=copy.stat().st_size))
+        else:
+            present = target.read_bytes().decode("utf-8", "replace").splitlines() \
+                if target.is_file() else []
+            if all(line_sha(l) != item["sha"] for l in present):
+                kept.append(item)
+    if not kept:
+        shutil.rmtree(batch_dir, ignore_errors=True)
+        return None
+    manifest = {k: v for k, v in manifest.items() if k != "moving"}
+    manifest["items"] = kept
+    _write_manifest(batch_dir, manifest)
     return manifest
 
 
@@ -282,6 +341,11 @@ def _batch(home, trash_id):
         manifest = json.loads((batch_dir / "manifest.json").read_text())
     except (OSError, ValueError):
         raise PathRefused("unknown trash id", status=404)
+    manifest = _settle(Path(home), batch_dir, manifest)
+    if manifest is None:
+        raise PathRefused("unknown trash id", status=404)
+    if manifest.get("moving"):
+        raise PathRefused("that batch is still being moved; try again", status=409)
     return batch_dir, manifest
 
 
@@ -295,9 +359,12 @@ def list_trash(home):
         if not child.is_dir() or not _ID_RE.match(child.name):
             continue
         try:
-            out.append(json.loads((child / "manifest.json").read_text()))
+            manifest = _settle(Path(home), child,
+                               json.loads((child / "manifest.json").read_text()))
         except (OSError, ValueError):
             continue
+        if manifest is not None:
+            out.append(manifest)
     return out
 
 

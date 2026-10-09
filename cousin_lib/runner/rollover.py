@@ -17,6 +17,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cousin_lib import atomic
 from cousin_lib.delivery import Item
 from cousin_lib.runner import wake
 
@@ -143,7 +144,7 @@ def write_emergency_handoff(home, *, name, reason, tail):
     store's tail: a real signal loss, never the normal flow."""
     path = Path(home) / "data" / "handoff.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join([
+    atomic.write_text(path, "\n".join([
         "# EMERGENCY HANDOFF (framework-generated)",
         "degraded_state: true",
         "reason: %s" % reason,

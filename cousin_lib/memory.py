@@ -22,6 +22,7 @@ import zlib
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from cousin_lib import atomic
 from cousin_lib import memory_lock, perimeter
 from cousin_lib.trace import traced_cli
 from cousin_lib import jsonl
@@ -140,7 +141,7 @@ def ensure_layout(home):
         path = ddir / fname
         if not path.exists():
             title = fname.replace(".md", "").replace("-", " ").title()
-            path.write_text("# %s\n\n%s\n" % (title, STUB_TEXT))
+            atomic.write_text(path, "# %s\n\n%s\n" % (title, STUB_TEXT))
 
 
 def entry_timestamp(entry):

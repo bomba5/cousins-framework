@@ -139,6 +139,7 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cousin_lib import atomic
 from cousin_lib import loops
 from cousin_lib.delivery import RUNNER_KINDS, lane_refusal  # the one list of runner kinds
 from cousin_lib.runner.main import LOCK_HELD_EXIT, STOP_TIMEOUT_S
@@ -569,7 +570,7 @@ class Supervisor:
         if spec.pid_file is not None:
             try:
                 spec.pid_file.parent.mkdir(parents=True, exist_ok=True)
-                spec.pid_file.write_text("%d\n" % proc.pid)
+                atomic.write_text(spec.pid_file, "%d\n" % proc.pid)
             except OSError as err:
                 self.say("cannot write %s: %s" % (spec.pid_file, err))
         child.reader = threading.Thread(target=self._pump,

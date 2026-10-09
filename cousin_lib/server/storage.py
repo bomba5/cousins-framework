@@ -136,6 +136,15 @@ class ChatStore:
         anticipated migration - no id-space change, no data rewrite."""
         for column in ("attachment_kind", "attachment_path"):
             add_column(self.conn, "messages", column, "TEXT")
+        # An inbound row waiting for its inbox put ('pending'), NULL once
+        # the put returned (and for every row that is not delivered), and
+        # the key that put runs under (chat_api.deliver_stored).
+        add_column(self.conn, "messages", "delivery", "TEXT")
+        add_column(self.conn, "messages", "delivery_key", "TEXT")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_delivery"
+                          " ON messages(delivery) WHERE delivery IS NOT NULL")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_delivery_key"
+                          " ON messages(delivery_key) WHERE delivery_key IS NOT NULL")
 
     def close(self):
         self.conn.close()
@@ -151,22 +160,41 @@ class ChatStore:
         reply_to_user=None,
         attachment_kind=None,
         attachment_path=None,
+        pending=False,
+        delivery_key=None,
     ):
         """Insert one message row and return {"id", "timestamp"}. reply_to
         is opaque client JSON, stored verbatim. An attachment is a
         local asset path plus its kind; the bytes live on disk, the row
-        holds only the path."""
+        holds only the path. `pending`: a row to be delivered, marked so
+        until `mark_delivered` (chat_api.deliver_stored)."""
         timestamp = datetime.now(timezone.utc).isoformat()
         cur = self.conn.execute(
             "INSERT INTO messages"
             " (chat_user, user, message, timestamp, type, reply_to,"
-            "  reply_to_user, attachment_kind, attachment_path)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  reply_to_user, attachment_kind, attachment_path, delivery, delivery_key)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (chat_user, user, message, timestamp, msg_type, reply_to,
-             reply_to_user, attachment_kind, attachment_path),
+             reply_to_user, attachment_kind, attachment_path,
+             "pending" if pending else None, delivery_key),
         )
         self.conn.commit()
         return {"id": cur.lastrowid, "timestamp": timestamp}
+
+    def mark_delivered(self, message_id):
+        self.conn.execute("UPDATE messages SET delivery = NULL WHERE id = ?", (message_id,))
+        self.conn.commit()
+
+    def pending_rows(self, older_than_iso):
+        """Rows still waiting for their inbox put, stored before `older_than_iso`."""
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM messages WHERE delivery = 'pending' AND timestamp < ? ORDER BY id",
+            (older_than_iso,))]
+
+    def by_delivery_key(self, key):
+        row = self.conn.execute("SELECT * FROM messages WHERE delivery_key = ? ORDER BY id"
+                                " LIMIT 1", (key,)).fetchone()
+        return dict(row) if row else None
 
     def delete_message(self, message_id):
         """Remove one row and its reactions: a message that was never

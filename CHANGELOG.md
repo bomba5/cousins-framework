@@ -3,6 +3,35 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.43.2 - 2026-10-09
+
+### Fixed
+
+- **An inbound chat message is no longer lost to a crash between its
+  chat row and its inbox row.** The row is stored pending and its put
+  runs under a key (`chat:<id>`, or the peer's own); the loops daemon
+  puts every row still pending after 30 seconds again, under the same
+  key, so the cousin gets it once. A peer's retry of a message whose row
+  is already stored delivers that row: no second chat line. New health
+  component `chat-redelivery`.
+- **A whole file the framework rewrites is replaced in one step.** The
+  handoff tool's STATUS.md, active-threads.md and handoff.md, the
+  emergency handoff, a reincarnation's CLAUDE.md, a merge's MEMORY.md,
+  the Telegram token, a supervised pid file, a new cousin's registry
+  and `.mcp.json`, and the distilled stubs went through an in-place
+  write; a kill could leave any of them torn or empty.
+- **A memory removal killed half way loses nothing.** The trash batch's
+  manifest, with each removed line's text, is written before anything
+  moves, marked `moving`; a removal killed between is settled the next
+  time the trash is read.
+
+### Added
+
+- `tests/crash_nightly.py` and the `nightly` workflow: one scenario
+  through every producer of a home, killed at a crash point and hit the
+  seed picks, 40 rounds a night on tmpfs (#294). Crash points
+  `chat.stored`, `chat.put`, `atomic.written`, `trash.moving`.
+
 ## 3.43.1 - 2026-10-09
 
 ### Fixed

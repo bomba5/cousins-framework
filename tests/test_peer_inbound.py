@@ -209,13 +209,13 @@ class TestAccept(InboundCase):
         real = chat.deliver_to
         calls = []
 
-        def blocked(target, payload):
+        def blocked(target, payload, key=None):
             calls.append(1)
             if len(calls) == 1:
                 entered.set()
                 release.wait(10)
                 raise chat_api.NotDelivered("the inbox did not take it")
-            return real(target, payload)
+            return real(target, payload, key=key)
         out = {}
 
         def first():

@@ -128,7 +128,7 @@ nothing to check and is never marked lost.
 `lost` isn't final: if the runner was in fact alive and finishes later,
 it still closes the row `done` or `failed` with its exit code, and
 `cousin-job done|fail|cancel` overwrite it as for any row. A lost job
-doesn't land in its cousin's memory (only `done` and `failed` do).
+doesn't land in its cousin's memory (only `failed` does, since 3.46.0).
 
 More housekeeping happens when the console lists jobs: anything still
 `running` after 24 hours is marked failed, whether or not its process

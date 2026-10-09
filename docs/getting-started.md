@@ -36,7 +36,7 @@ with the machine and come back after a reboot, install the systemd units
 three kinds of children up and restarts one that crashes:
 
 - **the console** (`console`): the web UI on `http://127.0.0.1:8600`.
-- **the loops daemon** (`loops`): the clock. Every hour it sends Wren a
+- **the loops daemon** (`loops`): the clock. Every hour, when something changed, it sends Wren a
   heartbeat (a short prompt with whatever changed in its identity, status and
   memory files, answered in one line), once a day it runs Wren's
   [flip](glossary.md#flip), and it fires anything scheduled.

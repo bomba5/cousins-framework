@@ -89,7 +89,7 @@ If the inbox didn't take the message in step 3 (its write failed; or, in a race,
 
 A send may carry a `msg_id` (8-128 letters, digits, `-` or `_`). A node (runtime 0.3.0 and later, `NODE_VERSION` in its checkin) keeps the row a `msg_id` stored for 15 minutes, in its memory (a node restart forgets it), and a second send with the same one answers that row, `200 {"ok": true, "id", "timestamp", "duplicate": true}`, with no second row and no second [turn](../glossary.md#turn); two tries arriving at once store once (one arriving while the first is still storing waits up to 10 s, then answers `503`, so the console tries again). The console puts one in every send it proxies to a remote node, and tries a send again after 1 s and 2 s when the node did not answer or answered a `5xx`. A `503` on the third try may still have landed: the first try can have stored the message while the later ones waited, so look in the history before sending it again. On a node with an older runtime, which ignores `msg_id`, a slow send that did land and is tried again is stored and answered twice: update the runtime on each node ([remote cousins](../remote-cousins.md)). A bad `msg_id` is `400`.
 
-On a node the row is stored and the answer goes back at once. The node's brain runs the [turn](../glossary.md#turn) on a background thread, and its reply shows up in the history. A node has no login codes, no corrections and no chat hooks.
+On a node the row is stored and the answer goes back at once. The node's brain runs the [turn](../glossary.md#turn) on a background thread, and its reply shows up in the history. A node has no login codes and no chat hooks.
 
 ## Reply
 

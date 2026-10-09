@@ -28,7 +28,7 @@ reading and writing some other cousin's memory.
 When a new session starts (a spawn, a [flip](glossary.md#flip), a restart), the framework
 hands the cousin a boot packet built from the layers below. So what a
 cousin "knows" at the start of a session is: its identity files, its
-open loops and handoff, the [distilled](glossary.md#distilled) views of its raw memory, its last
+open loops and handoff, the [distilled](glossary.md#distilled) views of its raw memory, its
 recent raw entries, and the head of its
 `MEMORY.md`. Anything else it has to search for.
 
@@ -40,7 +40,7 @@ Everything below is relative to the cousin home.
 |---|---|---|---|
 | Active state | `STATUS.md`, `data/handoff.md`, `data/handoff-manual.md`, `data/pre-compact-checkpoint.md` | the cousin; the checkpoint by the harness hook | boot packet, heartbeat, session start hook |
 | Index | `MEMORY.md` | the cousin | boot packet (the first 1000 characters), heartbeat |
-| Raw entries | `memory/raw/YYYY-MM-DD.jsonl` | `decide`, `remember`, transcript mining after each [turn](glossary.md#turn), a transplant merge | distiller, boot packet |
+| Raw entries | `memory/raw/YYYY-MM-DD.jsonl` | `decide`, `remember`, transcript mining after each [turn](glossary.md#turn) that did work or that someone in the chat started, a transplant merge | distiller, boot packet |
 | Monthly digests | `memory/raw/YYYY-MM-digest.jsonl` | the raw fold | distiller, boot packet |
 | Raw archive | `memory/raw/archive/YYYY-MM.jsonl.gz` | the raw fold | search (an entry also in a monthly digest is indexed once), explorer |
 | Distilled views | `memory/distilled/*.md` | the distiller | boot packet |
@@ -73,8 +73,8 @@ packet warns the cousin that STATUS may be stale.
 heading: the section the handoff writes (its `status` is the body; the
 framework writes the heading, drops a leading "Open loops" heading the
 model wrote itself and demotes a `#` or `##` heading inside to `###`).
-The digest, the boot packet, the session-end baseline and the checkpoint
-all read that section and nothing else. A suffixed
+The digest, the boot packet, the checkpoint and `cousin-sync-state`
+(deprecated) all read that section and nothing else. A suffixed
 heading (`## Open loops (current as of gen 4)`) is history the cousin
 kept, never the live section, and so is `### Open loops archive`. One
 exception reads homes written before the handoff normalised its
@@ -100,13 +100,9 @@ A fact written with a [scope or an end](#what-a-fact-holds-for-and-until-when)
 also carries `"scope"` and `"valid_to"`, and one built from other entries
 `"derived_from"`.
 
-**Corrections** are captured when a chat message is stored (the console,
-`cousin-chat`, the Telegram bridge): when a message from
-the configured operator contains "stop", "don't", "no", "actually",
-"instead" and similar, it's recorded with its class, and the boot
-packet shows the recent ones next to the operator calibration. Only the
-operator named in `cousin.toml [operator]` counts; a peer cousin's "no"
-isn't calibration.
+Corrections are no longer captured (3.46.0, meeting 11 B): a keyword
+match on "no" or "actually" was mostly noise, and what the operator
+wants kept is recorded with `remember` at level `operator`.
 
 **Harness auto-memory** is the agent's own memory directory (for Claude
 Code, `~/.claude/projects/<encoded home>/memory`). The framework never
@@ -934,7 +930,8 @@ transcript miner keeps that also says "decided", "agreed", "from now
 on", "the fix is" and the like) and recorded nothing with the memory
 tool, the runner queues one question: those sentences, and whether any
 is worth keeping. It runs when nothing else is waiting, never about its
-own turn, and at most `PROPOSAL_CAP` times a rolling day
+own turn, never about an idle one (nobody in the chat started it and
+every call only read), and at most `PROPOSAL_CAP` times a rolling day
 (`cousin_lib/runner/extract.py`). The answer is an ordinary `remember`
 or `decide`, under a topic the cousin chose. A step that fails while
 building the proposal (a broken store, a corrupt cursor or cap file)

@@ -114,7 +114,7 @@ What spawn writes besides the identity files:
   With Claude Code you may still need `cousin-mcp approve wren` to record the
   approval in `~/.claude.json`.
 - `.claude/settings.json` with the harness hooks: the session banner,
-  pre-compact and stop checkpoints, and the job-tracking hook (see
+  the pre-compact checkpoint, and the job-tracking hook (see
   [session hooks](#session-hooks)). Keys it doesn't own are kept.
 
 `cousin-spawn wren --repair-settings` rewrites those two for a cousin made by
@@ -363,8 +363,9 @@ into `.claude/settings.json`. They read the home (first argument or
 
 
 The per-turn Stop checkpoint (`hooks/session_checkpoint.sh`) was retired in
-3.47.0: it was one more copy of STATUS.md's open loops. The script stays one
-release as a no-op, and the next settings apply removes it from a home.
+3.47.0: it was one more copy of STATUS.md's open loops. The script stays as a
+no-op until no home names it; `cousin-spawn <slug> --repair-settings` removes
+it from a home's settings (an upgrade does not re-apply them).
 
 A third, `python -m cousin_lib.job_hooks`, records every subagent and every
 background shell as a job on the Jobs page. Errors go to

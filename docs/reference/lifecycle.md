@@ -19,7 +19,7 @@ DEGRADED layers: active_state
 ...
 ## 4. Retrieved Memories
 ...
-## 6. Shared Reference
+## 5. Shared Reference
 ...
 ```
 
@@ -33,10 +33,10 @@ DEGRADED layers: active_state
 | Operator rules | system prompt | `<root>/shared/*.md`, the canonical tier only: entries with `kind: rule`, in full. Never pending proposals | left out, fine: a fresh install has no [shared tier](../glossary.md#shared-tier) |
 | Identity | system prompt | the authored parts of `CLAUDE.md` (the title line, `## Identity`, `## Voice` and what's below the template marker, minus the template's own text), then `<home>/self-portrait.md`, the committed portrait only (a candidate waiting for review doesn't count) | a fixed note that no identity is on disk and none should be invented, **degraded** (`identity`) |
 | Standing instructions | system prompt | the cousin's L0 entries whose topic carries a preferences word ("rule:", "feedback", "preference", "prefers", "tone", "register", "style"; `distill.standing_instruction`), the newest entry per topic in full, sorted by topic, under "# Your operator's standing instructions" | left out |
-| Operator Calibration | digest | the curated text above the marker in `memory/distilled/operator-calibration.md`, the other L0 entries (one line per topic, the view's line) newest first. Standing instructions are not repeated here. The portrait's own calibration section is in the identity already | left out |
+| Operator Calibration | digest | the curated text above the marker in `memory/distilled/operator-calibration.md`, the other L0 entries (one line per topic, the view's line) newest first. Standing instructions are not repeated here. An older portrait's own calibration section is in the identity already (synthesize no longer drafts one) | left out |
 | Active State | digest | the live `## Open loops` section of STATUS.md, the bare heading the handoff writes (a suffixed `## Open loops (...)` heading is history; see [memory](../memory.md)) (or the first 1500 characters when there's no such section), then the first 1500 characters of `data/handoff.md`. A stale warning goes on top when decisions were logged after STATUS.md was last changed | `(no active state - degraded boot)`, **degraded** |
 | Recent Tool Trace Summary | digest | the cousin's traced CLI calls from the last 24 hours, newest first, up to 30 | `(no substantive tool traces in last 24h)`, fine |
-| Retrieved Memories | digest | the [distilled](../glossary.md#distilled) files in `memory/distilled/` (preferences, project facts, decisions, known failures, glossary; calibration has its own layer), the last 60 entries from the newest 14 files in `memory/raw/` (standing instructions left out: the system prompt has them), and the first 1000 characters of MEMORY.md | empty, fine: a new cousin has no memories |
+| Retrieved Memories | digest | the [distilled](../glossary.md#distilled) files in `memory/distilled/` (preferences, project facts, decisions, known failures, glossary; calibration has its own layer), the last 60 entries from the newest 14 files in `memory/raw/` (standing instructions left out: the system prompt has them; so is the framework's own log, `episode:`, `job:` and `framework:` topics), and the first 1000 characters of MEMORY.md. Each distilled file's lines are ordered so the budget cut falls on old conclusions: a line whose topic an open loop names, then L0-L2, then the rest newest first | empty, fine: a new cousin has no memories |
 | Shared Reference | digest | every other canonical shared entry as one line (file and description), with how to read one (`cousin-shared read <file>`) | left out, fine |
 
 Before it builds the digest, the runner regenerates `memory/distilled/` from `memory/raw/` (the same as `cousin-memory distill`), so the digest always has a fresh view. If that fails, the digest uses whatever distilled files are already there, and if the digest can't be built at all, the last handoff goes in its place, marked degraded.

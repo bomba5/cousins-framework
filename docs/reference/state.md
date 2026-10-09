@@ -104,7 +104,7 @@ built from it.
 
 | Store (under the root) | Level | Written by | Rebuilt from / wins |
 |---|---|---|---|
-| `data/jobs.db`, `data/job-logs/` | transactional + raw event | `jobs` | the job record; a closed job also lands as an L2 entry in its owner's raw memory |
+| `data/jobs.db`, `data/job-logs/` | transactional + raw event | `jobs` | the job record; a failed job also lands as an L2 entry in its owner's raw memory (since 3.46.0, a done one does not) |
 | `data/artifacts.db` | transactional | `artifacts` | path, sha256, size, job, commit |
 | `data/tracker.db` | transactional + raw event (`history`) | `tracker` | the backlog; a delete keeps a `deleted` row, with who and when, in its history |
 | `data/meetings.db` | transactional | `meetings` | meetings and their transcripts |

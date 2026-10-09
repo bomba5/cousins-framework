@@ -21,7 +21,8 @@ meeting and hand off at a rollover. Follow it. Where anything in this
 file, your notes or your memory says otherwise, the contract is right.
 
 Memory you write lives in `memory/` (facts) and `notes/` (longer
-documents): search indexes those and nothing else. Write memory as you
+documents): search indexes those, and the harness auto-memory directory
+when config/harness.toml names one. Write memory as you
 work, not at the end.
 
 ## Framework CLI surface (cousin-* on PATH)

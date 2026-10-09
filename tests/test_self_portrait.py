@@ -52,6 +52,47 @@ class TestSynthesize(PortraitCase):
         self.assertNotIn("follow the operator", text)   # hard rules stay in CLAUDE.md
         self.assertNotIn("verify window", text)         # no frozen decisions
 
+    def test_a_committed_portrait_keeps_its_three_sections_whole(self):
+        # the D trim: the reviewed sections stay as written, the rest goes
+        long_style = "Reads before guessing. " * 60
+        (self.home / "self-portrait.md").write_text(
+            "# Cousin Self-Portrait: wren\n\n## Role\nexample cousin\n\n"
+            "## Temperament\nDry and patient.\n\n"
+            "## Operator Calibration\n- an old rule\n\n"
+            "## Working Style\n%s\n\n## Recurring Risks\n- drift\n\n"
+            "## Voice\nShort sentences.\n\n## Identity Invariants\n- family\n"
+            % long_style.strip())
+        text = synthesize_candidate(self.home, "wren").read_text()
+        self.assertIn("Dry and patient.", text)
+        self.assertIn(long_style.strip(), text)         # reviewed: never trimmed
+        self.assertIn("Short sentences.", text)
+        self.assertNotIn("Plain and warm.", text)       # the portrait wins
+        for gone in ("an old rule", "drift", "- family", "example cousin"):
+            self.assertNotIn(gone, text)
+        self.assertNotIn("<TODO", text)
+
+    def test_the_cousins_own_part_is_read_before_the_template(self):
+        from cousin_lib.template_sync import MARKER
+        (self.home / "CLAUDE.md").write_text(
+            "# Wren\n\n## Identity\n\nAn example cousin.\n\n"
+            "You are part of cousins-framework: boilerplate.\n\n"
+            "## Voice\n\nTemplate voice.\n\n%s\n\n## Who I am\n\nWren, the gardener.\n\n"
+            "## Voice\n\nWren's own voice.\n\n## How I work\n\nMeasure twice.\n" % MARKER)
+        text = synthesize_candidate(self.home, "wren").read_text()
+        self.assertIn("Wren, the gardener.", text)
+        self.assertIn("Measure twice.", text)
+        self.assertIn("Wren's own voice.", text)
+        self.assertNotIn("Template voice.", text)
+        self.assertNotIn("boilerplate", text)
+
+    def test_the_template_identity_gives_its_role_paragraph_only(self):
+        (self.home / "CLAUDE.md").write_text(
+            "# Wren\n\n## Identity\n\nAn example cousin.\n\n"
+            "You are part of cousins-framework: boilerplate.\n")
+        text = synthesize_candidate(self.home, "wren").read_text()
+        self.assertIn("## Temperament\nAn example cousin.\n", text)
+        self.assertNotIn("boilerplate", text)
+
 
 class TestSynthesizeNeverWritesThroughALink(PortraitCase):
     """The candidate is written to a fresh temp file in the home and

@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.44.0 - 2026-10-09
+
+### Changed
+
+- **A reply on a turn nobody in the chat started reaches the operator.** A
+  job notice, a task notification, a schedule, a loop or the boot left
+  `reply` with no chat thread, and a bare reply was refused ("system is not
+  a chat-surface thread"). It now goes to the cousin's operator. A live
+  peer or meeting thread still refuses it, and so does a cousin with no
+  `[operator] name`. With no turn live at all a bare reply is still
+  refused, so a late reply meant for a person never reaches the operator
+  (#301, meeting 11 G).
+
 ## 3.43.2 - 2026-10-09
 
 ### Fixed

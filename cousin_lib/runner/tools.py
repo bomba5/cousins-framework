@@ -540,7 +540,16 @@ def _pick_thread(ctx, thread):
     refusal says which thread takes thread= and which takes send. A
     thread nothing can answer (system, loop, schedule, meeting) is no
     second candidate: with one surface thread and no peer live, a bare
-    reply goes to that thread, as the reply gate already counts it."""
+    reply goes to that thread, as the reply gate already counts it. A
+    turn no one in the chat started (a job notice, a task notification, a
+    schedule, a loop, the boot: only system, loop or schedule threads live)
+    has no chat thread of its own: a bare reply goes to this cousin's
+    operator, when cousin.toml names one. A job notice for work a person
+    asked for goes there too: a cousin that serves people names the
+    person's thread. With no turn live at all a bare reply is refused, so
+    a late reply meant for a person never lands on the operator's
+    surface. A live peer or meeting thread still refuses it: that turn is
+    answered with send or the meeting tool."""
     turn = ctx.turn
     if turn is None:
         active, live = False, ()
@@ -559,6 +568,10 @@ def _pick_thread(ctx, thread):
             raise ValueError("%s is not a chat-surface thread; name operator:<name>"
                              " or person:<name>" % thread)
         return next((t for t in live if _same_thread(t, thread)), thread)
+    if live and all(_kind(t) in UNANSWERED_KINDS for t in live):
+        operator = _own_operator(ctx)
+        if operator:
+            return "operator:%s" % operator
     if not live:
         raise ValueError("no turn is live; name the thread (thread=operator:<name>"
                          " or person:<name>)")
@@ -568,6 +581,18 @@ def _pick_thread(ctx, thread):
             return answerable[0]
         raise ValueError(_two_live(live))
     return live[0]
+
+
+# Threads no one in the chat started: a bare reply there goes to the operator.
+UNANSWERED_KINDS = ("system", "loop", "schedule")
+
+
+def _own_operator(ctx):
+    try:
+        from cousin_lib.config import CousinConfig
+        return CousinConfig.load(Path(ctx.home)).operator_name or None
+    except Exception:  # noqa: BLE001 - no config, no default: the refusal stands
+        return None
 
 
 def _kind(thread):
@@ -875,9 +900,10 @@ def handoff(ctx, args):
 
 RUNNER_TOOLS = [
     {"name": "reply",
-     "description": "Answer on the chat surface. Routes by the live thread of this turn; with two"
-                    " live threads, name one. Operator and person threads only; a peer is answered"
-                    " with send. The only tool that writes the chat surface.",
+     "description": "Answer on the chat surface. Routes by the live thread of this turn; on a turn"
+                    " no one in the chat started (a job notice, a schedule), to your operator; with"
+                    " two live threads, name one. Operator and person threads only; a peer is"
+                    " answered with send. The only tool that writes the chat surface.",
      "inputSchema": {"type": "object", "properties": {
          "text": {"type": "string"},
          "thread": {"type": "string",

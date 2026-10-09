@@ -234,10 +234,42 @@ class TestReply(HermeticCase):
         self.assertIn("thread=operator:priya", text); self.assertIn("thread=person:sam", text)
         self.assertEqual(self._rows(ctx.home), [])
 
-    def test_reply_outside_a_turn_is_refused(self):
+    def test_reply_outside_a_turn_is_refused_even_with_an_operator(self):
+        # a late reply (a subagent ending after a person's turn closed)
+        # must not reroute to the operator's surface
         ctx = _ctx(self)
         text, err = tools.call(ctx, "reply", {"text": "hi"})
         self.assertTrue(err); self.assertIn("no turn is live", text)
+        self.assertEqual(self._rows(ctx.home), [])
+
+    def test_reply_outside_a_turn_with_no_operator_is_refused(self):
+        ctx = _ctx(self)
+        toml = ctx.home / "cousin.toml"
+        toml.write_text(toml.read_text().replace('[operator]\nname = "Priya"\n', ""))
+        text, err = tools.call(ctx, "reply", {"text": "hi"})
+        self.assertTrue(err); self.assertIn("no turn is live", text)
+
+    def test_a_turn_no_one_in_the_chat_started_replies_to_the_operator(self):
+        # a job notice, a task notification, a schedule, a loop: three
+        # cousins were refused here on 2026-10-09
+        for first in ("system", "schedule", "loop:daemon"):
+            with self.subTest(thread=first):
+                turn = Turn(); turn.begin({"id": 1, "thread_id": first, "sender": ""})
+                ctx = _ctx(self, turn)
+                text, err = tools.call(ctx, "reply", {"text": "the job ended"})
+                self.assertFalse(err, text)
+                self.assertEqual(self._rows(ctx.home)[-1][:3], ("priya", "Wren", "the job ended"))
+
+    def test_a_live_peer_or_meeting_still_refuses_a_bare_reply(self):
+        for live in (("system", "peer:testa"), ("meeting:11",)):
+            with self.subTest(live=live):
+                turn = Turn(); turn.begin({"id": 1, "thread_id": live[0], "sender": ""})
+                for i, t in enumerate(live[1:], 2):
+                    turn.add({"id": i, "thread_id": t, "sender": ""})
+                ctx = _ctx(self, turn)
+                text, err = tools.call(ctx, "reply", {"text": "hi"})
+                self.assertTrue(err, text)
+                self.assertEqual(self._rows(ctx.home), [])
 
     def test_reply_to_a_peer_thread_is_refused_with_the_send_hint(self):
         turn = Turn(); turn.begin({"id": 1, "thread_id": "peer:testa", "sender": "Testa"})

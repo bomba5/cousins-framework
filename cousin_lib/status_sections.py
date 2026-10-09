@@ -1,6 +1,6 @@
 """STATUS.md's open-loops section: the one definition its writer (the
 handoff tool, runner/tools.py) and every reader (the digest, the boot
-packet, data/state.json, the session-end baseline, the checkpoints) use,
+packet, the pre-compact checkpoint, the deprecated cousin-sync-state) use,
 so they cannot disagree on where the section is.
 
 The live section is the FIRST bare `## Open loops` heading on a line of

@@ -70,7 +70,7 @@ them, watch them work, and browse their memory.
 Read this before the quick start, because it starts as soon as you finish it.
 
 A cousin is a live agent session. It is woken on a schedule, not only
-when you talk to it: a heartbeat every hour by default, and a [flip](docs/glossary.md#flip) once a day
+when you talk to it: an hourly heartbeat by default (skipped when nothing changed), and a [flip](docs/glossary.md#flip) once a day
 that ends its session and starts a new one. Every wake is a [turn](docs/glossary.md#turn) against the
 account it runs on, and it keeps happening while you sleep. The console's tokens
 page shows what your cousins are actually using; `cousin-loops flips` shows

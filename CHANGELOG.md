@@ -38,7 +38,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   generated contract's, per lane, and were stale on the SDK lane (the
   terminal lane's `cousin-reply`, `(Chat <Name>):` lines). The template
   keeps Identity, a pointer to the contract, the CLI table (tools first),
-  Hard rules and Voice: 272 lines down to 126.
+  Hard rules and Voice: 273 lines down to 126.
 
 ### Added
 
@@ -86,9 +86,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 - `cousin-sync-state` still renders `data/state.json` on demand and warns
   on stderr that it is deprecated; the handoff no longer runs it and
   nothing reads the file. It is removed in 4.0.0.
-- `hooks/session_checkpoint.sh` is a no-op for one release. A settings
-  apply still recognises it as the framework's own, so it removes it
-  from a home's `.claude/settings.json`.
+- `hooks/session_checkpoint.sh` is a no-op. A settings apply recognises
+  it as the framework's own and removes it from a home's
+  `.claude/settings.json`, but an upgrade does not re-apply settings, so
+  the script stays until no home names it: run `cousin-spawn <slug>
+  --repair-settings` on each home after upgrading.
 
 ## 3.46.0 - 2026-10-09
 

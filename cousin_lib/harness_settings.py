@@ -31,7 +31,7 @@ SHELL_HOOKS = (("SessionStart", "session_init.sh"),
                ("PreCompact", "pre_compact.sh"))
 # Scripts this module once wrote and no longer does: still recognised as its
 # own, so the next apply strips them from a home's settings (3.47.0 dropped
-# the per-turn Stop checkpoint; recognised for one release).
+# the per-turn Stop checkpoint; recognised until no home names it).
 RETIRED_SHELL_HOOKS = ("session_checkpoint.sh",)
 
 # The job-tracking hook (cousin_lib.job_hooks): one module, several

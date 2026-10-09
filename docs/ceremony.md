@@ -1,7 +1,7 @@
 # What the ceremony buys
 
 A [cousin](glossary.md#cousin) does work nobody asked for: it reads a state digest when a session
-starts, answers a heartbeat every hour, writes a handoff before each new
+starts, answers an hourly heartbeat when something changed, writes a handoff before each new
 session, and gets memory recalled, proposed and reviewed around its [turns](glossary.md#turn).
 That bookkeeping is what lets it pick up tomorrow where it stopped today,
 but it is paid for in model turns and tokens on your account. This page lists
@@ -27,8 +27,8 @@ bookkeeping before you say anything:
    `CLAUDE.md`, `STATUS.md` and `MEMORY.md` in full, up to 6000 characters
    each (`_compose_beat` in `cousin_lib/loops.py`): a second model turn.
 
-After that, the hourly heartbeat is the only thing that wakes it on a
-schedule. A new cousin does not [flip](glossary.md#flip) on its first day: the daily flip skips a
+After that, the hourly heartbeat (sent only when an identity or state
+file changed) is the only thing that wakes it on a schedule. A new cousin does not [flip](glossary.md#flip) on its first day: the daily flip skips a
 session that started after that day's flip time.
 
 ## At a glance
@@ -106,12 +106,13 @@ starts: see [rollover](#rollover-and-the-daily-flip).
 
 ## The heartbeat
 
-**Costs.** One model turn per beat, every `context_beat_seconds` (default
-3600, one an hour) while the cousin's runner runs, day and night
+**Costs.** At most one model turn per beat, every `context_beat_seconds`
+(default 3600, one an hour) while the cousin's runner runs, day and night
 (`tick` in `cousin_lib/loops.py`). The prompt is a fixed text plus each of
 `CLAUDE.md`, `STATUS.md` and `MEMORY.md` that changed since the last beat,
-inline, up to 6000 characters each (`_BEAT_INLINE_CAP`); when none changed it
-is a few lines. It asks the cousin to checkpoint its state with
+inline, up to 6000 characters each (`_BEAT_INLINE_CAP`). Since 3.48.0 a
+scheduled beat with none of them changed is not sent at all, so a quiet
+cousin costs a few file stats an hour; a manual fire always sends. It asks the cousin to checkpoint its state with
 `cousin-memory activity`. A beat that is due with other loops goes in the
 same turn. A stopped cousin gets none.
 
@@ -199,7 +200,8 @@ states a conclusion with a decision word in it ("decided", "the rule is",
 queues a short message naming up to three such sentences and asking the
 cousin whether to keep them (`propose_turn` in
 `cousin_lib/runner/extract.py`). It runs after everything else queued (the
-lowest priority), never follows its own proposal turn, and is capped at six
+lowest priority), never follows its own proposal turn or an idle one
+(nobody in the chat started it and every call only read), and is capped at six
 per cousin per rolling 24 hours (`PROPOSAL_CAP`).
 
 **Without it.** A conclusion the cousin did not save survives only as a

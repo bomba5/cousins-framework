@@ -12,6 +12,7 @@ import time
 import unittest
 from unittest import mock
 
+from cousin_lib import boot
 from cousin_lib.boot import (
     _truncate,
     bump_generation,
@@ -125,3 +126,37 @@ class TestSharedParts(BootCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMemoryOrder(BootCase):
+    """Meeting 11 E: the budget cut falls on old conclusions, never on this
+    week's or on what the operator, the framework or a tool vouched for."""
+
+    VIEW = ("# Decisions\n\n"
+            "- [L3_COUSIN_CONCLUSION] June gate closed (1 entry, 2026-06-02; topic: mh1 gate)\n"
+            "- [L3_COUSIN_CONCLUSION] this week's call (1 entry, 2026-10-08; topic: fw call)\n"
+            "- [L0_OPERATOR] never push to the old repo (1 entry, 2026-09-01; topic: old repo)\n"
+            "- [L3_COUSIN_CONCLUSION] the loop's subject (2 entries, 2026-07-01; topic: tins audit)\n"
+            "- [L2_TOOL] measured once (1 entry, superseded 1 earlier, 2026-08-01; topic: probe)\n")
+
+    def test_cited_then_vouched_then_newest_first_and_nothing_dropped(self):
+        out = boot._order_view(self.VIEW, "- [ ] finish the tins audit by Friday")
+        entries = [l for l in out.splitlines() if l.startswith("- [")]
+        self.assertEqual([l.rsplit("topic: ", 1)[1].rstrip(")") for l in entries],
+                         ["tins audit", "old repo", "probe", "fw call", "mh1 gate"])
+        self.assertTrue(out.startswith("# Decisions"))
+
+    def test_the_recent_raw_lines_leave_out_the_frameworks_own_log(self):
+        raw = pathlib.Path(self.home) / "memory" / "raw"
+        raw.mkdir(parents=True, exist_ok=True)
+        lines = [{"timestamp": "2026-10-09T10:00:00+00:00", "topic": t, "content": c,
+                  "truth_level": "L3_COUSIN_CONCLUSION"}
+                 for t, c in (("episode:s-1", "nothing came in"),
+                              ("job:build", "job #3 done"),
+                              ("framework:handoff", "handoff written"),
+                              ("tins", "the tins moved"))]
+        (raw / "2026-10-09.jsonl").write_text("".join(json.dumps(l) + "\n" for l in lines))
+        out = boot._memories(self.home, 20000)
+        self.assertIn("the tins moved", out)
+        for noise in ("nothing came in", "job #3 done", "handoff written"):
+            self.assertNotIn(noise, out)

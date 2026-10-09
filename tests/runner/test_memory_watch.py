@@ -46,8 +46,14 @@ class TestWatch(WatchCase):
         self.raw_line({"topic": "kestrel", "content": "merged", "truth_level": "L3_COUSIN_CONCLUSION",
                        "source": "dream", "cite": "dream:p1", "timestamp": "2026-10-02T21:01:00"})
         self.raw_line({"topic": "kestrel", "content": "x", "truth_level": "L5_OBSOLETE",
-                       "source": "review_gate", "why": "dropped at review",
+                       "source": "review_gate", "why": "dropped at review", "verdict": "drop",
                        "timestamp": "2026-10-02T21:02:00"})
+        # the gate's bookkeeping (meeting 11 B): held and kept are not news
+        for content, extra in (("held 3 for review", {"held": ["a"]}),
+                               ("keep a (kestrel)", {"verdict": "keep", "released": "a"})):
+            self.raw_line(dict({"topic": "framework:review-gate", "content": content,
+                                "truth_level": "L1_FRAMEWORK", "source": "review_gate",
+                                "timestamp": "2026-10-02T21:03:00"}, **extra))
         found = watch.check()
         self.assertEqual([e.get("content") for e in found], ["nests in the barn", "merged", "x"])
         text = memory_watch.note(found)

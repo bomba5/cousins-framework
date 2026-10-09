@@ -26,7 +26,7 @@ def _home(case):
 
 def _turn(store, sid, n, sentences):
     entries = [{"type": "user", "uuid": "%s-u%d" % (sid, n),
-                "message": {"role": "user", "content": "go"}},
+                "message": {"role": "user", "content": "[operator:priya] chat from Priya\n\ngo"}},
                {"type": "assistant", "uuid": "%s-a%d" % (sid, n), "message": {"role": "assistant",
                 "content": [{"type": "text", "text": " ".join(sentences)}]}}]
     asyncio.run(store.append({"project_key": "p", "session_id": sid}, entries))
@@ -160,3 +160,45 @@ class TestTranscriptMineSplit(HermeticCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIdleTurns(HermeticCase):
+    """Meeting 11 B: a turn nobody in the chat started, that changed
+    nothing, is not mined and not proposed about."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = _home(self); self.store = SqliteSessionStore(self.home)
+
+    def entries(self, opener, tools=()):
+        content = [{"type": "tool_use", "id": "t%d" % i, "name": name, "input": inp}
+                   for i, (name, inp) in enumerate(tools)]
+        content.append({"type": "text",
+                        "text": "Decided nothing changed because the inbox was empty."})
+        return [{"type": "user", "message": {"role": "user", "content": opener}},
+                {"type": "assistant", "message": {"role": "assistant", "content": content}}]
+
+    def test_what_counts_as_idle(self):
+        beat = "[loop:daemon] loop from unknown at 10:00\n\nContext heartbeat."
+        cases = [
+            (beat, (), True),
+            (beat, [("Bash", {"command": "ls"}), ("mcp__cousin__memory", {"command": "activity"})], True),
+            (beat, [("mcp__cousin__reply", {"text": "hi"})], False),
+            (beat, [("mcp__cousin__send", {"to": "kestrel"})], False),
+            (beat, [("mcp__cousin__memory", {"command": "decide"})], False),
+            (beat, [("Edit", {})], False),
+            ("[system] job from framework at 10:00\n\njob #3 done", (), True),
+            ("[operator:priya] chat from Priya at 10:00\n\nhow is it going", (), False),
+            ("[meeting:11] meeting from unknown", (), False),
+            ("[peer:kestrel] chat from Kestrel", (), False),
+        ]
+        for opener, tools, idle in cases:
+            with self.subTest(opener=opener[:20], tools=tools):
+                self.assertEqual(extract.idle_turn(self.entries(opener, tools)), idle)
+
+    def test_an_idle_heartbeat_is_neither_mined_nor_proposed(self):
+        asyncio.run(self.store.append({"project_key": "p", "session_id": "sess-9"},
+                                      self.entries("[loop:daemon] loop from unknown\n\nbeat")))
+        self.assertEqual(extract.mine_turn(self.home, "sess-9", 1, store=self.store), 0)
+        self.assertIsNone(extract.propose_turn(self.home, "sess-9", store=self.store))
+        self.assertEqual(_raw(self.home), [])

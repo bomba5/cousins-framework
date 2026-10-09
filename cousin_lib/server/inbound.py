@@ -1,18 +1,10 @@
-"""Follow-up to storing one inbound chat message, shared by every send
-path that stores a chat row: chat_api.send (the console, cousin-chat)
-and the Telegram bridge alike. When the sender is the configured operator, their
-message is checked for a correction and recorded on a hit: best-effort,
-because the message is already stored and this may never turn into a
-failed send.
-
-Before any of that, `divert_login_code` runs FIRST on every send path: a
-message that is a login code is never stored as written and never
-delivered.
+"""What every send path that stores a chat row runs on the way in:
+chat_api.send (the console, cousin-chat) and the Telegram bridge alike.
+`divert_login_code` runs FIRST: a message that is a login code is never
+stored as written and never delivered.
 """
 import re
-import sys
 
-from cousin_lib import corrections
 from cousin_lib.server.storage import is_operator
 
 # C0 controls except tab and newline, DEL, and C1: typed into a terminal
@@ -24,17 +16,6 @@ _CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 def strip_controls(text):
     """`text` without control characters (tab and newline kept)."""
     return _CONTROLS.sub("", str(text))
-
-
-def after_inbound_stored(config, user, message):
-    """For the operator only, capture a correction. Called after the
-    message has been stored and delivered."""
-    if not is_operator(config, user):
-        return
-    try:
-        corrections.detect_and_record(config.home, user=user, text=message)
-    except Exception as err:  # noqa: BLE001 - never fails the send
-        print("corrections: not recorded: %s" % err, file=sys.stderr)
 
 
 def divert_login_code(config, user, message):

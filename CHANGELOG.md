@@ -3,6 +3,32 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.46.0 - 2026-10-09
+
+### Changed
+
+- **Idle turns are not mined.** A turn nobody in the chat started (a
+  heartbeat, a job notice, a schedule) that changed nothing (no reply,
+  send, handoff, file edit, or memory, job, schedule or meeting write) is
+  neither mined into `episode:` entries nor proposed about. Those entries
+  were records of the cousin's own idleness (#296, meeting 11 B).
+- **Only failed jobs are copied into memory.** A job that ends done is in
+  its row, its log and its close notice; the `job:` raw copy was half of
+  some cousins' raw memory. Failures are still copied. `why` resolves
+  `job:<id>` against the jobs table, as before.
+- **A review-gate hold or keep is no longer "memory written by someone
+  else".** Only a drop, which changes what the cousin knows, reaches the
+  running session's note.
+
+### Removed
+
+- **The corrections layer.** The regex that labelled the operator's chat
+  lines ("instead" = redirect, no match = acceptance) mislabelled nearly
+  every line it kept, and its boot block cost packet space every
+  generation. Nothing records `data/corrections.jsonl` or reads it any
+  more; standing orders belong in L0 memory (each cousin moved its real
+  ones there first).
+
 ## 3.45.0 - 2026-10-09
 
 ### Changed

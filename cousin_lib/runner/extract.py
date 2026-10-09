@@ -140,6 +140,45 @@ def _recorded_memory(entries):
     return False
 
 
+# What makes a turn worth mining (meeting 11 B): someone in the chat
+# started it, or it did something. A heartbeat or a job notice that only
+# looked around and logged its activity is not mined and not proposed
+# about: its episodes were records of the cousin's own idleness.
+_TALK = re.compile(r"^\[(operator|person|peer|meeting):")
+_WORK_TOOLS = {"reply", "send", "handoff", "Edit", "Write", "MultiEdit", "NotebookEdit"}
+_WORK_COMMANDS = {"memory": {"remember", "decide", "obsolete"},
+                  "job": {"run", "start", "done", "fail"},
+                  "schedule": {"add", "cancel"},
+                  "meeting": {"say", "pass", "minutes"}}
+
+
+def idle_turn(entries):
+    """True when nobody in the chat started the turn (no operator, person,
+    peer or meeting envelope) and it called nothing that changes anything:
+    no reply, send, handoff, file edit, and no memory, job, schedule or
+    meeting write. Reading (files, search, Bash) is not work here: the
+    idle heartbeat's checks are exactly that."""
+    for record in entries:
+        if not isinstance(record, dict) or record.get("isSidechain"):
+            continue
+        content = (record.get("message") or {}).get("content")
+        if record.get("type") == "user":
+            texts = [content] if isinstance(content, str) else [
+                b.get("text") for b in content or ()
+                if isinstance(b, dict) and b.get("type") == "text"]
+            if any(_TALK.match(str(t or "").lstrip()) for t in texts):
+                return False
+        elif record.get("type") == "assistant" and isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                name = str(block.get("name") or "").split("__")[-1]
+                command = (block.get("input") or {}).get("command")
+                if name in _WORK_TOOLS or command in _WORK_COMMANDS.get(name, ()):
+                    return False
+    return True
+
+
 def proposal_text(sentences):
     """The row's body: the sentences, and the ask."""
     lines = [PROPOSAL_MARK + " Your last turn reached conclusions that are not in memory yet:"]
@@ -173,7 +212,7 @@ def propose_turn(home, session_id, *, store, turn_bodies=(), now=None):
         _save(home, cursors, _PROPOSE_CURSOR)
         if any(str(b).startswith(PROPOSAL_MARK) for b in turn_bodies):
             return None                  # a proposal's own turn: consumed, never proposed about
-        if not entries or _recorded_memory(entries):
+        if not entries or _recorded_memory(entries) or idle_turn(entries):
             return None
         texts = list(transcript_mine.texts_from_entries(entries))
         picked = [s for s in transcript_mine.candidates(texts, max_entries=10 ** 6)
@@ -206,7 +245,7 @@ def mine_turn(home, session_id, turn_no, *, store, now=None):
             entries, cursor = store.entries_after(session_id, int(state.get(session_id, 0)))
             left = max(0, WINDOW_CAP - written_in_window(home, now))
             kept = []
-            if entries and left:
+            if entries and left and not idle_turn(entries):
                 seen = _recent(home)
                 texts = list(transcript_mine.texts_from_entries(entries))
                 for sentence in transcript_mine.candidates(texts, max_entries=10 ** 6):

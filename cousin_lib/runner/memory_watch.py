@@ -11,7 +11,9 @@ session reach the model as one runner note in that prompt's context,
 keyed by entry id, each said once. "Newer wins" over the digest.
 
 What counts as written from outside: a console write (its cite starts
-"console"), a review-gate verdict (source `review_gate`), anything a
+"console"), a review-gate drop (source `review_gate`, verdict `drop`:
+the gate's held and keep records are its bookkeeping, not memory that
+changed), anything a
 dreaming pass wrote (source or cite starting "dream"), and an obsolete
 mark made from the console (source `console`). The session's own
 remember/decide/obsolete, its job events and the turn extractor are its
@@ -52,7 +54,9 @@ def foreign(entry):
     """Written from outside the live session (see the module docstring)."""
     source = str(entry.get("source") or "")
     cite = str(entry.get("cite") or "")
-    return (cite.startswith("console") or source in ("console", "review_gate")
+    if source == "review_gate":
+        return entry.get("verdict") == "drop"
+    return (cite.startswith("console") or source == "console"
             or source.startswith("dream") or cite.startswith("dream"))
 
 

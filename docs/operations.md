@@ -396,7 +396,7 @@ and its reply is in the copy: the streams are copied before `chat.db`, and a
 turn writes its reply before its result. No message is lost.
 
 What it doesn't copy: `cousin.toml`, `notes/`, the other files in `data/`
-(`decisions.jsonl`, `corrections.jsonl`, `handoff.md` and friends), and
+(`decisions.jsonl`, `handoff.md` and friends), and
 anything else in the home. It also only does one home, not the root's own
 `data/` (jobs, schedules, the tracker, loop requests) or `shared/` (the
 shared memory tier and the hive database). For a full copy, stop the cousin

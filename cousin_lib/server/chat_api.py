@@ -23,7 +23,7 @@ from pathlib import Path
 
 from cousin_lib import chat_hooks, delivery
 from cousin_lib.crashpoint import crashpoint
-from cousin_lib.server.inbound import after_inbound_stored, divert_login_code
+from cousin_lib.server.inbound import divert_login_code
 from cousin_lib.server.storage import ChatStore, normalize_chat_user, save_data_uri
 
 
@@ -209,8 +209,7 @@ def redeliver_pending(config, *, older_than_s=REDELIVER_AFTER_S, now=None, faile
 def send(config, body, *, deliver=None, key=None):
     """One inbound chat message: divert a login code, store the row,
     deliver it (`deliver(user=, message=, message_id=, attachments=)`),
-    touch the presence marker and capture a correction, then fire the
-    chat hooks. A delivery that failed removes the row again, fires
+    then fire the chat hooks. A delivery that failed removes the row again, fires
     nothing and raises NotDelivered: the sender learns the cousin will
     not see it, and a send again leaves one row, not two. A runner
     recalls in its own prompt hook, so the delivered
@@ -247,7 +246,6 @@ def send(config, body, *, deliver=None, key=None):
             # the runner will never see it: keep nothing, fire nothing
             drop_undelivered(home, row["id"], [a for a in attachments if a.startswith("/")])
             raise not_delivered(config)
-    after_inbound_stored(config, user, message)
     chat_hooks.on_message(home, user=user, message=message, message_id=row["id"],
                           slug=config.slug, deliver=deliver)
     return {"ok": True, "id": row["id"], "timestamp": row["timestamp"]}

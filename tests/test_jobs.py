@@ -22,11 +22,50 @@ from cousin_lib.jobs import (
 )
 
 
+def _wait_children_gone(root, timeout=15.0):
+    """Wait until no other process holds a file under this test's root. A
+    job's detached runner (a fork, never exec'd: its /proc environ is its
+    parent's at exec, so it cannot be told by FRAMEWORK_ROOT) commits the
+    row's status first, then writes the owner's raw memory and close notice
+    into the home, holding the job log open until it exits: a test that
+    returns at "done" can have its temp root removed under those writes
+    ("Directory not empty")."""
+    prefix = str(pathlib.Path(root).resolve()) + "/"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        busy = False
+        for proc in pathlib.Path("/proc").iterdir():
+            if not proc.name.isdigit() or int(proc.name) == os.getpid():
+                continue
+            try:
+                fds = list((proc / "fd").iterdir())
+            except OSError:
+                continue            # gone, a zombie, or another user's
+            for fd in fds:
+                try:
+                    link = os.readlink(fd)
+                except OSError:
+                    continue        # closed since the listing: the rest still count
+                if link.startswith(prefix):
+                    busy = True
+                    break
+            if busy:
+                break
+        if not busy:
+            return
+        time.sleep(0.05)
+    import warnings
+    warnings.warn("a process still holds files under %s after %ss: a leaked job runner?"
+                  % (root, timeout))
+
+
 class JobsCase(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = pathlib.Path(tmp.name)
+        # cleanups run last-in first-out: the children finish, then the root goes
+        self.addCleanup(_wait_children_gone, self.root)
         home = self.root / "cousins" / "wren"
         home.mkdir(parents=True)
         (home / "cousin.toml").write_text(
@@ -764,7 +803,9 @@ class TestCloseNotice(JobsCase):
         self.assertIn("it was marked lost", self.sent[-1][1].body)
 
     def test_the_title_first_shape_keeps_notify(self):
-        rc, out, _ = self._main(["start", "shell", "flagged", "--notify", "--json", "--", "true"])
+        # no command: the row is registered and nothing forks, so no job runner
+        # is left writing its close notice into the home while it is removed
+        rc, out, _ = self._main(["start", "shell", "flagged", "--notify", "--json"])
         self.assertEqual(rc, 0, out)
         self.assertEqual(get_job(json.loads(out)["job_id"])["notify"], 1)
 

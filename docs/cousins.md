@@ -296,7 +296,10 @@ counts. It holds the cousin's voice and how it works (Temperament, Working
 Style, Voice) and nothing else: the role lives in `CLAUDE.md` and
 `cousin.toml`, the rules in the law and L0 memory, the lane's mechanics in
 the generated contract. A copy of any of those in the portrait went stale
-beside its source. The runner hands the composed prompt to the agent CLI as a private
+beside its source. `synthesize` keeps a committed portrait's three
+sections as they are; without one it drafts them from the cousin's own
+part of `CLAUDE.md` (Who I am, How I work, Voice), and a section with no
+source is a review TODO. The runner hands the composed prompt to the agent CLI as a private
 file (`data/run/system-prompt.md`, readable by the cousin's user only), never
 on its command line, where every local user could read it
 ([runners](reference/runners.md#the-system-prompt-is-a-private-file)).

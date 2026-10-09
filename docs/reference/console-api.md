@@ -851,7 +851,7 @@ Body `{"pass_id"}`. Reverses one pass's changes (`dreaming.undo`), recorded as b
 
 ### `POST /api/memory/<slug>/portrait/synthesize`
 
-Drafts a candidate from the cousin's own sources (no model call): its Temperament, Working Style and Voice sections. A candidate that exists may hold edits: `409` unless the body says `{"replace": true}`. A candidate path that is a symlink (dangling or not) is `403`, checked before anything is written; the same holds for the candidate write and the commit. `200` with the portrait state.
+Drafts a candidate from the cousin's own sources (no model call): its Temperament, Working Style and Voice sections, kept whole from the committed portrait when it has them, else drawn from the cousin's own part of `CLAUDE.md`. A candidate that exists may hold edits: `409` unless the body says `{"replace": true}`. A candidate path that is a symlink (dangling or not) is `403`, checked before anything is written; the same holds for the candidate write and the commit. `200` with the portrait state.
 
 ### `POST /api/memory/<slug>/portrait/candidate`
 

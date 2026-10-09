@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.50.2 - 2026-10-10
+
+### Fixed
+
+- **`cousin-self-portrait synthesize` drafts the trim it was meant to.**
+  It put the template's generic Identity boilerplate under Temperament
+  and left Working Style a TODO on every home. A candidate now starts
+  from the committed portrait's Temperament, Working Style and Voice,
+  kept whole. Without one, it reads the cousin's own part of CLAUDE.md
+  (below the append marker: Who I am, How I work, Voice) before the
+  template's part, and only the role paragraph of the template's
+  Identity (#308).
+
 ## 3.50.1 - 2026-10-10
 
 ### Fixed

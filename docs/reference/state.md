@@ -28,7 +28,7 @@ lags its source is shown with what it has, and the source decides.
 | `memory/raw/YYYY-MM-digest.jsonl` | projection | `raw_fold.fold_raw` | from the folded day files; the archive is the record |
 | `memory/raw/archive/YYYY-MM.jsonl.gz` | raw event | `raw_fold` | byte copies of folded day files |
 | `memory/distilled/*.md` | projection | `distill.distill` | from raw; text above the auto marker is authored and kept |
-| `memory/capsules.jsonl` | raw event | `capsule.write_capsule` | the record; `distilled/reasoning-capsules.md` is its mirror and boot reads the jsonl |
+| `memory/capsules.jsonl` | raw event | `capsule.write_capsule` (deprecated 3.50.0) | reasoning capsules (`cousin-reason list`, the console); removed in 4.0.0 |
 | `memory/fts_index.db`, `memory/vectors.db` | projection | `memory_search` | from memory, notes and raw; a cache, rebuilt when stale |
 | `memory/.recall-log.jsonl`, `.recall-log-archive.jsonl` | raw event | `reinforce.record` | the log of searches |
 | `memory/.recall-counts.json` | transactional | `reinforce.record` | an aggregate of the recall log, never rebuilt from it; re-earned, not memory |

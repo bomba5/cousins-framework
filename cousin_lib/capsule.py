@@ -1,6 +1,12 @@
 """Reasoning capsules: structured, compressed summaries of a reasoning
 chain, in place of "log every chain in full".
 
+Deprecated (3.50.0, meeting 11 F): the memory tool's `decide` records the
+same (the decision, its reasoning, `derived_from`), and law rule 9 names
+it since law 1.4. The boot packet no longer reads capsules. `cousin-reason
+capsule` still writes one and warns on stderr; `list` and the console's
+view still read them. All of it is removed in 4.0.0.
+
 Each capsule is a conclusion (one to three sentences), its evidence
 (bullets), the alternatives rejected on the way (bullets, optional),
 a confidence (low / medium / high) and a truth level (this tree's
@@ -274,7 +280,14 @@ def _home(args):
     return Path(home).resolve()
 
 
+DEPRECATED = ("cousin-reason capsule is deprecated (3.50.0): record a consequential chain of"
+              " reasoning with the memory tool's decide (the decision, its reasoning,"
+              " derived_from), or `cousin-memory decide` from a shell. Law rule 9 says so"
+              " since law 1.4. Capsules are removed in 4.0.0.")
+
+
 def _cmd_capsule(args):
+    print(DEPRECATED, file=sys.stderr)
     home = _home(args)
     try:
         write_capsule(home, conclusion=args.conclusion,

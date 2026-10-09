@@ -29,7 +29,7 @@ When a new session starts (a spawn, a [flip](glossary.md#flip), a restart), the 
 hands the cousin a boot packet built from the layers below. So what a
 cousin "knows" at the start of a session is: its identity files, its
 open loops and handoff, the [distilled](glossary.md#distilled) views of its raw memory, its last
-few reasoning capsules and recent raw entries, and the head of its
+recent raw entries, and the head of its
 `MEMORY.md`. Anything else it has to search for.
 
 ## The layers
@@ -46,7 +46,7 @@ Everything below is relative to the cousin home.
 | Distilled views | `memory/distilled/*.md` | the distiller | boot packet |
 | Decisions | `data/decisions.jsonl` | `decide` | `consolidate`, the boot packet's staleness warning (a compatibility log: `recall` reads raw memory, and the one-time backfill (triggered by recall, search, consolidate) copies the decisions only this log holds into raw) |
 | Memory and notes files | `memory/**/*.md`, `notes/**/*.md` | the cousin | search |
-| Reasoning capsules | `memory/capsules.jsonl`, mirrored to `memory/distilled/reasoning-capsules.md` | `cousin-reason capsule` | boot packet, search (the mirror) |
+| Reasoning capsules (deprecated) | `memory/capsules.jsonl` | `cousin-reason capsule` (warns since 3.50.0) | `cousin-reason list`, the console |
 | Raw entries | `memory/raw/*.jsonl`, `memory/raw/archive/*.jsonl.gz` | `cousin-memory decide` and `remember`, the transcript miner, the jobs ledger, framework events | distill, **search**, `recall` |
 | Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself (switched off by the `sdk` and `tmux` [runner](glossary.md#runner) kinds) | search (a file whose imported copy is current is found as the copy), explorer, `import-auto` |
 | Imported auto-memory | `memory/imported/auto/*.md`, `.manifest.json`, `.baseline.json` | `cousin-memory import-auto --apply` | search (collection `memory`), `import-auto --verify` |
@@ -572,21 +572,13 @@ memory (which holds every decision too), as candidates for a proper topic file i
 
 ## Reasoning capsules
 
-A decision records what the cousin chose. A capsule records why, short:
-the conclusion, the evidence, what it ruled out, and how sure it is.
-
-```
-cousin-reason capsule --conclusion "cap the port range at 8200" \
-    --evidence "leaves room for hive" \
-    --evidence "no collision with the console" \
-    --rejected "unbounded range" --confidence high --topic "port range"
-cousin-reason list --n 5
-```
-
-The record is `memory/capsules.jsonl`. The readable mirror,
-`memory/distilled/reasoning-capsules.md`, is what search finds; the
-distiller never touches it. The boot packet carries the last three
-capsules in full and the newest five conclusions as one line each.
+Deprecated in 3.50.0. A capsule holds a conclusion, its evidence, what
+it ruled out and how sure it was: what a `decide` holds too (the
+decision, its reasoning, `derived_from`), and the fleet had stopped
+writing them. Law 1.4's rule 9 names `decide`. `cousin-reason capsule`
+still writes one and warns; `cousin-reason list` and the console still
+show them. The boot packet no longer reads them. All of it is removed in
+4.0.0.
 
 ## Keeping it bounded
 
@@ -746,8 +738,7 @@ The state digest, the session's first message, has a ceiling of about
 6. Active state: the open loops from `STATUS.md` and the latest
    `data/handoff.md`.
 7. Tool trace summary.
-8. Retrieved memories: the other five distilled files, the newest
-   capsule conclusions, recent raw entries (up to the last 60 lines
+8. Retrieved memories: the other five distilled files, recent raw entries (up to the last 60 lines
    from the newest 14 raw files, without the framework's own log:
    `episode:`, `job:` and `framework:` topics) and the head of
    `MEMORY.md`. Each distilled file's lines come in the order the budget

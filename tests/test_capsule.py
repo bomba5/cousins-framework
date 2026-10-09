@@ -7,7 +7,8 @@ The first block re-expresses an earlier version's own unit tests for
 this module (path, create-on-write, appendable, optional sections,
 empty listing, newest N, rotation). Everything after is this tree's:
 the jsonl round trip, the curated-region rule against the distill
-marker, and the state digest.
+marker, and the state digest (which no longer reads capsules: they are
+deprecated since 3.50.0, removed in 4.0.0).
 """
 import io
 import json
@@ -19,7 +20,6 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from cousin_lib import capsule, distill, memory
-from cousin_lib.runner import prompt
 
 
 class CapsuleCase(unittest.TestCase):
@@ -191,55 +191,12 @@ class TestCuratedRegion(CapsuleCase):
 
 
 class TestStateDigest(CapsuleCase):
-    def setUp(self):
-        super().setUp()
-        (self.root / "config").mkdir()
-        (self.root / "config" / "law.md").write_text("1. Law.\n")
-        (self.home / "self-portrait.md").write_text(
-            "# Cousin Self-Portrait: testa\n## Voice\nPlain.\n"
-            "## Operator Calibration\nShort statuses.\n")
-        (self.home / "STATUS.md").write_text(
-            "# STATUS\n\n## Open loops\n\n- one\n")
-        patcher = mock.patch.dict(os.environ,
-                                  {"FRAMEWORK_ROOT": str(self.root)})
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def _digest(self):
-        return prompt.state_digest(self.home, root=self.root, slug="testa")["text"]
-
-    def _memories_section(self, text):
-        start = text.index("Retrieved Memories")
-        end = text.find("Shared Reference")
-        return text[start:end if end != -1 else len(text)]
-
-    def test_memories_carry_the_newest_five_conclusions(self):
-        for i in range(7):
-            self._write(conclusion="conclusion number %d" % i,
-                        evidence=["e"], topic="t%d" % i)
-        section = self._memories_section(self._digest())
-        self.assertIn("## Reasoning capsules", section)
-        for i in range(2, 7):
-            self.assertIn("conclusion number %d" % i, section)
-        for i in range(0, 2):
-            self.assertNotIn("conclusion number %d" % i, section)
-        self.assertLess(section.index("conclusion number 6"),
-                        section.index("conclusion number 2"))
-        self.assertIn("topic: t6", section)
-
-    def test_no_capsules_means_no_block(self):
-        section = self._memories_section(self._digest())
-        self.assertNotIn("Reasoning capsules", section)
-
-    def test_the_marker_never_reaches_the_packet(self):
-        path = capsule.markdown_path(self.home)
-        path.parent.mkdir(parents=True)
-        path.write_text("# Reasoning Capsules\n\n%s\n%s tail_\n"
-                        % (distill.AUTO_MARKER, distill.AUTO_HEADER))
-        self._write(conclusion="visible")
-        text = self._digest()
-        self.assertIn("visible", text)
-        self.assertNotIn(distill.AUTO_MARKER, text)
+    def test_the_boot_packet_no_longer_reads_capsules(self):
+        """Deprecated in 3.50.0: decide records reasoning, and its entries
+        reach the packet through the memory views."""
+        from cousin_lib import boot
+        self._write(conclusion="keep backups 30 days", evidence=["audits"])
+        self.assertNotIn("keep backups 30 days", boot._memories(self.home, 20000))
 
 
 class TestCli(CapsuleCase):
@@ -250,7 +207,7 @@ class TestCli(CapsuleCase):
         return rc, out.getvalue(), err.getvalue()
 
     def test_capsule_then_list_round_trip(self):
-        rc, out, _ = self._run(
+        rc, out, err = self._run(
             "--home", str(self.home), "capsule",
             "--conclusion", "cap at 8200",
             "--evidence", "room for hive", "--evidence", "no collisions",
@@ -258,6 +215,8 @@ class TestCli(CapsuleCase):
             "--topic", "port range")
         self.assertEqual(rc, 0)
         self.assertTrue(out.strip().startswith("capsule-"), out)
+        self.assertIn("deprecated (3.50.0)", err)
+        self.assertIn("decide", err)
         rc, out, _ = self._run("--home", str(self.home), "list", "--n", "5")
         self.assertEqual(rc, 0)
         self.assertIn("cap at 8200", out)

@@ -33,7 +33,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from cousin_lib import capsule, distill, memory, status_sections
+from cousin_lib import distill, memory, status_sections
 from cousin_lib.config import FrameworkConfig
 
 CHARS_PER_TOKEN = 4
@@ -356,7 +356,7 @@ def _order_view(body, cited=""):
 
 def _memories(home, max_chars):
     """The durable floor (memory/distilled, regenerated from raw by
-    its consumer, the state digest), the newest reasoning capsules, recent raw-memory
+    its consumer, the state digest), recent raw-memory
     entries (the decide bridge is their producer) and the memory index
     head. Empty is the legitimate
     starting condition of a new cousin. Each view is ordered (_order_view)
@@ -371,11 +371,6 @@ def _memories(home, max_chars):
             body = _order_view(body, loops)
             parts.append("## %s" % fname)
             parts.append(body)
-    # Newest conclusions as one line each, read from the jsonl record
-    # (never the markdown mirror, so no marker can reach the packet).
-    capsules = capsule.summary_for_boot(home, n=5)
-    if capsules:
-        parts.append(capsules)
     raw_dir = Path(home) / "memory" / "raw"
     if raw_dir.is_dir():
         # the same exclusions as the distilled views: a retired or held

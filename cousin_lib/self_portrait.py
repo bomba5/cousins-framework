@@ -42,12 +42,13 @@ def _cap(text, limit):
     return text[:limit].rstrip() + "\n... (trimmed - review)"
 
 
-def md_section(text, *keys):
+def md_section(text, *keys, depth=3):
     """Body under the first '##'/'###' heading whose title contains any
-    key (case-insensitive), up to the next heading."""
+    key (case-insensitive), up to the next heading; with depth=2 only
+    '##' headings count, so a '###' stays inside the body."""
     if not text:
         return ""
-    parts = re.split(r"(?m)^(#{2,3}[ \t]+.+)$", text)
+    parts = re.split(r"(?m)^(#{2,%d}[ \t]+.+)$" % depth, text)
     for i in range(1, len(parts), 2):
         title = parts[i].lstrip("#").strip().lower()
         body = parts[i + 1] if i + 1 < len(parts) else ""
@@ -63,6 +64,16 @@ _CLAUDE_KEYS = {"Temperament": ("temperament", "principles", "who i am"),
                                   "working method"),
                 "Voice": ("voice",)}
 _CAPS = {"Temperament": 800, "Working Style": 800, "Voice": 500}
+# the template's own paragraph under Voice, which the prompt carries anyway
+_TEMPLATE_PARAGRAPHS = ("Invariant for every cousin",)
+
+
+def _drafted(text, section):
+    """A CLAUDE.md section as a draft: the template's paragraphs out,
+    capped for review."""
+    kept = [p for p in text.split("\n\n")
+            if not p.strip().startswith(_TEMPLATE_PARAGRAPHS)]
+    return _cap("\n\n".join(kept), _CAPS[section])
 
 
 def _gather_evidence(home, slug):
@@ -79,9 +90,9 @@ def _gather_evidence(home, slug):
     evidence = {}
     for section in SECTIONS:
         keys = _CLAUDE_KEYS[section]
-        evidence[section] = (md_section(committed, section)
-                             or _cap(md_section(own, *keys), _CAPS[section])
-                             or _cap(md_section(claude, *keys), _CAPS[section]))
+        evidence[section] = (md_section(committed, section, depth=2)
+                             or _drafted(md_section(own, *keys), section)
+                             or _drafted(md_section(claude, *keys), section))
     if not evidence["Temperament"]:
         role = md_section(claude, "Identity").split("\n\n", 1)[0]
         evidence["Temperament"] = _cap(role, _CAPS["Temperament"])

@@ -580,7 +580,9 @@ class TestPaneLoss(Case):
         self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
         rec = r.enqueue(Item("operator:wren", "chat", "waits", sender="Wren"))
         time.sleep(2.0)
-        self.assertEqual(self.outcome(r, rec)[0], "queued")
+        # still waiting: a retry holds the row claimed for a moment, so
+        # either state is right; delivered or dropped is not
+        self.assertIn(self.outcome(r, rec)[0], ("queued", "claimed"))
         self.assertLess(self.panes[0].type_calls, 8, "not a 10 Hz spin")
         blocked = [e for e in r.events() if e["kind"] == "system"
                    and e["payload"].get("subtype") == "typing_blocked"]

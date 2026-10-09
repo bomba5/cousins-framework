@@ -73,10 +73,18 @@ class TestShippedTemplate(unittest.TestCase):
 
     def test_carries_the_day_one_doctrine(self):
         out = self._render()
-        for anchor in ("## Voice", "IN-CHARACTER", "OUT-OF-CHARACTER",
-                       "## Hard rules", "## Memory",
-                       "## Append your cousin-specific sections"):
+        for anchor in ("## Identity", "## The framework contract", "## Hard rules",
+                       "## Voice", "## Append your cousin-specific sections"):
             self.assertIn(anchor, out)
+        self.assertIn("the contract is right", " ".join(out.split()))
+
+    def test_carries_no_lane_mechanics(self):
+        # meeting 11 D: how to reply, remember, run jobs, meet and hand off
+        # is the generated contract, per lane; a copy here went stale
+        out = self._render()
+        for gone in ("IN-CHARACTER", "## Memory", "## Meetings", "## Session bookends",
+                     "## Tools: MCP first", "cousin-reply --user <their name> <<'REPLY'"):
+            self.assertNotIn(gone, out)
 
     def test_cli_table_covers_every_shipped_cousin_cli(self):
         # v1 shipped a memory subsystem the first template never
@@ -94,12 +102,11 @@ class TestShippedTemplate(unittest.TestCase):
             self.assertIn("`%s`" % cli, out,
                           "%s shipped without a template row" % cli)
 
-    def test_memory_doctrine_names_the_layout_and_the_producer_loop(self):
+    def test_memory_doctrine_names_the_layout(self):
         out = self._render()
         self.assertIn("memory/", out)
         self.assertIn("notes/", out)
-        self.assertIn("cousin-memory decide", out)
-        self.assertIn("cousin-memory search", out)
+        self.assertIn("Write memory as you", " ".join(out.split()))
 
     def test_flip_carries_the_do_not_self_flip_caveat(self):
         out = self._render()
@@ -109,39 +116,12 @@ class TestShippedTemplate(unittest.TestCase):
         out = self._render()
         self.assertIn("authored, never improvised", out)
 
-    def test_peer_reply_pitfall_is_stated(self):
-        # The one instruction an earlier version's drifted copy got
-        # backwards: peer replies go out via cousin-chat, and using the
-        # own-surface reply path for a peer silently fails to deliver.
-        out = self._render()
-        self.assertIn("cousin-chat send", out)
-        self.assertIn("DOES NOT deliver", out)
-
-    def test_mcp_tools_are_named_as_the_preferred_interface(self):
-        # The MCP tools were one table row; a cousin reading the CLI
-        # table reached for the CLIs and the tools went unused.
-        out = self._render()
-        self.assertIn("## Tools: MCP first, CLIs as the fallback", out)
-        for tool in ("mcp__cousin__memory", "mcp__cousin__send",
-                     "mcp__cousin__job", "mcp__cousin__schedule"):
-            self.assertIn(tool, out)
-
-    def test_automatic_job_tracking_is_stated(self):
-        out = self._render()
-        self.assertIn("tracked automatically", out)
-        self.assertIn("run_in_background", out)
-
-    def test_job_run_is_the_doctrine_and_the_cli_is_only_the_fallback(self):
-        # a tracked shell command goes through the job
-        # tool's `run` command first; `cousin-job start shell` through
-        # Bash is named only as what to use when the tool is missing.
-        out = self._render()
-        self.assertIn("mcp__cousin__job` - start, done, fail, list, show,"
-                      " run", out)
-        self.assertIn("goes through the job tool's `run` command", out)
-        self.assertIn("When the tool is missing, the fallback", out)
-        self.assertIn("cousin-job start shell", out)
-
+    def test_the_cli_table_puts_the_contracts_tools_first(self):
+        out = " ".join(self._render().split())
+        self.assertIn("The contract's tools come first", out)
+        for cli, tool in (("cousin-reply", "reply"), ("cousin-chat", "send"),
+                          ("cousin-memory", "memory")):
+            self.assertIn("(the `%s` tool first)" % tool, out, cli)
 
 if __name__ == "__main__":
     unittest.main()

@@ -238,6 +238,8 @@ def _j_run(ctx, a):
         if not outputs:
             raise ValueError("run: commit names what the artifacts were built from; give artifacts too")
         cli += ["--artifact-commit", commit]
+    if a.get("notify"):
+        cli += ["--notify"]
     cli += ["--", title] + argv
     env = dict(os.environ, FRAMEWORK_ROOT=str(ctx.root), COUSIN_HOME=str(ctx.home),
                COUSIN_SLUG=ctx.slug)

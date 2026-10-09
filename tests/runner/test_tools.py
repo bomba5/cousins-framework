@@ -580,6 +580,18 @@ class TestJobRun(HermeticCase):
             self.assertTrue(err, bad)
         self.assertEqual(len(jobs.list_jobs()), 1)
 
+    def test_notify_reaches_the_row(self):
+        """`notify` was in the schema but never passed to the launcher:
+        every row said notify=0 and no close notice came (#292)."""
+        from cousin_lib import jobs
+        ctx = self._ctx()
+        told = self._run(ctx, title="tell me", notify=True, argv=[sys.executable, "-c", "print(1)"])
+        quiet = self._run(ctx, title="quiet", argv=[sys.executable, "-c", "print(1)"])
+        self.assertEqual(jobs.get_job(told["job_id"])["notify"], 1)
+        self.assertEqual(jobs.get_job(quiet["job_id"])["notify"], 0)
+        self._wait(told["job_id"])
+        self._wait(quiet["job_id"])
+
     def test_a_relative_log_lands_under_the_home(self):
         ctx = self._ctx()
         out = self._run(ctx, title="logged", log="data/my-run.log",

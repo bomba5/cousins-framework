@@ -3,6 +3,15 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.42.6 - 2026-10-09
+
+### Fixed
+
+- **The job tool's `run` honours `notify`.** The option was in the
+  tool's schema from 3.42.2 on, but it never reached the launcher: every
+  row was stored without it and its owner got no notice when the job
+  ended.
+
 ## 3.42.5 - 2026-10-09
 
 ### Fixed

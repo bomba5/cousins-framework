@@ -13,7 +13,9 @@ What `accept` enforces, for every caller:
   seen); a delivery that fails frees it, so the sender may retry; an id
   whose delivery never returned (the gate was killed in between) is
   delivered by the retry, under the key `peer:<identity>:<msg_id>`, unless
-  the cousin's inbox already holds that key (then it answers 409);
+  the cousin's inbox already holds that key (then it answers 409); a
+  replay while the id's delivery is still running, or while the inbox
+  cannot be read, answers 503 (retry);
 - at most RATE_PER_MIN messages per identity in any minute, at most
   MAX_MESSAGE characters each, never empty;
 - the destination is one the route allows (`allowed(slug)`: a hive node
@@ -92,8 +94,11 @@ def _key(identity, msg_id):
 
 
 # keys this process is delivering now: an unsettled id in here is in
-# flight (a concurrent replay answers 409), one not in here was left by a
-# gate that died
+# flight (a concurrent replay answers 503, retry), one not in here was left
+# by a gate that died. One gate process per root (the console) is assumed:
+# a second one would read the first's in-flight ids as orphans, and the
+# keyed put would still keep the inbox to one row (only the chat.db line
+# would repeat).
 _IN_FLIGHT = set()
 
 
@@ -125,13 +130,14 @@ _LATIN_EXTRA = {"ø": "o", "Ø": "O", "æ": "ae", "Æ": "AE", "œ": "oe", "Œ": 
 
 def _landed(target, key):
     """True when the target's inbox holds the row put under `key`: a first
-    delivery that landed before its gate died. Unreadable reads as landed:
-    a 409 the sender counts delivered beats a second copy."""
+    delivery that landed before its gate died. None when the inbox cannot
+    be read: unknown, answered 503 (the sender retries), never a 409 the
+    sender would count delivered."""
     from cousin_lib.runner.inbox import Inbox
     try:
         return Inbox(target.home).keyed_id(key) is not None
     except (OSError, sqlite3.Error):
-        return True
+        return None
 
 
 def _settle(conn, identity, msg_id):
@@ -244,13 +250,23 @@ def accept(root, *, identity, display, to, message, msg_id, sent_at, allowed, no
         except sqlite3.IntegrityError:
             settled = conn.execute("SELECT settled FROM seen WHERE identity = ? AND msg_id = ?",
                                    (identity, msg_id)).fetchone()[0]
+            if settled:
+                conn.execute("COMMIT")
+                raise Refused(409, "message %s from %s was already delivered" % (msg_id, identity))
+            if key in _IN_FLIGHT:
+                # its delivery may still fail and free the id: a 409 now
+                # would read as delivered to a sender that stops listening
+                conn.execute("COMMIT")
+                raise Refused(503, "message %s from %s is being delivered; retry" % (msg_id, identity))
             # unsettled and in no delivery of this process: the gate that
             # recorded it died before its delivery returned. Delivered now,
             # unless the cousin's inbox holds the key (it landed first).
-            orphan = not settled and key not in _IN_FLIGHT and not _landed(target, key)
-            if not orphan:
-                if not settled and key not in _IN_FLIGHT:
-                    _settle(conn, identity, msg_id)
+            landed = _landed(target, key)
+            if landed is None:
+                conn.execute("COMMIT")
+                raise Refused(503, "the cousin's inbox cannot be read; retry")
+            if landed:
+                _settle(conn, identity, msg_id)
                 conn.execute("COMMIT")
                 raise Refused(409, "message %s from %s was already delivered" % (msg_id, identity))
         _IN_FLIGHT.add(key)         # under the write lock: a replay now reads it in flight

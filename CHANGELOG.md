@@ -12,13 +12,19 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   killed in between never delivered it, and the sender's retry heard
   `409` (already delivered) and counted it delivered. An id now stays
   unsettled until its delivery returns; the retry of an unsettled id
-  delivers it, unless the cousin's inbox already holds it. Concurrent
-  replays still answer `409`.
+  delivers it, unless the cousin's inbox already holds it. A replay
+  while the first delivery is still running answers `503` (retry), not
+  `409`: that delivery may still fail and free the id. A chat hook's
+  inject on a peer message stays its own row.
 - **A runner killed after a turn's result no longer runs the turn
   again.** The result is written to the stream before the rows it names
   close; a runner that died in between left them claimed, and the next
   start requeued them. The start now closes them as the recorded result
   says.
+- **A snapshot copies the streams before the other databases.** The
+  inbox comes first, then the streams, then `chat.db` and the rest. A
+  claimed row whose result is in the copied stream is now closed on
+  restore, and this order keeps its reply in the copy.
 - **A one-shot is delivered once across a loops daemon crash.** A crash
   between the inbox put and the fired mark refired it as a second row;
   the put now carries the key `schedule:<id>`, and the inbox keeps one

@@ -74,11 +74,23 @@ class TestKeyed(InboxCase):
         self.assertEqual(again, first)
         self.assertEqual(self.inbox.unfinished(), 0)
         self.assertEqual(self.inbox.keyed_id("schedule:7"), first)
-        with delivery.keyed("schedule:8"):
-            out = delivery.deliver(self.home, Item("schedule", "schedule", "x"), wait=False)
-            again = delivery.deliver(self.home, Item("schedule", "schedule", "x"), wait=False)
-        self.assertEqual((out, again), (delivery.QUEUED, delivery.QUEUED))
+        outs = []
+        for _ in range(2):          # a repeat after a crash: the same row
+            with delivery.keyed("schedule:8"):
+                outs.append(delivery.deliver(self.home, Item("schedule", "schedule", "x"),
+                                             wait=False))
+        self.assertEqual(outs, [delivery.QUEUED, delivery.QUEUED])
         self.assertEqual(self.inbox.unfinished(), 1)
+
+    def test_only_the_first_put_inside_keyed_carries_the_key(self):
+        from cousin_lib import delivery
+        with delivery.keyed("peer:kestrel:m-1"):
+            delivery.deliver(self.home, Item("operator:wren", "chat", "message"), wait=False)
+            delivery.deliver(self.home, Item("system", "hook", "a hook's inject"), wait=False)
+        self.assertEqual(self.inbox.unfinished(), 2)
+        with delivery.keyed("peer:kestrel:m-1"):
+            delivery.deliver(self.home, Item("operator:wren", "chat", "message"), wait=False)
+        self.assertEqual(self.inbox.unfinished(), 2)
 
     def test_unkeyed_puts_never_collide(self):
         self.inbox.put(Item("schedule", "schedule", "a"))

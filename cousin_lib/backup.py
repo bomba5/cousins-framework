@@ -19,12 +19,15 @@ them a restored home starts a fresh session, resets its generation and
 re-mines turns it already mined.
 
 Order matters while a runner is live. data/inbox.db is snapshotted
-FIRST, then the other databases, then the streams, then the runner's
-state files. A turn commits its reply (chat.db) before it closes its row
-(inbox.db), so a row `done` in the copy had its reply committed before
-the copy of chat.db began; a row still `claimed` in the copy is
-requeued on restore and at worst answered twice. At-least-once, never
-lost. The reverse order could restore a `done` row with no reply.
+FIRST, then the streams, then the other databases, then the runner's
+state files. A turn commits its reply (chat.db), then records its
+result (the stream), then closes its row (inbox.db), so each copy is
+taken before the store written ahead of it. A row `done` in the copy
+had its result and reply written before those copies began. A row still
+`claimed` whose result is in the stream copy is closed on restore
+(Inbox.close_recorded), and its reply is in the later chat.db copy; one
+with no result is requeued and at worst answered twice. At-least-once,
+never lost. Any other order can restore a closed row with no reply.
 
 The destination is an argument, never a default: a backup path in code
 is somebody's disk. The source also committed and pushed the snapshot
@@ -142,6 +145,13 @@ def _copy_memory(src, dst):
                     ignore=shutil.ignore_patterns(*MEMORY_SKIP))
 
 
+def _snapshot_db_or_raise(db, dst):
+    try:
+        _snapshot_db(db, dst)
+    except sqlite3.Error as err:
+        raise BackupError("%s: %s" % (db, err))
+
+
 def snapshot(home, dest_root=None, *, target=None):
     """Snapshot <home> into <dest_root>/<slug>/<YYYY-MM-DD>/ (the slug
     read from the home's cousin.toml), or, given `target`, into
@@ -162,17 +172,18 @@ def snapshot(home, dest_root=None, *, target=None):
     data = home / "data"
     if data.is_dir():
         inbox = data / INBOX_DB
-        # the inbox first, then the rest sorted (the module docstring)
-        for db in sorted(data.rglob("*.db"), key=lambda p: (p != inbox, p)):
-            try:
-                _snapshot_db(db, snap / "data" / db.relative_to(data))
-            except sqlite3.Error as err:
-                raise BackupError("%s: %s" % (db, err))
+        # the inbox, then the streams, then the other databases sorted
+        # (the module docstring)
+        if inbox.is_file():
+            _snapshot_db_or_raise(inbox, snap / "data" / INBOX_DB)
         for jsonl in sorted(data.glob(STREAM_GLOB)):
             try:
                 _snapshot_stream(jsonl, snap / "data" / jsonl.relative_to(data))
             except OSError as err:
                 raise BackupError("%s: %s" % (jsonl, err))
+        for db in sorted(data.rglob("*.db")):
+            if db != inbox:
+                _snapshot_db_or_raise(db, snap / "data" / db.relative_to(data))
         for state in sorted({p for pattern in RUNNER_STATE
                              for p in data.glob(pattern)}):
             try:

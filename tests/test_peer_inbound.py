@@ -193,8 +193,78 @@ class TestAccept(InboundCase):
             t.start()
         for t in threads:
             t.join(10)
-        self.assertEqual(sorted(results, key=str), sorted([True] + [409] * 5, key=str))
+        # a replay sees the first in flight (503, retry) or settled (409)
+        self.assertEqual(results.count(True), 1, results)
+        self.assertTrue(all(r in (True, 409, 503) for r in results), results)
         self.assertEqual(len(_messages(self.root / "cousins" / "wren")), 1)
+
+    def test_a_replay_while_the_first_is_in_flight_retries_and_a_failed_first_frees_it(self):
+        """A 409 during the first delivery would read as delivered; that
+        delivery may still fail. The replay hears 503, and once the first
+        failed the next retry delivers."""
+        import threading
+        from cousin_lib import chat
+        from cousin_lib.server import chat_api
+        entered, release = threading.Event(), threading.Event()
+        real = chat.deliver_to
+        calls = []
+
+        def blocked(target, payload):
+            calls.append(1)
+            if len(calls) == 1:
+                entered.set()
+                release.wait(10)
+                raise chat_api.NotDelivered("the inbox did not take it")
+            return real(target, payload)
+        out = {}
+
+        def first():
+            try:
+                self.accept(msg_id="m-flight-0001")
+            except peer_inbound.Refused as err:
+                out["first"] = err.status
+        with mock.patch.object(chat, "deliver_to", blocked):
+            t = threading.Thread(target=first)
+            t.start()
+            self.assertTrue(entered.wait(10))
+            with self.assertRaises(peer_inbound.Refused) as cm:
+                self.accept(msg_id="m-flight-0001")
+            self.assertEqual(cm.exception.status, 503)
+            release.set()
+            t.join(10)
+            self.assertEqual(out["first"], 502)
+            self.assertTrue(self.accept(msg_id="m-flight-0001")["ok"])
+        self.assertEqual(len(_messages(self.root / "cousins" / "wren")), 1)
+
+    def test_an_orphan_id_with_an_unreadable_inbox_answers_503_and_stays_open(self):
+        conn = peer_inbound._db(self.root)
+        conn.execute("INSERT INTO seen (identity, msg_id, at, settled)"
+                     " VALUES ('mallory-node', 'm-orphan-0001', ?, 0)", (time.time(),))
+        conn.close()
+        with mock.patch("cousin_lib.runner.inbox.Inbox.keyed_id",
+                        side_effect=sqlite3.OperationalError("disk I/O error")):
+            with self.assertRaises(peer_inbound.Refused) as cm:
+                self.accept(msg_id="m-orphan-0001")
+        self.assertEqual(cm.exception.status, 503)
+        self.assertTrue(self.accept(msg_id="m-orphan-0001")["ok"])
+        self.assertEqual(len(_messages(self.root / "cousins" / "wren")), 1)
+
+    def test_a_chat_hooks_inject_on_a_peer_message_is_its_own_row(self):
+        """The message's key is single use: the hook's put after it lands."""
+        import json
+        from cousin_lib.runner.inbox import Inbox
+        home = self.root / "cousins" / "wren"
+        (home / "chat-hooks.json").write_text(json.dumps(
+            [{"pattern": "tins", "handler": "inject:HOOK FIRED", "user": "*"}]))
+        self.accept(msg_id="m-hooked-0001")
+        conn = sqlite3.connect(Inbox(home).path)
+        try:
+            rows = conn.execute("SELECT source, body, dedup_key FROM inbox ORDER BY id").fetchall()
+        finally:
+            conn.close()
+        self.assertEqual([(s, k) for s, _b, k in rows],
+                         [("chat", "peer:mallory-node:m-hooked-0001"), ("hook", None)])
+        self.assertIn("HOOK FIRED", rows[1][1])
 
     def test_the_seen_store_is_private_to_its_user(self):
         self.accept()

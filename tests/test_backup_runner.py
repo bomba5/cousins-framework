@@ -194,7 +194,7 @@ class TestRunnerStoresInTheSnapshot(HermeticCase):
         self.assertEqual([name for _, name in calls],
                          ["inbox.db", "abc.db", "chat.db", "usage.db"])
 
-    def test_the_streams_then_the_session_files_follow_the_databases(self):
+    def test_the_streams_come_between_the_inbox_and_the_other_databases(self):
         data_dir = self._seed_order_home()
         calls = []
         with mock.patch.object(backup, "_snapshot_db", self._recorder(
@@ -205,9 +205,66 @@ class TestRunnerStoresInTheSnapshot(HermeticCase):
                     calls, data_dir, "plain", backup._copy_plain)):
             backup.snapshot(self.home, self.dest)
         self.assertEqual(calls, [
-            ("db", "inbox.db"), ("db", "abc.db"), ("db", "chat.db"),
-            ("db", "usage.db"), ("stream", "stream/%s.jsonl" % SESSION),
+            ("db", "inbox.db"), ("stream", "stream/%s.jsonl" % SESSION),
+            ("db", "abc.db"), ("db", "chat.db"), ("db", "usage.db"),
             ("plain", "runner-session.json")])
+
+    def test_a_turn_ending_between_any_two_copies_never_restores_a_closed_row_without_its_reply(self):
+        """A turn writes its reply (chat.db), its result (the stream), then
+        closes its row (inbox.db). Ended between any two copies, the
+        restore either answers the row again or closes it with the reply
+        in the copy: never closed with the reply missing."""
+        data_dir = self._seed_order_home()
+        real = {"db": backup._snapshot_db, "stream": backup._snapshot_stream,
+                "plain": backup._copy_plain}
+        steps = []
+        with mock.patch.object(backup, "_snapshot_db", self._recorder(
+                steps, data_dir, "db", real["db"])), \
+                mock.patch.object(backup, "_snapshot_stream", self._recorder(
+                    steps, data_dir, "stream", real["stream"])), \
+                mock.patch.object(backup, "_copy_plain", self._recorder(
+                    steps, data_dir, "plain", real["plain"])):
+            backup.snapshot(self.home, self.dest)
+        for k in range(len(steps) + 1):
+            with self.subTest(turn_ends_after=steps[k - 1] if k else "nothing"):
+                self.home = temp_home(self, slug="wren", runner="fake")
+                data_dir = self._seed_order_home()
+                inbox = Inbox(self.home)
+                (row,) = inbox.claim(limit=1, claimant=SESSION)
+                done = []
+
+                def end_turn():
+                    con = sqlite3.connect(data_dir / "chat.db")
+                    con.execute("INSERT INTO t VALUES ('reply')")
+                    con.commit()
+                    con.close()
+                    EventStream(self.home, SESSION).append(
+                        "result", {"inbox_ids": [row["id"]], "is_error": False})
+                    inbox.done(row["id"], "delivered", "turn")
+
+                def step(kind):
+                    def wrapper(src, dst):
+                        out = real[kind](src, dst)
+                        done.append(kind)
+                        if len(done) == k:
+                            end_turn()
+                        return out
+                    return wrapper
+                if k == 0:
+                    end_turn()
+                dest = _tmpdir(self)
+                with mock.patch.object(backup, "_snapshot_db", step("db")), \
+                        mock.patch.object(backup, "_snapshot_stream", step("stream")), \
+                        mock.patch.object(backup, "_copy_plain", step("plain")):
+                    snap = backup.snapshot(self.home, dest)
+                home = _restore(self, snap)
+                restored = Inbox(home)
+                restored.close_recorded()
+                con = sqlite3.connect(home / "data" / "chat.db")
+                replies = con.execute("SELECT COUNT(*) FROM t").fetchone()[0]
+                con.close()
+                if restored.get(row["id"])["state"] == "done":
+                    self.assertEqual(replies, 1, "a closed row whose reply is not in the copy")
 
     def test_a_mid_turn_snapshot_restores_and_the_row_is_answered(self):
         inbox = Inbox(self.home)

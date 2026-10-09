@@ -21,7 +21,9 @@ never `delivered`: unknown is a result, fine is a claim.
 A producer that may deliver the same thing twice (a schedule refired
 after a crash, a peer's retry of a message whose first delivery is
 unconfirmed) does it inside `keyed(key)`: the inbox keeps one row per
-key, and a second put of the key is the first row, not a new one.
+key, and a second put of the key is the first row, not a new one. Only
+the first put inside carries the key (a chat hook's inject that follows
+the message is its own row).
 """
 import contextvars
 from contextlib import contextmanager
@@ -95,11 +97,10 @@ _KEY = contextvars.ContextVar("cousin_delivery_key", default=None)
 
 @contextmanager
 def keyed(key):
-    """Every inbox put inside carries `key` (None: no key). The inbox
-    holds one row per key, so a producer that repeats a delivery after a
-    crash (it cannot know whether the first put happened) repeats it as
-    a no-op. Wrap exactly one delivery: a second put inside is the first
-    one's row."""
+    """The first inbox put inside carries `key` (None: no key); any later
+    put inside carries none. The inbox holds one row per key, so a
+    producer that repeats a delivery after a crash (it cannot know
+    whether the first put happened) repeats it as a no-op."""
     token = _KEY.set(key)
     try:
         yield
@@ -126,7 +127,9 @@ class InboxBackend:
         from cousin_lib.runner.inbox import Inbox
         try:
             inbox = Inbox(home)
-            inbox_id = inbox.put(item, key=_KEY.get())
+            key = _KEY.get()
+            _KEY.set(None)      # single use: keyed() restores it on the way out
+            inbox_id = inbox.put(item, key=key)
         except (OSError, sqlite3.Error):
             return FAILED
         try:

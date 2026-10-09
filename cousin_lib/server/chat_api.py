@@ -150,7 +150,7 @@ def deliver_stored(config, row_id, deliver, *, user, message, attachments=(), ke
     crashpoint("chat.stored")
     with delivery.keyed(key or "chat:%d" % row_id):
         outcome = deliver(user=user, message=message, message_id=row_id,
-                          attachments=tuple(attachments))
+                          attachments=attachments)
     if outcome != delivery.FAILED:
         crashpoint("chat.put")
         _with_store(config.home, lambda store: store.mark_delivered(row_id))
@@ -165,9 +165,7 @@ def redeliver_pending(config, *, older_than_s=30.0, now=None):
     hooks and the correction capture that run after a delivery are not
     run for it. Returns the ids put."""
     from datetime import datetime, timedelta, timezone
-    path = db_path(config.home)
-    if not path.exists() or not isinstance(delivery.backend_for(config.home),
-                                           delivery.InboxBackend):
+    if not db_path(config.home).exists():
         return []
     at = now or datetime.now(timezone.utc)
     cutoff = (at - timedelta(seconds=older_than_s)).isoformat()

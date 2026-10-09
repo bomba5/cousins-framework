@@ -11,8 +11,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   command substitution (`$(...)`, backticks, `<(...)`), `sed` editing in
   place (`--in-place`, `-i` alone or bundled as `-ni`), `git branch -D` or
   `git remote add` (branch and remote now read only bare or with listing
-  flags), `find` with `-fprint`/`-fls`/`-ok`, and `awk` calling `system()`
-  all count as work, so the turn is mined (#306).
+  flags), `find` with `-fprint`/`-fls`/`-ok`, `awk` calling `system()` or
+  editing in place, `sed` scripts that write (`w`) or run (`e`), `sort -o`,
+  `uniq IN OUT`, `git --output=`, `rg --pre`, a lone `&` before another
+  command, and `&>`/`&>>` into a file all count as work, so the turn is
+  mined (#306).
 
 ## 3.50.0 - 2026-10-09
 

@@ -30,9 +30,11 @@ function JobsView() {
   }, [tab]);
   React.useEffect(() => {
     let cancelled = false;
-    const pull = () => fetchCousins().then(cs => {
-      if (cancelled) return;
-      const next = (cs || []).filter(c => c.hidden).map(c => c.slug).sort();
+    // apiGet answers null on any error: keep the set we have, so a failed
+    // poll never unhides anything
+    const pull = () => apiGet("/api/cousins").then(d => {
+      if (cancelled || !d || !Array.isArray(d.cousins)) return;
+      const next = d.cousins.filter(c => c.hidden).map(c => c.slug).sort();
       setHiddenSlugs(cur => cur && [...cur].sort().join() === next.join() ? cur : new Set(next));
     });
     pull();

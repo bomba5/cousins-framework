@@ -122,6 +122,9 @@ class JobsAndArtifactsFollowTheHiddenToggle(unittest.TestCase):
     def test_the_hidden_flags_are_polled_not_read_once(self):
         self.assertIn("setInterval(pull", self.view)
 
+    def test_a_failed_poll_keeps_the_hidden_set(self):
+        self.assertIn("if (cancelled || !d || !Array.isArray(d.cousins)) return;", self.view)
+
     def test_a_cousin_going_hidden_takes_its_pick_and_open_log(self):
         self.assertIn('hiddenSlugs.has(spawnedBy)) setSpawnedBy("all")', self.jobs)
         self.assertIn("hiddenSlugs.has(o.spawned_by) ? null", self.jobs)

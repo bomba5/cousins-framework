@@ -87,14 +87,12 @@ class TestWrites(ApiCase):
 
     def test_send_stores_delivers_then_hooks(self):
         order = []
-        with mock.patch.object(chat_api, "after_inbound_stored",
-                               lambda *a: order.append("marker")), \
-                mock.patch.object(chat_api.chat_hooks, "on_message",
-                                  lambda *a, **k: order.append("hooks")):
+        with mock.patch.object(chat_api.chat_hooks, "on_message",
+                               lambda *a, **k: order.append("hooks")):
             out = chat_api.send(self.config, {"user": "Priya", "message": "hi",
                                               "reply_to": {"id": 1}},
                                 deliver=lambda **k: order.append(("deliver", k["message"])))
-        self.assertEqual(order, [("deliver", "hi"), "marker", "hooks"])
+        self.assertEqual(order, [("deliver", "hi"), "hooks"])
         [stored] = chat_api.history(self.home, {"user": "Priya"})["messages"]
         self.assertEqual((stored["id"], stored["message"], json.loads(stored["reply_to"])),
                          (out["id"], "hi", {"id": 1}))

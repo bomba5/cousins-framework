@@ -39,7 +39,7 @@ def _turn(store, sid, n, text, tool_input=None):
         content.insert(0, {"type": "tool_use", "id": "tu-%d" % n, "name": extract.MEMORY_TOOL,
                            "input": tool_input})
     entries = [{"type": "user", "uuid": "%s-u%d" % (sid, n),
-                "message": {"role": "user", "content": "go"}},
+                "message": {"role": "user", "content": "[operator:priya] chat from Priya\n\ngo"}},
                {"type": "assistant", "uuid": "%s-a%d" % (sid, n),
                 "message": {"role": "assistant", "content": content}}]
     asyncio.run(store.append({"project_key": "p", "session_id": sid}, entries))
@@ -187,7 +187,7 @@ class TestWiring(HermeticCase):
         r = self._runner()
         asyncio.run(r.session_store.append(
             {"project_key": "p", "session_id": "s-1"},
-            [{"type": "user", "uuid": "u1", "message": {"role": "user", "content": "go"}},
+            [{"type": "user", "uuid": "u1", "message": {"role": "user", "content": "[operator:priya] chat from Priya\n\ngo"}},
              {"type": "assistant", "uuid": "a1",
               "message": {"role": "assistant", "content": [{"type": "text", "text": DECIDED}]}}]))
         r.start()

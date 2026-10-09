@@ -130,7 +130,7 @@ the same shape here:
 | `memory/capsules.jsonl`, `memory/callbacks.md` | reasoning capsules and callbacks |
 | `notes/` | notes |
 | `data/decisions.jsonl` | the decisions log |
-| `data/corrections.jsonl` | corrections |
+| `data/corrections.jsonl` | corrections (copied; nothing reads it since 3.46.0) |
 | `data/active-threads.md`, `data/handoff.md` | what was in flight when it stopped |
 | `self-portrait.md` | the self-portrait |
 | `scripts/` and other working folders | whatever the cousin kept |

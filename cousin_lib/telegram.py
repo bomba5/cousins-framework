@@ -35,7 +35,7 @@ from pathlib import Path
 from cousin_lib import chat_hooks, delivery
 from cousin_lib.config import CousinConfig, FrameworkConfig
 from cousin_lib.server import chat_api
-from cousin_lib.server.inbound import after_inbound_stored, divert_login_code
+from cousin_lib.server.inbound import divert_login_code
 from cousin_lib.server.storage import (ChatStore, normalize_chat_user,
                                        save_data_uri)
 
@@ -257,10 +257,7 @@ def _store_and_deliver(cfg, *, user, message, attachment=None, key=None):
         # relay_inbound tells the sender instead of leaving them waiting
         chat_api.drop_undelivered(cfg.home, row["id"], [str(path)] if path else [])
         raise chat_api.not_delivered(config)
-    # After delivery, same order chat_api.send has: the marker's mtime is
-    # the gap baseline for the NEXT message, and the correction capture
-    # rides along on the same call.
-    after_inbound_stored(config, user, message)
+    # after delivery, as chat_api.send does
     chat_hooks.on_message(cfg.home, user=user, message=message,
                           message_id=row["id"], slug=cfg.slug,
                           deliver=deliver)

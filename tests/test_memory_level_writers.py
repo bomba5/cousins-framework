@@ -244,7 +244,9 @@ class TestJobResults(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_done_and_failed_land_as_l2_in_the_owner_home(self):
+    def test_a_failure_lands_as_l2_in_the_owner_home_and_a_success_does_not(self):
+        # meeting 11 B: a job that ended done is in its row, its log and its
+        # close notice; mirrored, it was half of some cousins' raw memory
         from cousin_lib import jobs
         a = jobs.register_job(kind="build", title="Build the Docs!")
         jobs.finish_job(a, status="done", summary="42 pages", exit_code=0)
@@ -252,21 +254,19 @@ class TestJobResults(unittest.TestCase):
         jobs.finish_job(b, status="failed", summary="host 3 refused " * 80,
                         exit_code=7)
         rows = level_rows(self.home, "L2_TOOL")
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[0]["topic"], "job:build-the-docs")
-        self.assertIn("job #%d done (exit 0): Build the Docs! - 42 pages"
-                      % a, rows[0]["content"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["topic"], "job:fleet-sync")
         self.assertEqual(rows[0]["source"], "job")
-        self.assertEqual(rows[1]["exit_code"], 7)
-        self.assertIn("failed (exit 7)", rows[1]["content"])
-        self.assertLessEqual(len(rows[1]["content"]),
+        self.assertEqual(rows[0]["exit_code"], 7)
+        self.assertIn("job #%d failed (exit 7): fleet sync" % b, rows[0]["content"])
+        self.assertLessEqual(len(rows[0]["content"]),
                              memory.EVENT_CONTENT_CHARS)
 
     def test_a_repeat_close_or_a_cancel_writes_nothing_more(self):
         from cousin_lib import jobs
         a = jobs.register_job(kind="build", title="t")
-        jobs.finish_job(a, status="done")
-        jobs.finish_job(a, status="done", summary="again")
+        jobs.finish_job(a, status="failed")
+        jobs.finish_job(a, status="failed", summary="again")
         c = jobs.register_job(kind="build", title="c")
         jobs.finish_job(c, status="cancelled")
         self.assertEqual(len(level_rows(self.home, "L2_TOOL")), 1)
@@ -283,7 +283,7 @@ class TestJobResults(unittest.TestCase):
         # a job close is the framework's own write, never demoted
         from cousin_lib import jobs
         a = jobs.register_job(kind="build", title="no cite")
-        jobs.finish_job(a, status="done", exit_code=0)
+        jobs.finish_job(a, status="failed", exit_code=1)
         [row] = raw_rows(self.home)
         self.assertEqual(row["truth_level"], "L2_TOOL")
         self.assertNotIn("cite", row)

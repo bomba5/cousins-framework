@@ -140,6 +140,92 @@ def _recorded_memory(entries):
     return False
 
 
+# What makes a turn worth mining (meeting 11 B): someone in the chat
+# started it, or it did something. A heartbeat or a job notice that only
+# looked around and logged its activity is not mined and not proposed
+# about: its episodes were records of the cousin's own idleness. The list
+# is of what only READS: any other call (another MCP server, a subagent, a
+# shell command not known to read) counts as work, so a doubt mines.
+_TALK = re.compile(r"^\[(operator|person|peer|meeting):")
+_READ_TOOLS = {"Read", "Grep", "Glob", "LS", "ToolSearch", "TodoWrite"}
+_READ_COMMANDS = {"memory": {"search", "recall", "activity", "why"},
+                  "job": {"list", "show"},
+                  "schedule": {"list"},
+                  "meeting": {"show"}}
+_READ_SHELL = {"ls", "cat", "head", "tail", "grep", "rg", "find", "stat", "wc", "du", "df",
+               "date", "ps", "pgrep", "uptime", "free", "echo", "printf", "sort", "uniq",
+               "cut", "awk", "sed", "jq", "test", "true", "file", "readlink", "realpath",
+               "basename", "dirname", "pwd", "id", "hostname", "which", "sleep"}
+_READ_GIT = {"status", "log", "diff", "show", "branch", "rev-parse", "ls-files", "remote"}
+_READ_COUSIN = re.compile(r"^cousin-[\w-]+$")
+_SHELL_SPLIT = re.compile(r"\|\|?|&&|;|\n")
+# a redirect into a file; into /dev/null, or fd to fd (2>&1), writes nothing
+_WRITE_REDIRECT = re.compile(r"(?<![<>&])>>?(?![>&])(?!\s*/dev/null)")
+
+
+def _read_only_shell(command):
+    """True when every segment of a shell command starts with a command
+    known to only read, with no redirect into a file and no in-place sed."""
+    command = str(command or "")
+    if not command.strip() or _WRITE_REDIRECT.search(command) or "sed -i" in command:
+        return False
+    for segment in _SHELL_SPLIT.split(command):
+        words = segment.split()
+        while words and "=" in words[0] and not words[0].startswith("-"):
+            words.pop(0)                    # VAR=value prefixes
+        if not words:
+            continue
+        head = words[0].rsplit("/", 1)[-1]
+        if head in ("cd", "systemctl") and (head == "cd" or "status" in words[1:2]
+                                             or "is-active" in words[1:2]):
+            continue
+        if head == "git" and len(words) > 1 and words[1] in _READ_GIT:
+            continue
+        if head in _READ_SHELL and not (head == "find" and {"-delete", "-exec", "-execdir"}
+                                          & set(words)):
+            continue
+        if _READ_COUSIN.match(head) and len(words) > 1 and words[1] in ("list", "show", "status"):
+            continue
+        return False
+    return True
+
+
+def _reads_only(name, inp):
+    if name in _READ_TOOLS:
+        return True
+    if name == "Bash":
+        return _read_only_shell(inp.get("command"))
+    return inp.get("command") in _READ_COMMANDS.get(name, ())
+
+
+def idle_turn(entries):
+    """True when nobody in the chat started the turn (no operator, person,
+    peer or meeting envelope) and every call it made only read: files,
+    searches, memory search/recall/activity/why, job and schedule lists,
+    and shell commands known to read. Anything else is work, and a turn
+    that did work is mined."""
+    for record in entries:
+        if not isinstance(record, dict) or record.get("isSidechain"):
+            continue
+        content = (record.get("message") or {}).get("content")
+        if record.get("type") == "user":
+            texts = [content] if isinstance(content, str) else [
+                b.get("text") for b in content or ()
+                if isinstance(b, dict) and b.get("type") == "text"]
+            if any(_TALK.match(str(t or "").lstrip()) for t in texts):
+                return False
+        elif record.get("type") == "assistant" and isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                name = str(block.get("name") or "")
+                if name.startswith("mcp__") and not name.startswith("mcp__cousin__"):
+                    return False              # another server's tool: work
+                if not _reads_only(name.split("__")[-1], block.get("input") or {}):
+                    return False
+    return True
+
+
 def proposal_text(sentences):
     """The row's body: the sentences, and the ask."""
     lines = [PROPOSAL_MARK + " Your last turn reached conclusions that are not in memory yet:"]
@@ -173,7 +259,7 @@ def propose_turn(home, session_id, *, store, turn_bodies=(), now=None):
         _save(home, cursors, _PROPOSE_CURSOR)
         if any(str(b).startswith(PROPOSAL_MARK) for b in turn_bodies):
             return None                  # a proposal's own turn: consumed, never proposed about
-        if not entries or _recorded_memory(entries):
+        if not entries or _recorded_memory(entries) or idle_turn(entries):
             return None
         texts = list(transcript_mine.texts_from_entries(entries))
         picked = [s for s in transcript_mine.candidates(texts, max_entries=10 ** 6)
@@ -206,7 +292,7 @@ def mine_turn(home, session_id, turn_no, *, store, now=None):
             entries, cursor = store.entries_after(session_id, int(state.get(session_id, 0)))
             left = max(0, WINDOW_CAP - written_in_window(home, now))
             kept = []
-            if entries and left:
+            if entries and left and not idle_turn(entries):
                 seen = _recent(home)
                 texts = list(transcript_mine.texts_from_entries(entries))
                 for sentence in transcript_mine.candidates(texts, max_entries=10 ** 6):

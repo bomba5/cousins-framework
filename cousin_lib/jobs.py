@@ -98,8 +98,8 @@ def register_job(*, kind, title, description="", spawned_by=None,
 def finish_job(job_id, *, status="done", summary="", exit_code=None):
     """Close a job row. Idempotent by last-write-wins; the terminal
     status is whatever the closer says it is. The first close of a
-    running row to done or failed also lands in the owning cousin's
-    raw memory as an L2 (tool) entry - see record_job_result."""
+    running row to failed also lands in the owning cousin's raw memory
+    as an L2 (tool) entry - see record_job_result."""
     conn = _db()
     try:
         before = conn.execute("SELECT status FROM jobs WHERE id=?",
@@ -134,12 +134,14 @@ def job_topic(title):
 
 def record_job_result(job):
     """An L2_TOOL raw entry in the owning cousin's home for a job that
-    ended done or failed: what ran, how it ended (exit code when
-    known), what it said. A job whose spawned_by names no cousin home
-    under the root is skipped. Never raises: the job is closed either
-    way."""
+    FAILED: what ran, how it ended (exit code when known), what it said.
+    A job that ended done is not mirrored: its row, its log and the close
+    notice already hold it, and the copies were half of some cousins' raw
+    memory (meeting 11 B); `why` resolves job:<id> against the jobs table.
+    A job whose spawned_by names no cousin home under the root is skipped.
+    Never raises: the job is closed either way."""
     try:
-        if job.get("status") not in ("done", "failed"):
+        if job.get("status") != "failed":
             return False
         owner = str(job.get("spawned_by") or "")
         if not owner or "/" in owner or owner.startswith("."):

@@ -764,7 +764,9 @@ class TestCloseNotice(JobsCase):
         self.assertIn("it was marked lost", self.sent[-1][1].body)
 
     def test_the_title_first_shape_keeps_notify(self):
-        rc, out, _ = self._main(["start", "shell", "flagged", "--notify", "--json", "--", "true"])
+        # no command: the row is registered and nothing forks, so no job runner
+        # is left writing its close notice into the home while it is removed
+        rc, out, _ = self._main(["start", "shell", "flagged", "--notify", "--json"])
         self.assertEqual(rc, 0, out)
         self.assertEqual(get_job(json.loads(out)["job_id"])["notify"], 1)
 

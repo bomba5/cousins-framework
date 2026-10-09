@@ -177,15 +177,15 @@ should do) and `status` (markdown, the section's body: replaces
 `STATUS.md`'s bare `## Open loops` section, the live one every reader
 reads, and the rest of the file is kept; the framework writes the heading,
 so a leading "Open loops" heading in `status` is dropped and a `#` or `##`
-heading inside becomes `###`) are required, `active_threads` (one
-string per in-flight thread, written to `data/active-threads.md`) and
-`learned` (facts not yet in memory, each `{topic, fact, level, cite}`,
-remembered through the same path `cousin-memory remember` uses) are taken
-when the model has them. A wrong shape (`active_threads` that is not a
-list of strings, a `learned` that is not a list, or an item without a
-`topic` and a `fact`) is a tool error before any write, so `STATUS.md`
-does not move. It writes `STATUS.md`'s open loops, then
-`data/active-threads.md` when given, then the memories, then
+heading inside becomes `###`) are required, and `learned` (facts not yet
+in memory, each `{topic, fact, level, cite}`, remembered through the same
+path `cousin-memory remember` uses) is taken when the model has it.
+`active_threads` is deprecated (3.47.0): still accepted, it writes nothing
+and the result says so, since `STATUS.md`'s open loops are the one list of
+what is in flight. A wrong shape (`active_threads` that is not a list of
+strings, a `learned` that is not a list, or an item without a `topic` and a
+`fact`) is a tool error before any write, so `STATUS.md` does not move. It
+writes `STATUS.md`'s open loops, then the memories, then
 `data/handoff.md` last (the write order the module docstring calls the
 ritual), and returns one line naming what it wrote and how many memories,
 then any memory written at a lower level than asked (law 10: an uncited

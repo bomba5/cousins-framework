@@ -967,8 +967,7 @@ tools that session started with (`snapshot`): a resume whose prompt or tools
 changed rolls over. `data/extract-cursor.json` is continuous
 extraction's per-session cursor into the transcript. `data/generations/` is
 one directory per past generation (`gen-0001`, ...), each a copy of
-`STATUS.md`, `data/handoff.md` and `data/active-threads.md` as they stood at
-that rollover.
+`STATUS.md` and `data/handoff.md` as they stood at that rollover.
 
 A few other files in a cousin's home are configuration too:
 `mcp-registry.toml` (its MCP tools), `.mcp.json` (its other MCP servers,

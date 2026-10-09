@@ -423,8 +423,8 @@ class TestWholeFileCrashes(ProducerCrashCase):
         self.assertEqual((self.home / "STATUS.md").read_bytes(), old_status)
         self.assertEqual((self.home / "data" / "handoff.md").read_text(), "# Handoff - old\n")
         self.assertEqual(len(list(self.home.glob(".STATUS.md.*.tmp"))), 1)
-        # the third: STATUS.md and the threads are new, handoff.md still whole
-        out = self.py(HANDOFF, crash="atomic.written:3")
+        # the second: STATUS.md is new, handoff.md still whole
+        out = self.py(HANDOFF, crash="atomic.written:2")
         self.assertEqual(out.returncode, -9, out.stderr)
         self.assertIn("new loop", (self.home / "STATUS.md").read_text())
         self.assertEqual((self.home / "data" / "handoff.md").read_text(), "# Handoff - old\n")

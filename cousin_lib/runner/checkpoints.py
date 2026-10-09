@@ -1,8 +1,8 @@
-"""The two checkpoint files in-process: Python equivalents of the harness
-hooks `hooks/session_checkpoint.sh` (Stop) and `hooks/pre_compact.sh`
-(PreCompact), same files and headings. Open work comes from
-`data/state.json` when present, else STATUS.md's live `## Open loops`
-block (cousin_lib.status_sections), else its open checkboxes; the
+"""The pre-compaction checkpoint in-process: the Python equivalent of the
+harness hook `hooks/pre_compact.sh` (PreCompact), same file and headings.
+(The per-turn Stop checkpoint is gone: it was a fourth copy of the open
+loops, meeting 11 A.) Open work comes from STATUS.md's live `## Open
+loops` block (cousin_lib.status_sections), else its open checkboxes; the
 pre-compact file adds the tail of the calling session's event stream (the
 newest one when no session names its own), the SDK lane's terminal
 capture. Writes only under
@@ -52,14 +52,6 @@ def _decisions(data):
 
 
 def _open_work(home):
-    try:
-        loops = json.loads(_read(home / "data" / "state.json") or "null")["open_loops"]
-    except (ValueError, TypeError, KeyError):
-        loops = None
-    if isinstance(loops, list):
-        items = ["- [%s] %s" % ("~" if i.get("partial") else " ", i.get("text", ""))
-                 for i in loops if isinstance(i, dict) and not i.get("done")]
-        return "\n".join(items) or "No open loops."
     status = _read(home / "STATUS.md")
     if status is None:
         return "No STATUS.md."
@@ -147,14 +139,6 @@ def _write(home, name, title, slug, now, sections):
     tmp.write_text(body)
     os.replace(tmp, path)
     return path
-
-
-def write_session_checkpoint(home, *, slug=None, now=None):
-    home, data = Path(home), Path(home) / "data"
-    return _write(home, "session-checkpoint.md", "Session checkpoint", slug, now, [
-        ("What was happening", _read(data / "last-activity.txt") or "No activity recorded."),
-        ("Open work (from STATUS.md)", _open_work(home)),
-        ("Last decisions", _decisions(data))])
 
 
 def write_pre_compact_checkpoint(home, *, slug=None, now=None, stream_path=None):

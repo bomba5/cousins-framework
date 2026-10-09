@@ -38,7 +38,7 @@ Everything below is relative to the cousin home.
 
 | Layer | Where | Written by | Read by |
 |---|---|---|---|
-| Active state | `STATUS.md`, `data/handoff.md`, `data/handoff-manual.md`, `data/active-threads.md`, `data/session-checkpoint.md`, `data/pre-compact-checkpoint.md` | the cousin; the checkpoint files by the harness hooks | boot packet, heartbeat, session start hook |
+| Active state | `STATUS.md`, `data/handoff.md`, `data/handoff-manual.md`, `data/pre-compact-checkpoint.md` | the cousin; the checkpoint by the harness hook | boot packet, heartbeat, session start hook |
 | Index | `MEMORY.md` | the cousin | boot packet (the first 1000 characters), heartbeat |
 | Raw entries | `memory/raw/YYYY-MM-DD.jsonl` | `decide`, `remember`, transcript mining after each [turn](glossary.md#turn), a transplant merge | distiller, boot packet |
 | Monthly digests | `memory/raw/YYYY-MM-digest.jsonl` | the raw fold | distiller, boot packet |
@@ -59,13 +59,12 @@ Everything below is relative to the cousin home.
 A few notes on the ones that aren't obvious.
 
 **Active state** is what the cousin is doing right now. `STATUS.md`
-holds the open loops, `data/handoff.md` is what the last generation
-told the next one, and `data/active-threads.md` is one bullet per thread in flight.
-The `handoff` tool writes them when a flip ends a session (its `active_threads`
-list when the cousin gives one).
+holds the open loops, the one list of what is in flight, and
+`data/handoff.md` is what the last generation told the next one. The
+`handoff` tool writes them when a flip ends a session.
 `data/handoff-manual.md` is for a handoff written by hand; the
-framework never writes it. The two checkpoint files come from the
-Claude Code hooks in `hooks/` (see [cousins](cousins.md)).
+framework never writes it. The pre-compaction checkpoint comes from the
+Claude Code hook in `hooks/` (see [cousins](cousins.md)).
 If decisions were logged after `STATUS.md` last changed, the boot
 packet warns the cousin that STATUS may be stale.
 
@@ -74,8 +73,8 @@ packet warns the cousin that STATUS may be stale.
 heading: the section the handoff writes (its `status` is the body; the
 framework writes the heading, drops a leading "Open loops" heading the
 model wrote itself and demotes a `#` or `##` heading inside to `###`).
-The digest, the boot packet, `data/state.json`, the session-end baseline
-and the checkpoints all read that section and nothing else. A suffixed
+The digest, the boot packet, the session-end baseline and the checkpoint
+all read that section and nothing else. A suffixed
 heading (`## Open loops (current as of gen 4)`) is history the cousin
 kept, never the live section, and so is `### Open loops archive`. One
 exception reads homes written before the handoff normalised its
@@ -746,9 +745,8 @@ The state digest, the session's first message, has a ceiling of about
    cut in the middle.
 6. Active state: the open loops from `STATUS.md` and the latest
    `data/handoff.md`.
-7. Task packet: `data/active-threads.md` and the last three capsules.
-8. Tool trace summary.
-9. Retrieved memories: the other five distilled files, the newest
+7. Tool trace summary.
+8. Retrieved memories: the other five distilled files, the newest
    capsule conclusions, recent raw entries (up to the last 60 lines
    from the newest 14 raw files, without the framework's own log:
    `episode:`, `job:` and `framework:` topics) and the head of
@@ -756,7 +754,7 @@ The state digest, the session's first message, has a ceiling of about
    should spare them: a line whose topic an open loop in `STATUS.md`
    names, then operator, framework and tool lines (L0-L2), then the rest
    newest first. Nothing is dropped; the cut falls on old conclusions.
-10. Shared reference: a one-line index of the rest of the shared tier.
+9. Shared reference: a one-line index of the rest of the shared tier.
 
 When the digest is too big, the memories are cut first. A
 layer that's missing (no identity, no active
@@ -1265,8 +1263,5 @@ nothing.
 - `cousin-callback tag "ana named the espresso machine Gustav" --cycle 3 --category banter`
   keeps moments worth calling back to in `memory/callbacks.md`;
   `cousin-callback search gustav` finds them.
-- `cousin-sync-state` renders the live `## Open loops` section of
-  `STATUS.md` (the bare heading; a suffixed one is history) into `data/state.json` for scripts that don't want to
-  parse Markdown.
 - `cousin-backup --dest DIR` snapshots each cousin's databases, `memory/`
   and core Markdown files ([operations](operations.md)).

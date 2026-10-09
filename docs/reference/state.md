@@ -52,11 +52,10 @@ never written back.
 |---|---|---|---|
 | `STATUS.md` | authored | the cousin; the handoff rewrites only the live `## Open loops` section | **authoritative for open loops**; the first copy of a section is current, later copies are history |
 | `data/handoff.md` | transactional | the `handoff` tool (written last), or an emergency handoff marked degraded | where the last generation stood |
-| `data/active-threads.md` | transactional | the `handoff` tool | the [threads](../glossary.md#thread) in flight at the handoff |
-| `data/state.json` | projection | `sync_state.write_state` | from STATUS.md, at a handoff or `cousin-sync-state` only; STATUS wins |
-| `data/session-checkpoint.md`, `data/pre-compact-checkpoint.md` | context | `runner/checkpoints` | built from last-activity, state.json or STATUS, and decisions |
+| `data/state.json` | projection | `sync_state.write_state` | deprecated (3.47.0): from STATUS.md by `cousin-sync-state` only, nothing reads it; removed in 4.0.0 |
+| `data/pre-compact-checkpoint.md` | context | `runner/checkpoints` | built from last-activity, STATUS and decisions |
 | `data/last-activity.txt` | transactional | `memory.note_activity` | the latest activity line |
-| `data/generations/gen-NNNN/` | raw event | `rollover.archive_generation` | copies of STATUS, handoff and threads at each [rollover](../glossary.md#rollover) |
+| `data/generations/gen-NNNN/` | raw event | `rollover.archive_generation` | copies of STATUS and the handoff at each [rollover](../glossary.md#rollover) |
 | `data/generation.txt`, `data/generation-started.json` | transactional | `boot` | the counter and when the generation started |
 | `data/cycle.json`, `data/cycle-archive.json` | transactional | `cycle` | the cousin's breadcrumbs |
 | `data/heartbeat-mtimes.json` | transactional | the loops daemon's heartbeat | the mtimes it last saw, so a beat says only what changed |

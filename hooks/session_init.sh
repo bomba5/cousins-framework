@@ -29,7 +29,7 @@ if [ -n "$HOME_DIR" ] && [ -d "$HOME_DIR" ]; then
       echo "  $f (${lines:-?} lines)"
     fi
   done
-  for f in session-checkpoint.md pre-compact-checkpoint.md handoff.md; do
+  for f in pre-compact-checkpoint.md handoff.md; do
     if [ -f "$HOME_DIR/data/$f" ]; then
       echo "  data/$f (read it first)"
     fi

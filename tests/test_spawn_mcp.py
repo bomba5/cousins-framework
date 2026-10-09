@@ -191,7 +191,8 @@ class TestProjectSettings(ProvisionCase):
         home = self._create(root)["home"]
         data = json.loads((home / ".claude" / "settings.json").read_text())
         self.assertIn("cousin", data["enabledMcpjsonServers"])
-        self.assertIn("Stop", data["hooks"])
+        self.assertIn("SessionStart", data["hooks"])
+        self.assertNotIn("Stop", data["hooks"])     # the per-turn checkpoint is retired (3.47.0)
 
     def test_repair_settings_applies_to_an_existing_home(self):
         root = self._framework_root()
@@ -204,7 +205,8 @@ class TestProjectSettings(ProvisionCase):
         data = json.loads(path.read_text())
         self.assertEqual(data["model"], "kept")
         self.assertIn("cousin", data["enabledMcpjsonServers"])
-        self.assertIn("Stop", data["hooks"])
+        self.assertIn("SessionStart", data["hooks"])
+        self.assertNotIn("Stop", data["hooks"])     # the per-turn checkpoint is retired (3.47.0)
         self.assertIn(str(path), out)
 
     def test_repair_settings_is_idempotent(self):

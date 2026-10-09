@@ -26,10 +26,13 @@ from cousin_lib.mcp_server import SERVER_NAME
 
 PROJECT_SETTINGS = pathlib.Path(".claude") / "settings.json"
 
-# (harness event, script under hooks/) for the three bookend hooks.
+# (harness event, script under hooks/) for the bookend hooks.
 SHELL_HOOKS = (("SessionStart", "session_init.sh"),
-               ("PreCompact", "pre_compact.sh"),
-               ("Stop", "session_checkpoint.sh"))
+               ("PreCompact", "pre_compact.sh"))
+# Scripts this module once wrote and no longer does: still recognised as its
+# own, so the next apply strips them from a home's settings (3.47.0 dropped
+# the per-turn Stop checkpoint; recognised for one release).
+RETIRED_SHELL_HOOKS = ("session_checkpoint.sh",)
 
 # The job-tracking hook (cousin_lib.job_hooks): one module, several
 # events. A matcher of None means every tool (or, for SubagentStop, an
@@ -104,7 +107,7 @@ def _owned(command):
         return False
     head = pathlib.PurePath(argv[0])
     if head.parent.name == "hooks" and head.name in {
-            s for _e, s in SHELL_HOOKS}:
+            s for _e, s in SHELL_HOOKS} | set(RETIRED_SHELL_HOOKS):
         return True
     return "-m" in argv and (JOB_HOOK_MODULE in argv or TMUX_HOOK_MODULE in argv)
 

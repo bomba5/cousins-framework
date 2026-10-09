@@ -349,9 +349,13 @@ into `.claude/settings.json`. They read the home (first argument or
 |---|---|---|
 | `hooks/session_init.sh` | SessionStart | nothing; prints a banner with the slug, the identity files and which checkpoints exist |
 | `hooks/pre_compact.sh` | PreCompact | `data/pre-compact-checkpoint.md`: current activity, last five decisions |
-| `hooks/session_checkpoint.sh` | Stop | `data/session-checkpoint.md`: activity, open and in-progress STATUS items, last five decisions |
 
-A fourth, `python -m cousin_lib.job_hooks`, records every subagent and every
+
+The per-turn Stop checkpoint (`hooks/session_checkpoint.sh`) was retired in
+3.47.0: it was one more copy of STATUS.md's open loops. The script stays one
+release as a no-op, and the next settings apply removes it from a home.
+
+A third, `python -m cousin_lib.job_hooks`, records every subagent and every
 background shell as a job on the Jobs page. Errors go to
 `data/job-hooks.log`. On another harness, wire the scripts by hand; they only
 need a POSIX `sh`.
@@ -374,7 +378,7 @@ cousin to call them):
 [session]
 start_hooks = ["cousin-cycle inc --start"]
 end_hooks = [
-  {name = "sync-state", cmd = "cousin-sync-state"},
+  {name = "activity", cmd = "cousin-memory activity 'session closed'"},
   "cousin-cycle inc --end",
 ]
 ```
@@ -382,7 +386,7 @@ end_hooks = [
 ```
 cousin-session end
 #   -> running session end (2 hook(s))
-#        [ok]   sync-state
+#        [ok]   activity
 #        [ok]   step-2
 #      session end done: 2 ok, 0 failed, 0 skipped
 cousin-session status             # last run and both lists, as JSON

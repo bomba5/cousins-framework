@@ -356,8 +356,9 @@ to 6000 characters, then a pointer to the file), never the history
 around it; a changed `CLAUDE.md` or `MEMORY.md` gets a one-line pointer,
 not its body. Then it asks the cousin to
 checkpoint with `cousin-memory activity` and reply with one line,
-`Heartbeat at HH:MM`. If nothing changed it says so and points at
-`cousin-memory search`. Which versions the cousin has seen is kept in
+`Heartbeat at HH:MM`. If nothing changed, the scheduled beat isn't sent
+at all; the daemon looks again on the next tick, so a change still lands.
+A beat you fire by hand is always sent, and says nothing changed. Which versions the cousin has seen is kept in
 `data/heartbeat-mtimes.json` in the cousin home, updated only after the
 beat was delivered.
 

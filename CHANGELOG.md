@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.50.1 - 2026-10-10
+
+### Fixed
+
+- **The idle-turn check no longer reads writing commands as reads.** A
+  command substitution (`$(...)`, backticks, `<(...)`), `sed` editing in
+  place (`--in-place`, `-i` alone or bundled as `-ni`), `git branch -D` or
+  `git remote add` (branch and remote now read only bare or with listing
+  flags), `find` with `-fprint`/`-fls`/`-ok`, and `awk` calling `system()`
+  all count as work, so the turn is mined (#306).
+
 ## 3.50.0 - 2026-10-09
 
 ### Changed

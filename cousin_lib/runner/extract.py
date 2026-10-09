@@ -156,7 +156,16 @@ _READ_SHELL = {"ls", "cat", "head", "tail", "grep", "rg", "find", "stat", "wc", 
                "date", "ps", "pgrep", "uptime", "free", "echo", "printf", "sort", "uniq",
                "cut", "awk", "sed", "jq", "test", "true", "file", "readlink", "realpath",
                "basename", "dirname", "pwd", "id", "hostname", "which", "sleep"}
-_READ_GIT = {"status", "log", "diff", "show", "branch", "rev-parse", "ls-files", "remote"}
+_READ_GIT = {"status", "log", "diff", "show", "rev-parse", "ls-files"}
+# branch and remote read bare or with these words only (branch -D, remote add write)
+_READ_GIT_LISTS = {"branch": {"-a", "-r", "-v", "-vv", "-l", "--list", "--show-current", "--all",
+                              "--remotes", "--merged", "--no-merged", "--contains"},
+                   "remote": {"-v", "--verbose", "show", "get-url"}}
+# find actions that write or run something
+_FIND_WRITES = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0",
+                "-fprintf", "-fls"}
+# a command run inside the line: $(...), `...`, <(...), >(...)
+_SUBSTITUTION = re.compile(r"\$\(|`|[<>]\(")
 _READ_COUSIN = re.compile(r"^cousin-[\w-]+$")
 _SHELL_SPLIT = re.compile(r"\|\|?|&&|;|\n")
 # a redirect into a file; into /dev/null, or fd to fd (2>&1), writes nothing
@@ -165,9 +174,11 @@ _WRITE_REDIRECT = re.compile(r"(?<![<>&])>>?(?![>&])(?!\s*/dev/null)")
 
 def _read_only_shell(command):
     """True when every segment of a shell command starts with a command
-    known to only read, with no redirect into a file and no in-place sed."""
+    known to only read, with no redirect into a file, no command
+    substitution and no in-place edit."""
     command = str(command or "")
-    if not command.strip() or _WRITE_REDIRECT.search(command) or "sed -i" in command:
+    if (not command.strip() or _WRITE_REDIRECT.search(command)
+            or _SUBSTITUTION.search(command)):
         return False
     for segment in _SHELL_SPLIT.split(command):
         words = segment.split()
@@ -179,10 +190,20 @@ def _read_only_shell(command):
         if head in ("cd", "systemctl") and (head == "cd" or "status" in words[1:2]
                                              or "is-active" in words[1:2]):
             continue
-        if head == "git" and len(words) > 1 and words[1] in _READ_GIT:
+        if head == "git" and len(words) > 1 and (
+                words[1] in _READ_GIT
+                or set(words[2:]) <= _READ_GIT_LISTS.get(words[1], set()) | {""}
+                and words[1] in _READ_GIT_LISTS):
             continue
-        if head in _READ_SHELL and not (head == "find" and {"-delete", "-exec", "-execdir"}
-                                          & set(words)):
+        if head == "sed" and any(w == "--in-place" or w.startswith("--in-place=")
+                                 or (w.startswith("-") and not w.startswith("--") and "i" in w)
+                                 for w in words[1:]):
+            return False
+        if head == "find" and _FIND_WRITES & set(words):
+            return False
+        if head == "awk" and "system(" in segment:
+            return False
+        if head in _READ_SHELL:
             continue
         if _READ_COUSIN.match(head) and len(words) > 1 and words[1] in ("list", "show", "status"):
             continue

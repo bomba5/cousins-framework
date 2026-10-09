@@ -216,7 +216,7 @@ def _store_and_deliver(cfg, *, user, message, attachment=None, key=None):
         finally:
             store.close()
         return
-    # `key` names the Telegram update (tg:<update_id>): the bridge saves its
+    # `key` names the Telegram message (tg:<chat_id>:<message_id>): the bridge saves its
     # offset after the relay, so one killed in between is handed the update
     # again, and the row it stored then is the one delivered, never a second
     key = key or chat_api.new_key()
@@ -294,12 +294,15 @@ def relay_inbound(cfg, *, update, chat_send=None, tg_send=None,
         except Exception:
             pass
         return  # silent on the wire, logged above
-    # the update's own key: handed the same update again (the bridge died
-    # before saving its offset), the row stored for it is the one delivered
-    key = "tg:%s" % update["update_id"] if update.get("update_id") is not None else None
+    chat_id = (message.get("chat") or {}).get("id", sender["id"])
+    # the message's own key: handed the same update again (the bridge died
+    # before saving its offset), the row stored for it is the one delivered.
+    # Chat and message id, never the update id: Telegram restarts update ids
+    # at random after a quiet week, and a new token has its own sequence
+    key = ("tg:%s:%s" % (chat_id, message["message_id"])
+           if message.get("message_id") is not None else None)
     chat_send = chat_send or (lambda **kw: _default_chat_send(cfg, key=key, **kw))
     user = _thread_name(cfg, sender["id"])
-    chat_id = (message.get("chat") or {}).get("id", sender["id"])
     try:
         _relay_one(cfg, message, chat_send=chat_send, user=user,
                    tg_fetch=tg_fetch, log=log)

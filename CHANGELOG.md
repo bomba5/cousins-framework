@@ -10,7 +10,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 - **An inbound chat message is no longer lost to a crash between its
   chat row and its inbox row.** The row is stored pending and its put
   runs under a key (random per row, the peer's own, or the Telegram
-  update's); the loops daemon puts every row still pending after two
+  message's); the loops daemon puts every row still pending after two
   minutes again, under the same key, so the cousin gets it once. A
   peer's retry, or Telegram handing the bridge the same update again,
   delivers the stored row: no second chat line, no second turn. A row

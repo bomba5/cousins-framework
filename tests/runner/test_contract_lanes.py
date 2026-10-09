@@ -28,7 +28,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # SDK lane's renderer produces. A registry or static-text edit changes it on
 # purpose: update the hash in the same commit, knowing every SDK and
 # opencode cousin's prompt cache resets (the edit moves both lanes' bytes).
-SDK_CONTRACT_SHA256 = "a5e0e940101ffaee5b8e6634821eb8a130ea2e08bca474bc45dac0d35537732e"
+SDK_CONTRACT_SHA256 = "b91362dacdfb64b1794178f5b2b9485e4571bb61eea1ed8a3754d7ff52186674"
 
 
 def as_opencode(sdk_text):

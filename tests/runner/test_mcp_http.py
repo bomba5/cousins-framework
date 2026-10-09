@@ -239,13 +239,13 @@ class TestCalls(McpCase):
 
     def test_the_live_turn_is_read_at_call_time(self):
         # The same server, the turn moving under it: a reply outside a turn
-        # is refused, the next turn's thread is the one answered.
+        # goes to the operator, the next turn's thread is the one answered.
         reply = self.rpc("tools/call", {"name": "reply", "arguments": {"text": "early"}})
-        self.assertTrue(reply["result"]["isError"])
+        self.assertFalse(reply["result"]["isError"], reply)
         self.turn.begin({"id": 2, "thread_id": "person:sam", "sender": "Sam"})
         reply = self.rpc("tools/call", {"name": "reply", "arguments": {"text": "now"}})
         self.assertFalse(reply["result"]["isError"], reply)
-        self.assertEqual(self.chat_rows(), [("sam", "Wren", "now")])
+        self.assertEqual(self.chat_rows(), [("priya", "Wren", "early"), ("sam", "Wren", "now")])
 
     def test_a_handler_error_is_is_error_true_never_a_jsonrpc_error(self):
         reply = self.rpc("tools/call", {"name": "memory", "arguments": {"command": "levitate"}})

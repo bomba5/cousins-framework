@@ -105,14 +105,14 @@ class TestStdioPaneTools(HermeticCase):
     def test_reply_goes_to_the_live_turns_thread(self):
         _root, home = _home(self)
         _pane_session(home, "s-1")
-        text, is_error = mcp_server.call_pane_tool(home, "reply", {"text": "on it"})
-        self.assertTrue(is_error)                                 # no live turn, no thread
-        self.assertIn("no turn is live", text)
+        text, is_error = mcp_server.call_pane_tool(home, "reply", {"text": "between turns"})
+        self.assertFalse(is_error, text)                          # no live turn: its operator
+        self.assertEqual(_chat(home), [("priya", "between turns")])
         tmux_turn.write(home, session_id="s-1", turn_nonce="a1b2c3d4e5f6",
                         threads=["operator:priya"])
         text, is_error = mcp_server.call_pane_tool(home, "reply", {"text": "on it"})
         self.assertFalse(is_error, text)
-        self.assertEqual(_chat(home), [("priya", "on it")])
+        self.assertEqual(_chat(home)[-1], ("priya", "on it"))
         tmux_turn.write(home, session_id="s-1", turn_nonce="a1b2c3d4e5f6",
                         threads=["operator:priya", "person:sam"])
         text, is_error = mcp_server.call_pane_tool(home, "reply", {"text": "which?"})

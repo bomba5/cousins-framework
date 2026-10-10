@@ -1065,10 +1065,21 @@ class OpencodeRunner:
                                          " denied until it is rewritten"
                                          % (_policy.FILE, e.get("source"), e.get("error"))})
 
+    def _compose_system(self):
+        """The system prompt every prompt carries. Composed at start and
+        again at each rollover, so a new generation reads the identity files
+        (portrait, CLAUDE.md, law) as they are on disk then (#311)."""
+        from cousin_lib.runner import prompt
+        return prompt.compose_system_prompt(self.home, root=self.root,
+                                            registry=self._mcp.registry,
+                                            tool_name=tool_name,
+                                            runner="the opencode runner",
+                                            call_form=True,
+                                            other_servers=None)
+
     def _boot(self):
         """MCP server, config, guard, server, event reader, MCP check.
         True when turns may run; otherwise the runner gave up."""
-        from cousin_lib.runner import prompt
         try:
             self._start_mcp()
             self._say_plugin_mcp()
@@ -1079,12 +1090,7 @@ class OpencodeRunner:
             path = self._write_config(config)
             seed_plugin_dependency(Path(env["XDG_CONFIG_HOME"]) / "opencode")
             self._write_policy()
-            self._system = prompt.compose_system_prompt(self.home, root=self.root,
-                                                        registry=self._mcp.registry,
-                                                        tool_name=tool_name,
-                                                        runner="the opencode runner",
-                                                        call_form=True,
-                                                        other_servers=None)
+            self._system = self._compose_system()
             if self._stop.is_set():
                 return False
             self._server = self.server_factory(argv0=self.binary, cwd=self.home, env=env,
@@ -1232,12 +1238,14 @@ class OpencodeRunner:
             return {}
         return d if isinstance(d, dict) else {}
 
-    def _save_session(self, session_id):
+    def _save_session(self, session_id, generation=None):
+        if generation is None:
+            generation = boot.read_generation(self.home)
         path = self._session_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"session_id": session_id, "lane": LANE,
-                                   "generation": boot.read_generation(self.home),
+                                   "generation": generation,
                                    "updated": time.time()}))
         tmp.replace(path)
 
@@ -1270,7 +1278,9 @@ class OpencodeRunner:
                                                                     generation))
         self.opencode_session = created["id"]
         try:
-            self._save_session(self.opencode_session)
+            # the generation this session starts: a rollover makes it before
+            # the bump, and the file must not name the old one (#311)
+            self._save_session(self.opencode_session, generation)
         except Exception as exc:  # noqa: BLE001 - the file must never fail a start
             self.stream.append("error", {"error": "runner-session.json: %s: %s"
                                          % (type(exc).__name__, exc)})
@@ -1456,6 +1466,10 @@ class OpencodeRunner:
             session.run_phase(self.home, "start")
         except Exception as exc:  # noqa: BLE001 - named in the detail
             problems.append("start hooks: %s: %s" % (type(exc).__name__, exc))
+        try:
+            self._system = self._compose_system()
+        except Exception as exc:  # noqa: BLE001 - the old prompt serves on, named
+            problems.append("system prompt not recomposed: %s: %s" % (type(exc).__name__, exc))
         digest_id = self._put_digest(generation)
         detail = {"reason": reason, "handoff": handoff, "generation": generation,
                   "old_session": old, "new_session": self.opencode_session,

@@ -89,6 +89,35 @@ class TestRollover(OpencodeCase):
         self.assertTrue(_wait(lambda: self.outcome(r, rec) == "delivered"))
         self.assertIn(r.opencode_session, self.prompts()[-1]["path"])
 
+    def test_a_rollover_recomposes_the_system_prompt_and_files_the_new_generation(self):
+        """#311: the new generation's prompts carry the identity files as
+        they are at the rollover, and runner-session.json names the new
+        generation, not the one that just ended."""
+        r = self.started(self.runner([[("text", "no handoff")], [("text", "digest read")]]))
+        g0 = boot.read_generation(r.home)
+        with mock.patch("cousin_lib.runner.prompt.compose_system_prompt",
+                        return_value="RECOMPOSED-AT-ROLLOVER"):
+            out = r.rollover("contract")
+        self.assertTrue(out["ok"], out)
+        self.assertNotIn("RECOMPOSED-AT-ROLLOVER", self.prompts()[0]["body"].get("system", ""))
+        self.assertTrue(_wait(lambda: len(self.prompts()) == 2))
+        self.assertEqual(self.prompts()[1]["body"]["system"], "RECOMPOSED-AT-ROLLOVER")
+        on_file = json.loads((r.home / "data" / "runner-session.json").read_text())
+        self.assertEqual((on_file["session_id"], on_file["generation"]),
+                         (r.opencode_session, g0 + 1))
+
+    def test_a_prompt_that_cannot_be_recomposed_keeps_the_old_one_and_says_so(self):
+        r = self.started(self.runner([[("text", "no handoff")], [("text", "digest read")]]))
+        before = r._system
+        with mock.patch("cousin_lib.runner.prompt.compose_system_prompt",
+                        side_effect=OSError("portrait unreadable")):
+            out = r.rollover("contract")
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(r._system, before)
+        done = [p for p in self.payloads(r, "rollover") if p.get("phase") == "done"]
+        self.assertIn("system prompt not recomposed: OSError: portrait unreadable",
+                      done[0]["problems"])
+
     def test_the_digest_turn_after_a_rollover_is_guarded_too(self):
         """The rollover runs the new session's digest
         turn itself, so it gets the per-turn check: a config source written

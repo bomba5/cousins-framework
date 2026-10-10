@@ -3,6 +3,36 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.50.3 - 2026-10-10
+
+### Fixed
+
+- **An opencode cousin's new generation reads its identity files as they
+  are.** The opencode lane composed its system prompt once, at runner
+  start, and kept it through every rollover, so a portrait or CLAUDE.md
+  edit followed by a flip never reached the session. The prompt is now
+  recomposed at each rollover (a failure keeps the old one and says so in
+  the rollover's problems), and `runner-session.json` names the new
+  generation instead of the one that just ended (#311).
+- **`cousin-self-portrait synthesize` never cuts the authored Voice.** It
+  cut a long Voice at 500 characters mid-sentence, and `commit` took the
+  stub as the authored text. Voice is now drafted whole. Temperament and
+  Working Style drafts over their cap are cut at a paragraph, with a
+  `(trimmed - review)` line saying how much is left out, and `commit`
+  refuses a candidate that still holds it (the CLI exits 1, the console
+  answers `409`) (#310).
+- **`--prune-retired` removes only the template's own text.** It pruned
+  the five retired CLAUDE.md sections by title alone, so a cousin's own
+  lines under Memory or Meetings went too. The sections' last rendering
+  ships as `templates/retired-CLAUDE-sections.md`; a copy that still
+  matches it is pruned, one that differs is kept with a note to review it
+  by hand (#304).
+- **The console's heartbeat row no longer reads "due now" forever.** Since
+  3.48.0 a due beat with nothing changed sends nothing, so `last_beat`
+  stayed and the next fire was always now. The daemon records that look
+  (`beat_checked` in `loops-state.json`) and the row shows `quiet`, with
+  no countdown: it beats on the next change (#305).
+
 ## 3.50.2 - 2026-10-10
 
 ### Fixed

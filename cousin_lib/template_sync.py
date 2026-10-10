@@ -104,7 +104,10 @@ def _render(text, values):
 # Sections a past template carried and the current one does not: the
 # lane's mechanics, now only in the generated contract (meeting 11 D,
 # 3.49.0). Above the marker they are reported, and removed with `prune`
-# (cousin-spawn --sync-template --apply --prune-retired); a section with
+# (cousin-spawn --sync-template --apply --prune-retired) only while the
+# cousin's copy still reads as the last template rendered it
+# (templates/retired-CLAUDE-sections.md): one with the cousin's own lines
+# under a kept title stays, for a person to review (#304). A section with
 # another title stays the cousin's own.
 RETIRED_SECTIONS = (
     "Chat handling - IN-CHARACTER vs OUT-OF-CHARACTER",
@@ -115,11 +118,24 @@ RETIRED_SECTIONS = (
 )
 
 
-def plan(home, root=None, *, template=None, prune=False):
+def _retired_text(root):
+    """The retired sections as the last template carried them; "" when
+    the file is missing, so nothing is pruned without a rendering."""
+    for path in (Path(root) / "templates" / "retired-CLAUDE-sections.md",
+                 Path(__file__).resolve().parents[1] / "templates"
+                 / "retired-CLAUDE-sections.md"):
+        if path.is_file():
+            return path.read_text()
+    return ""
+
+
+def plan(home, root=None, *, template=None, prune=False, retired=None):
     """(old_text, new_text, notes) for one cousin; new == old when it is
     in step. `template` is the template's text (default: the install's,
     _template_text). A retired framework section is removed only with
-    `prune`. Raises SyncError when the file cannot be synced safely."""
+    `prune`, and only while it matches `retired` (the retired sections'
+    last rendering; default: the install's, _retired_text). Raises
+    SyncError when the file cannot be synced safely."""
     home = Path(home)
     root = Path(root) if root else FrameworkConfig.root_from_home(home)
     old = (home / "CLAUDE.md").read_text()
@@ -132,6 +148,8 @@ def plan(home, root=None, *, template=None, prune=False):
     tpl_top = tpl[:tpl.index(MARKER)]
     _tpl_pre, tpl_secs = _sections(tpl_top)
     values = _values(home)
+    last = {t: _norm(_render(b, values))
+            for t, b in _sections(_retired_text(root) if retired is None else retired)[1]}
     top, rest = old[:old.index(MARKER)], old[old.index(MARKER):]
     pre, secs = _sections(top)
     have = {t: b for t, b in secs}
@@ -153,10 +171,15 @@ def plan(home, root=None, *, template=None, prune=False):
     for title, body in secs:
         if title not in known:
             if title.lstrip("#").strip() in RETIRED_SECTIONS:
-                if prune:
+                if prune and last.get(title) == _norm(body):
                     notes.append("%s: retired from the template; removed" % title)
                     continue
                 new_secs.append((title, body))
+                if prune:
+                    notes.append("%s: retired from the template, but it differs from the"
+                                 " template's last version (the cousin's own lines?);"
+                                 " kept, review it by hand" % title)
+                    continue
                 notes.append("%s: retired from the template (the contract carries it);"
                              " kept until --prune-retired" % title)
                 continue

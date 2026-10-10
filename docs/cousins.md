@@ -83,7 +83,7 @@ Every option:
 | `--start` | start it after creating; on an existing cousin without `--role`/`--voice`, only start it. The start asks the running [supervisor](glossary.md#supervisor); with none the start fails, exit 1. A cousin with no `[agent] runner` is refused, exit 2 |
 | `--sync-template` | create nothing; show how an existing cousin's CLAUDE.md framework part differs from the current template (see [the CLAUDE.md template](#the-claudemd-template)) |
 | `--apply` | with `--sync-template`: write the sync |
-| `--prune-retired` | with `--sync-template`: also remove the framework sections the template retired |
+| `--prune-retired` | with `--sync-template`: also remove a framework section the template retired, when the cousin's copy still matches the template's last version (`templates/retired-CLAUDE-sections.md`); one that differs is kept, with a note to review it by hand |
 | `--repair-settings` | create nothing; rewrite an existing cousin's `.claude/settings.json` and the `cousin` entry in `.mcp.json` |
 
 An option you leave out writes no key, so the default applies and can change
@@ -167,7 +167,9 @@ reaches every cousin, not only the ones spawned after it:
   the lane's mechanics out: chat handling, the memory commands, tools,
   session bookends, meetings; the generated contract in the system prompt
   carries them) is kept and reported until you prune it with
-  `--prune-retired`.
+  `--prune-retired`, which removes it only while it still matches the
+  template's last version (`templates/retired-CLAUDE-sections.md`). A copy
+  with your own lines in it is kept, with a note to review it by hand.
 - Below the marker nothing changes, except a leftover copy of a framework
   section that is word for word the template's, which is removed.
 - The old file goes to `data/claude-md-backups/` whenever the sync changes

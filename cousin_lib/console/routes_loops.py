@@ -75,12 +75,16 @@ def _row(config, entry, state, now, fires):
 
 def _beat_row(config, state, now):
     last = float(state.get("last_beat", {}).get(config.slug, 0) or 0)
+    checked = float((state.get("beat_checked") or {}).get(config.slug, 0) or 0)
     interval = int(config.heartbeat_seconds or 0)
+    # due, and the daemon's last look found nothing new: it beats at the
+    # first tick after a change, so there is no time to count down to (#305)
+    quiet = interval > 0 and checked > last and now - last >= interval
     return {
         "cousin": config.slug,
         "name": BEAT,
         "state": "disabled" if interval <= 0 else
-                 ("healthy" if last else "idle"),
+                 ("quiet" if quiet else "healthy" if last else "idle"),
         "interval": interval,
         "schedule": {"interval_seconds": interval, "daily_at": "",
                      "cron": "", "days": []},
@@ -89,10 +93,12 @@ def _beat_row(config, state, now):
         "hidden": False,
         "lastFireTs": int(last),
         "lastTick": int(now - last) if last else 0,
-        "nextFireTs": (int(max(now, last + interval)) if interval > 0
+        "nextFireTs": (int(max(now, last + interval)) if interval > 0 and not quiet
                        else 0),
         "drift": 0,
-        "note": "context heartbeat (the daemon's own beat)",
+        "note": ("context heartbeat: quiet, nothing changed since the last beat;"
+                 " it beats on the next change" if quiet
+                 else "context heartbeat (the daemon's own beat)"),
         "source": "framework",
     }
 

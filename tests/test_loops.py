@@ -325,6 +325,18 @@ class TestHeartbeat(LoopsCase):
         text, _commit = loops._compose_beat(home, time.time())
         self.assertIn("No identity files changed", text)
 
+    def test_a_pending_change_is_not_quiet_when_its_delivery_fails(self):
+        from cousin_lib import loops
+        home = self._beat_cousin()
+        base = time.time()
+        self._tick(now=base)
+        self._tick(now=base + 10)                     # quiet look on record
+        self.assertIn(home.name, loops._load_state()["beat_checked"])
+        (home / "STATUS.md").write_text("## Open loops\n\n- [ ] changed\n")
+        os.utime(home / "STATUS.md", (base + 15, base + 15))
+        self._tick(now=base + 20, deliver=lambda s, t: False)
+        self.assertNotIn(home.name, loops._load_state().get("beat_checked", {}))
+
     def test_delta_state_commits_after_delivery_not_before(self):
         # The source wrote the mtime state BEFORE injecting; a failed
         # inject lost the delta and the next beat lied "no changes".

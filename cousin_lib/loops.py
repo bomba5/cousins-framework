@@ -1174,6 +1174,9 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
                 beat_prompt, beat_commit = _compose_beat(home, now, only_changes=True)
                 if beat_prompt:
                     sections.append(("context-heartbeat", beat_prompt))
+                    # a change waits for its delivery: not quiet even if
+                    # this delivery fails
+                    state.get("beat_checked", {}).pop(slug, None)
                 else:
                     # due, nothing changed: no beat, so last_beat stays; the
                     # console reads this as quiet, not as due now (#305)

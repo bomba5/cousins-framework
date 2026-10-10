@@ -17,7 +17,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 - **`cousin-self-portrait synthesize` never cuts the authored Voice.** It
   cut a long Voice at 500 characters mid-sentence, and `commit` took the
   stub as the authored text. Voice is now drafted whole. Temperament and
-  Working Style drafts over their cap are cut at a paragraph, with a
+  Working Style drafts over their cap are cut at a paragraph break (a
+  line break when there is none), with a
   `(trimmed - review)` line saying how much is left out, and `commit`
   refuses a candidate that still holds it (the CLI exits 1, the console
   answers `409`) (#310).

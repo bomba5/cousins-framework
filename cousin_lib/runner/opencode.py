@@ -1461,6 +1461,13 @@ class OpencodeRunner:
             generation = boot.bump_generation(self.home)
         except Exception as exc:  # noqa: BLE001 - named in the detail
             problems.append("generation not moved: %s: %s" % (type(exc).__name__, exc))
+        if problems:
+            # the file was written for generation + 1 before the bump: it names
+            # the generation reached, so a failed bump leaves the old one
+            try:
+                self._save_session(self.opencode_session, generation)
+            except Exception as exc:  # noqa: BLE001 - named in the detail
+                problems.append("runner-session.json: %s: %s" % (type(exc).__name__, exc))
         self.hysteresis.rolled_over()
         try:
             session.run_phase(self.home, "start")

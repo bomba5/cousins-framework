@@ -46,13 +46,15 @@ class UnreviewedCandidate(ValueError):
 
 def _cap(text, limit):
     """`text` whole when it fits or `limit` is None; else cut at the last
-    paragraph (or line) break before `limit`, with a marker naming how
-    much of the source was left out."""
+    paragraph break before `limit` (the last line break when there is
+    none), with a marker naming how much of the source was left out."""
     text = (text or "").strip()
     if limit is None or len(text) <= limit:
         return text
     head = text[:limit]
-    cut = max(head.rfind("\n\n"), head.rfind("\n"))
+    cut = head.rfind("\n\n")
+    if cut <= 0:
+        cut = head.rfind("\n")
     head = head[:cut] if cut > 0 else head
     head = head.rstrip()
     return "%s\n... %s: %d more characters in the source; restore or cut them, then commit" \

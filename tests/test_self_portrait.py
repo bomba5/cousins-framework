@@ -194,6 +194,13 @@ class TestTrimmed(PortraitCase):
         self.assertTrue(style.startswith(kept) and kept.endswith("is here."), kept[-40:])
         self.assertIn("(trimmed - review): %d more characters" % (len(style) - len(kept)), section)
 
+    def test_the_cut_prefers_a_paragraph_break_to_a_line_break(self):
+        from cousin_lib.self_portrait import _cap
+        text = "para one\n\nline a\nline b\nline c and a long tail " + "x" * 50
+        self.assertEqual(_cap(text, 40).split("\n... ", 1)[0], "para one")
+        lines = "line a\nline b\nline c " + "x" * 50
+        self.assertEqual(_cap(lines, 20).split("\n... ", 1)[0], "line a\nline b")
+
     def test_commit_refuses_a_candidate_that_still_holds_the_marker(self):
         from cousin_lib.self_portrait import UnreviewedCandidate
         self._claude(Working_Style="x\n\n" * 900)

@@ -106,6 +106,15 @@ class TestRollover(OpencodeCase):
         self.assertEqual((on_file["session_id"], on_file["generation"]),
                          (r.opencode_session, g0 + 1))
 
+    def test_a_failed_bump_leaves_the_file_on_the_generation_reached(self):
+        r = self.started(self.runner([[("text", "no handoff")], [("text", "digest read")]]))
+        g0 = boot.read_generation(r.home)
+        with mock.patch("cousin_lib.boot.bump_generation", side_effect=OSError("disk full")):
+            out = r.rollover("contract")
+        self.assertTrue(out["ok"], out)
+        on_file = json.loads((r.home / "data" / "runner-session.json").read_text())
+        self.assertEqual((on_file["session_id"], on_file["generation"]), (r.opencode_session, g0))
+
     def test_a_prompt_that_cannot_be_recomposed_keeps_the_old_one_and_says_so(self):
         r = self.started(self.runner([[("text", "no handoff")], [("text", "digest read")]]))
         before = r._system

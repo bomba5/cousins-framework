@@ -821,11 +821,36 @@ class TestTemplateSync(unittest.TestCase):
         self.assertIn("run cousin-session", new)
         self.assertTrue(any("Session bookends: retired" in n and "--prune-retired" in n
                             for n in notes), notes)
-        _old, new, notes = template_sync.plan(self.home, self.root, prune=True)
+        last = "## Session bookends\n\nrun  cousin-session\n"     # as the template had it
+        _old, new, notes = template_sync.plan(self.home, self.root, prune=True, retired=last)
         self.assertNotIn("run cousin-session", new)
         self.assertIn("keep me", new)
         self.assertTrue(any("Session bookends: retired from the template; removed" in n
                             for n in notes), notes)
+
+    def test_a_retired_section_with_the_cousins_own_lines_is_kept_for_review(self):
+        # #304: pruning by title alone dropped what a cousin added under a
+        # retired title; only the template's own rendering goes
+        from cousin_lib import template_sync
+        claude = self.home / "CLAUDE.md"
+        claude.write_text(claude.read_text().replace(
+            "## Local extra\n\nkeep me\n\n",
+            "## Local extra\n\nkeep me\n\n## Meetings\n\nspeak on your turn\n"
+            "my own: I chair the Friday one\n\n"))
+        last = "## Meetings\n\nspeak on your turn\n"
+        _old, new, notes = template_sync.plan(self.home, self.root, prune=True, retired=last)
+        self.assertIn("I chair the Friday one", new)
+        self.assertTrue(any("Meetings: retired" in n and "review it by hand" in n
+                            for n in notes), notes)
+        # no rendering on file at all: nothing is pruned
+        _old, new, _notes = template_sync.plan(self.home, self.root, prune=True, retired="")
+        self.assertIn("I chair the Friday one", new)
+
+    def test_the_shipped_retired_sections_are_the_five_the_template_dropped(self):
+        from cousin_lib import template_sync
+        titles = [t.lstrip("#").strip() for t, _ in
+                  template_sync._sections(template_sync._retired_text(self.root))[1]]
+        self.assertEqual(sorted(titles), sorted(template_sync.RETIRED_SECTIONS))
 
     def test_no_marker_is_refused(self):
         from cousin_lib import template_sync

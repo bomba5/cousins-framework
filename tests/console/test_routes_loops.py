@@ -55,6 +55,26 @@ class TestLoopsView(ConsoleCase):
         self.assertEqual(len(body["errors"]), 1, body["errors"])
         self.assertIn("bad", body["errors"][0])
 
+    def test_a_due_beat_that_found_nothing_reads_quiet_not_due_now(self):
+        # #305: last_beat no longer moves on a skipped beat, so
+        # max(now, last + interval) read "now" forever
+        self.cousin("wren")
+        now = time.time()
+        loops._save_state({"last_tick": now, "last_beat": {"wren": now - 7200},
+                           "beat_checked": {"wren": now - 20}, "last_fires": {}})
+        self.serve()
+        _, body = self.get("/api/loops")
+        beat = {(r["cousin"], r["name"]): r for r in body["loops"]}[("wren", "context-heartbeat")]
+        self.assertEqual((beat["state"], beat["nextFireTs"]), ("quiet", 0), beat)
+        self.assertIn("beats on the next change", beat["note"])
+        self.assertEqual(beat["lastFireTs"], int(now - 7200))
+        # a beat after the look: healthy again, counting down
+        loops._save_state({"last_tick": now, "last_beat": {"wren": now - 10},
+                           "beat_checked": {"wren": now - 20}, "last_fires": {}})
+        _, body = self.get("/api/loops")
+        beat = {(r["cousin"], r["name"]): r for r in body["loops"]}[("wren", "context-heartbeat")]
+        self.assertEqual((beat["state"], beat["nextFireTs"]), ("healthy", int(now - 10 + 3600)))
+
     def test_worker_loop_with_a_failed_last_job_is_failed(self):
         from cousin_lib import jobs
         self.cousin("toki", ctype="worker",

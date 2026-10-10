@@ -689,12 +689,12 @@ The console reads loop state and queues requests; the loops daemon does the firi
 | key | what it is |
 |---|---|
 | `cousin`, `name` | |
-| `state` | `healthy` (fired at least once), `idle` (never fired), `disabled`, `failed` (a worker loop whose last job failed) |
+| `state` | `healthy` (fired at least once), `idle` (never fired), `disabled`, `failed` (a worker loop whose last job failed), `quiet` (a `context-heartbeat` that is due but found nothing changed: it beats on the next change, `nextFireTs` 0) |
 | `interval` | `interval_seconds`, 0 for daily/cron loops |
 | `schedule` | `{"interval_seconds", "daily_at", "cron", "days"}` |
 | `prompt`, `enabled`, `hidden` | |
 | `lastFireTs`, `lastTick` | unix time of the last fire and seconds since, 0 if never |
-| `nextFireTs` | when it's due next, 0 when disabled |
+| `nextFireTs` | when it's due next, 0 when disabled or `quiet` |
 | `drift` | how many seconds longer than the interval the last gap between fires was |
 | `note` | first 60 characters of the prompt |
 | `source` | always `framework` |

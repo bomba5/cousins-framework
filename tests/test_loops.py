@@ -307,6 +307,11 @@ class TestHeartbeat(LoopsCase):
         self._tick(now=base)
         self._tick(now=base + 10)
         self.assertEqual(len(self.delivered), 1)
+        # the look that found nothing is on record for the console (#305)
+        from cousin_lib import loops
+        state = loops._load_state()
+        self.assertEqual(state["beat_checked"][home.name], base + 10)
+        self.assertLess(state["last_beat"][home.name], base + 10)
         (home / "STATUS.md").write_text("## Open loops\n\n- [ ] a new loop\n")
         os.utime(home / "STATUS.md", (base + 15, base + 15))
         self._tick(now=base + 20)

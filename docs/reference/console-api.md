@@ -859,7 +859,7 @@ Body `{"text"}` (at most 64 KiB). Replaces the candidate. `200` with the portrai
 
 ### `POST /api/memory/<slug>/portrait/commit`
 
-Body `{"confirm": "<slug>", "sha": "<candidate_sha>"}`. Promotes the candidate (`cousin-self-portrait commit`; the previous portrait becomes `.self-portrait.md.bak`). The identity gate: a logged-in user (`403`), the slug typed back (`400`), and the candidate still the one read (`409` with the current `candidate_sha` when it changed). `404` no candidate.
+Body `{"confirm": "<slug>", "sha": "<candidate_sha>"}`. Promotes the candidate (`cousin-self-portrait commit`; the previous portrait becomes `.self-portrait.md.bak`). The identity gate: a logged-in user (`403`), the slug typed back (`400`), and the candidate still the one read (`409` with the current `candidate_sha` when it changed). `409` too while the candidate still holds synthesize's `(trimmed - review)` marker: a draft cut short is restored or cut by a person first. `404` no candidate.
 
 ### `GET /api/memory/<slug>/callbacks`
 

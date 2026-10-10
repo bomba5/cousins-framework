@@ -35,11 +35,28 @@ def _read(path):
         return ""
 
 
+# what a cut draft ends with; commit refuses a candidate that still holds
+# it, so a draft cut short never boots as the authored text (#310)
+TRIM_MARKER = "(trimmed - review)"
+
+
+class UnreviewedCandidate(ValueError):
+    """The candidate still carries a synthesize marker a person must resolve."""
+
+
 def _cap(text, limit):
+    """`text` whole when it fits or `limit` is None; else cut at the last
+    paragraph (or line) break before `limit`, with a marker naming how
+    much of the source was left out."""
     text = (text or "").strip()
-    if len(text) <= limit:
+    if limit is None or len(text) <= limit:
         return text
-    return text[:limit].rstrip() + "\n... (trimmed - review)"
+    head = text[:limit]
+    cut = max(head.rfind("\n\n"), head.rfind("\n"))
+    head = head[:cut] if cut > 0 else head
+    head = head.rstrip()
+    return "%s\n... %s: %d more characters in the source; restore or cut them, then commit" \
+        % (head, TRIM_MARKER, len(text) - len(head))
 
 
 def md_section(text, *keys, depth=3):
@@ -63,7 +80,8 @@ _CLAUDE_KEYS = {"Temperament": ("temperament", "principles", "who i am"),
                 "Working Style": ("working style", "how you work", "how i work",
                                   "working method"),
                 "Voice": ("voice",)}
-_CAPS = {"Temperament": 800, "Working Style": 800, "Voice": 500}
+# Voice is the persona the operator authored (law rule 3a): drafted whole
+_CAPS = {"Temperament": 800, "Working Style": 800, "Voice": None}
 # the template's own paragraph under Voice, which the prompt carries anyway
 _TEMPLATE_PARAGRAPHS = ("Invariant for every cousin",)
 
@@ -152,6 +170,10 @@ def commit_candidate(home):
     if not cand.exists():
         raise FileNotFoundError(
             "no candidate at %s; run synthesize first" % cand)
+    if TRIM_MARKER in _read(cand):
+        raise UnreviewedCandidate(
+            "the candidate still says %r: synthesize cut a draft short; restore the"
+            " text from its source or cut it, remove the marker, then commit" % TRIM_MARKER)
     committed = committed_path(home)
     if committed.exists():
         committed.replace(Path(home) / ".self-portrait.md.bak")
@@ -188,7 +210,7 @@ def portrait_main(argv=None):
     if args.cmd == "commit":
         try:
             path = commit_candidate(home)
-        except FileNotFoundError as err:
+        except (FileNotFoundError, UnreviewedCandidate) as err:
             print("cousin-self-portrait: %s" % err, file=sys.stderr)
             return 1
         print("committed: %s" % path)

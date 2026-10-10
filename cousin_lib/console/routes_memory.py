@@ -805,7 +805,10 @@ def _register_actions():
             raise HttpError(409, "the candidate changed since it was read;"
                                  " review it again",
                             candidate_sha=state["candidate_sha"])
-        self_portrait.commit_candidate(home)
+        try:
+            self_portrait.commit_candidate(home)
+        except self_portrait.UnreviewedCandidate as err:
+            raise HttpError(409, str(err))
         req.server.emit("memory-change", {"slug": slug,
                                           "action": "portrait-commit",
                                           "by": user})

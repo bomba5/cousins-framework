@@ -572,7 +572,7 @@ Body `{"cousin", "message_id", "user", "emoji", "action": "tap" | "remove"}` (`a
 
 ### `GET /api/chat/inbound/<slug>/<name>`
 
-One inbound image from `<home>/chat/inbound/`. The name has to be `<message id>.<png|jpg|jpeg|gif|webp>` and sit directly in that folder, otherwise `404`. Streamed, with `Cache-Control: private, max-age=3600`, an `ETag` and `Last-Modified`; a request whose `If-None-Match` names the ETag (or, without it, whose `If-Modified-Since` is not older than the file) gets `304` with no body.
+One inbound image from `<home>/chat/inbound/`. The name has to be `<message id>.<png|jpg|jpeg|gif|webp>` and sit directly in that folder, otherwise `404`. Streamed, with `Cache-Control: private, max-age=3600`, an `ETag` and `Last-Modified`; a request whose `If-None-Match` names the ETag or is `*` (or, without it, whose `If-Modified-Since` is not older than the file) gets `304` with no body.
 
 ### `GET /api/chat/media/<slug>/<folder>/<name>`
 

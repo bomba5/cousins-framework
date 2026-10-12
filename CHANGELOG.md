@@ -18,8 +18,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 - **Chat media is streamed and cached properly.** The media and inbound
   image routes read the whole file into memory per request (a browser's
   `bytes=0-` asked for all ~7 MB of a clip). They now stream it in 64 KiB
-  chunks and send an `ETag` and `Last-Modified`, answer a current copy
-  with `304`, and honour `If-Range` (#314).
+  chunks and send an `ETag` and `Last-Modified`, and answer a current
+  copy with `304`; the media route also honours `If-Range` (#314).
 
 ## 3.50.3 - 2026-10-10
 

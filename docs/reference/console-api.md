@@ -572,11 +572,11 @@ Body `{"cousin", "message_id", "user", "emoji", "action": "tap" | "remove"}` (`a
 
 ### `GET /api/chat/inbound/<slug>/<name>`
 
-One inbound image from `<home>/chat/inbound/`. The name has to be `<message id>.<png|jpg|jpeg|gif|webp>` and sit directly in that folder, otherwise `404`. `Cache-Control: private, max-age=3600`.
+One inbound image from `<home>/chat/inbound/`. The name has to be `<message id>.<png|jpg|jpeg|gif|webp>` and sit directly in that folder, otherwise `404`. Streamed, with `Cache-Control: private, max-age=3600`, an `ETag` and `Last-Modified`; a request whose `If-None-Match` names the ETag (or, without it, whose `If-Modified-Since` is not older than the file) gets `304` with no body.
 
 ### `GET /api/chat/media/<slug>/<folder>/<name>`
 
-One generated file from `<home>/chat/<folder>/`, folder `images`, `audio` or `video`. The name starts with a letter or digit and uses only letters, digits, `.`, `_`, `-`. Allowed suffixes: images png, jpg, jpeg, gif, webp; audio mp3, ogg, oga, opus, wav, m4a, webm; video mp4, webm, mov, m4v. Anything else is `404`. A single `Range: bytes=` header gets `206` with `Content-Range` (that's how the browser seeks a video), an impossible range `416`, otherwise `200` with `Accept-Ranges: bytes`.
+One generated file from `<home>/chat/<folder>/`, folder `images`, `audio` or `video`. The name starts with a letter or digit and uses only letters, digits, `.`, `_`, `-`. Allowed suffixes: images png, jpg, jpeg, gif, webp; audio mp3, ogg, oga, opus, wav, m4a, webm; video mp4, webm, mov, m4v. Anything else is `404`. A single `Range: bytes=` header gets `206` with `Content-Range` (that's how the browser seeks a video), an impossible range `416`, otherwise `200` with `Accept-Ranges: bytes`. An `If-Range` that doesn't match the ETag drops the range and sends the whole file. The body is streamed in 64 KiB chunks, never read whole into memory, and the validators and `304` work as for an inbound image.
 
 ## The pane (the tmux terminal)
 

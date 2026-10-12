@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
 
 from cousin_lib.config import CousinConfig
+from cousin_lib.console.sse import Stream
 from cousin_lib.console import proxy, router
 from tests._fakes import FakeChatUpstream as ChatServer
 
@@ -230,11 +231,13 @@ class TestInboundFiles(ProxyCase):
         mid = self._send_image()
         status, body = self._get("/api/chat/inbound/testa/%d.png" % mid)
         self.assertEqual(status, 200)
-        self.assertIsInstance(body, proxy.RawResponse)
+        self.assertIsInstance(body, Stream)
         headers = {k.lower(): v for k, v in body.headers}
-        self.assertEqual(headers["content-type"], "image/png")
+        self.assertEqual(body.content_type, "image/png")
         self.assertEqual(headers["cache-control"], "private, max-age=3600")
-        self.assertEqual(body.body, base64.b64decode(_PNG))
+        self.assertIn("etag", headers)
+        self.assertNotIn("accept-ranges", headers)
+        self.assertEqual(b"".join(body), base64.b64decode(_PNG))
 
     def test_bad_names_and_traversal_are_404(self):
         self._send_image()
@@ -316,11 +319,12 @@ class TestGeneratedMedia(ProxyCase):
         self._asset("video", "c.mp4", self._CLIP)
         status, body = self._get("/api/chat/media/testa/video/c.mp4")
         self.assertEqual(status, 200)
-        self.assertIsInstance(body, proxy.RawResponse)
+        self.assertIsInstance(body, Stream)
         headers = {k.lower(): v for k, v in body.headers}
-        self.assertEqual(headers["content-type"], "video/mp4")
+        self.assertEqual(body.content_type, "video/mp4")
         self.assertEqual(headers["accept-ranges"], "bytes")
-        self.assertEqual(body.body, self._CLIP)
+        self.assertEqual(headers["content-length"], "1024")
+        self.assertEqual(b"".join(body), self._CLIP)
 
     def test_a_byte_range_is_a_206_with_its_slice(self):
         self._asset("video", "c.mp4", self._CLIP)
@@ -331,15 +335,65 @@ class TestGeneratedMedia(ProxyCase):
         self.assertEqual(status, 206)
         headers = {k.lower(): v for k, v in body.headers}
         self.assertEqual(headers["content-range"], "bytes 100-199/1024")
-        self.assertEqual(body.body, self._CLIP[100:200])
+        self.assertEqual(headers["content-length"], "100")
+        self.assertEqual(b"".join(body), self._CLIP[100:200])
         req.headers = {"Range": "bytes=-24"}
         status, body = router.dispatch(
             "GET", "/api/chat/media/testa/video/c.mp4", req=req)
-        self.assertEqual((status, body.body), (206, self._CLIP[-24:]))
+        self.assertEqual((status, b"".join(body)), (206, self._CLIP[-24:]))
         req.headers = {"Range": "bytes=5000-"}
         status, body = router.dispatch(
             "GET", "/api/chat/media/testa/video/c.mp4", req=req)
         self.assertEqual(status, 416)
+
+    def test_a_big_file_streams_in_chunks(self):
+        # #314: a 7 MB clip used to sit whole in memory per request
+        big = bytes(range(256)) * 1024   # 256 KiB
+        self._asset("video", "big.mp4", big)
+        req = self._req()
+        req.headers = {"Range": "bytes=0-"}
+        status, body = router.dispatch(
+            "GET", "/api/chat/media/testa/video/big.mp4", req=req)
+        self.assertEqual(status, 206)
+        chunks = list(body)
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(c) <= 64 * 1024 for c in chunks))
+        self.assertEqual(b"".join(chunks), big)
+
+    def test_a_current_copy_gets_304(self):
+        self._asset("video", "c.mp4", self._CLIP)
+        status, body = self._get("/api/chat/media/testa/video/c.mp4")
+        headers = {k.lower(): v for k, v in body.headers}
+        body.close()
+        etag, modified = headers["etag"], headers["last-modified"]
+        req = self._req()
+        for ask in ({"If-None-Match": etag}, {"If-None-Match": 'W/"x", ' + etag},
+                    {"If-Modified-Since": modified}):
+            req.headers = ask
+            status, body = router.dispatch(
+                "GET", "/api/chat/media/testa/video/c.mp4", req=req)
+            self.assertEqual(status, 304, ask)
+            self.assertEqual(body.body, b"")
+        req.headers = {"If-None-Match": '"other"', "If-Modified-Since": modified}
+        status, body = router.dispatch(
+            "GET", "/api/chat/media/testa/video/c.mp4", req=req)
+        self.assertEqual(status, 200, "If-None-Match wins over the date")
+        body.close()
+
+    def test_a_stale_if_range_sends_the_whole_file(self):
+        self._asset("video", "c.mp4", self._CLIP)
+        status, body = self._get("/api/chat/media/testa/video/c.mp4")
+        etag = dict((k.lower(), v) for k, v in body.headers)["etag"]
+        body.close()
+        req = self._req()
+        req.headers = {"Range": "bytes=100-199", "If-Range": '"stale"'}
+        status, body = router.dispatch(
+            "GET", "/api/chat/media/testa/video/c.mp4", req=req)
+        self.assertEqual((status, b"".join(body)), (200, self._CLIP))
+        req.headers = {"Range": "bytes=100-199", "If-Range": etag}
+        status, body = router.dispatch(
+            "GET", "/api/chat/media/testa/video/c.mp4", req=req)
+        self.assertEqual((status, b"".join(body)), (206, self._CLIP[100:200]))
 
     def test_bad_folders_names_and_traversal_are_404(self):
         self._asset("video", "c.mp4", self._CLIP)

@@ -22,8 +22,9 @@ jobs:
   crash:
     name: crash rounds
     runs-on: ubuntu-latest
-    # 40 rounds take ~6 min; a hung round must not hold a runner for hours
-    timeout-minutes: 45
+    # 40 rounds take under a minute (28 s on 2026-10-10); a hung round must
+    # not hold a runner for long
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash

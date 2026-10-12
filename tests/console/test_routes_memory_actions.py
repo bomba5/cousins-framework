@@ -370,6 +370,19 @@ class Portrait(ActionsCase):
                          "# Wren\n\nkind and brief\n")
         self.assertFalse(self_portrait.candidate_path(self.home).exists())
 
+    def test_commit_refuses_a_trimmed_candidate_with_409(self):
+        self.users("ana")
+        self.serve()
+        self.login("ana")
+        text = "# W\n\n## Voice\nhalf\n... (trimmed - review): 9 more\n"
+        self.post("/api/memory/wren/portrait/candidate", {"text": text})
+        sha = hashlib.sha256(text.encode()).hexdigest()[:16]
+        status, body = self.post("/api/memory/wren/portrait/commit",
+                                 {"confirm": "wren", "sha": sha})
+        self.assertEqual(status, 409, body)
+        self.assertIn("trimmed - review", body["error"])
+        self.assertFalse(self_portrait.committed_path(self.home).exists())
+
     def test_commit_needs_a_login(self):
         self.serve()
         self.post("/api/memory/wren/portrait/candidate", {"text": "# W\n"})

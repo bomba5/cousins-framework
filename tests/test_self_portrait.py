@@ -167,6 +167,53 @@ class TestCommitAndBoot(PortraitCase):
         self.assertIn("Plain and warm.", backup.read_text())
 
 
+class TestTrimmed(PortraitCase):
+    """#310: synthesize never cuts the authored Voice, cuts a long draft at
+    a paragraph with a marker, and commit refuses while the marker is in."""
+
+    def _claude(self, **sections):
+        body = "".join("## %s\n\n%s\n\n" % (k.replace("_", " "), v) for k, v in sections.items())
+        (self.home / "CLAUDE.md").write_text(body)
+        committed = self.home / "self-portrait.md"
+        if committed.exists():
+            committed.unlink()
+
+    def test_a_long_authored_voice_is_drafted_whole(self):
+        voice = "\n\n".join("Voice paragraph %d, authored and kept." % i for i in range(40))
+        self._claude(Voice=voice)
+        text = synthesize_candidate(str(self.home), "wren").read_text()
+        self.assertIn(voice, text)
+        self.assertNotIn("trimmed - review", text)
+
+    def test_a_long_draft_is_cut_at_a_paragraph_and_says_how_much(self):
+        style = "\n\n".join("Style paragraph %d is here." % i for i in range(80))
+        self._claude(Working_Style=style)
+        text = synthesize_candidate(str(self.home), "wren").read_text()
+        section = text.split("## Working Style", 1)[1].split("## Voice", 1)[0]
+        kept = section.split("\n... ", 1)[0].strip()
+        self.assertTrue(style.startswith(kept) and kept.endswith("is here."), kept[-40:])
+        self.assertIn("(trimmed - review): %d more characters" % (len(style) - len(kept)), section)
+
+    def test_the_cut_prefers_a_paragraph_break_to_a_line_break(self):
+        from cousin_lib.self_portrait import _cap
+        text = "para one\n\nline a\nline b\nline c and a long tail " + "x" * 50
+        self.assertEqual(_cap(text, 40).split("\n... ", 1)[0], "para one")
+        lines = "line a\nline b\nline c " + "x" * 50
+        self.assertEqual(_cap(lines, 20).split("\n... ", 1)[0], "line a\nline b")
+
+    def test_commit_refuses_a_candidate_that_still_holds_the_marker(self):
+        from cousin_lib.self_portrait import UnreviewedCandidate
+        self._claude(Working_Style="x\n\n" * 900)
+        synthesize_candidate(str(self.home), "wren")
+        with self.assertRaises(UnreviewedCandidate):
+            commit_candidate(str(self.home))
+        self.assertFalse((self.home / "self-portrait.md").exists())
+        cand = self.home / ".self-portrait-candidate.md"
+        cand.write_text(cand.read_text().split("\n... ", 1)[0] + "\n")
+        commit_candidate(str(self.home))
+        self.assertTrue((self.home / "self-portrait.md").exists())
+
+
 class TestCli(PortraitCase):
     def _main(self, argv):
         import contextlib
@@ -191,6 +238,13 @@ class TestCli(PortraitCase):
         rc, out, _ = self._main(["show"])
         self.assertEqual(rc, 0)
         self.assertIn("Plain and warm.", out)
+
+    def test_commit_of_a_trimmed_candidate_exits_one_and_says_why(self):
+        (self.home / ".self-portrait-candidate.md").write_text(
+            "# Cousin Self-Portrait: wren\n## Voice\nhalf\n... (trimmed - review): 9 more\n")
+        rc, _, err = self._main(["commit"])
+        self.assertEqual(rc, 1)
+        self.assertIn("trimmed - review", err)
 
     def test_commit_without_candidate_exits_one(self):
         rc, _, err = self._main(["commit"])

@@ -237,7 +237,7 @@ Neither kind starts a stopped cousin. A daily flip skips a cousin whose runner i
 
 | path | what |
 |---|---|
-| `data/loops-state.json` | `last_tick`, `last_beat` per slug, `last_fires` per `slug\|loop`, `last_flips`, warning and report bookkeeping. The daemon's memory; losing it means every interval loop fires on the next tick |
+| `data/loops-state.json` | `last_tick`, `last_beat` per slug, `beat_checked` per slug (the last due beat that found nothing changed), `last_fires` per `slug\|loop`, `last_flips`, warning and report bookkeeping. The daemon's memory; losing it means every interval loop fires on the next tick |
 | `data/loops-fires.jsonl` | one `{"ts", "cousin", "loop"}` line per delivered loop fire. The console's drift chart reads it. Heartbeats aren't in it |
 | `data/health.json` | per component: ok or failing, consecutive failures, since when, the last error ([operations](../operations.md#health)) |
 | `data/loop-requests.db` | the request queue |

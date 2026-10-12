@@ -23,7 +23,7 @@ function StatePill({ state }) {
     succeeded: "cyan",
     waiting_tool: "cyan", waiting_user: "amber", queued: "amber", idle: "amber",
     degraded: "amber", starting: "amber", stopping: "amber",
-    failed: "red", lost: "amber", cancelled: "gray", stopped: "gray", disabled: "gray",
+    failed: "red", lost: "amber", cancelled: "gray", stopped: "gray", disabled: "gray", quiet: "cyan",
   }[state] || "gray";
   return (
     <span className={`pill ${tone}`}>

@@ -82,9 +82,26 @@ function threadMedia(messages) {
 // mobile browsers showing black boxes, so an IntersectionObserver plays
 // the visible ones and pauses the rest. Without the observer it falls
 // back to plain autoplay.
+//
+// It also loads only once it comes near the chat's visible area (#314):
+// with every clip's src set at mount, opening a thread queued all of them
+// oldest first, and the newest one at the bottom waited behind the rest.
+// `near` is set once and never unset, so scrolling back does not fetch
+// again. The observer's root is the chat scroller, so the margin works.
 function LoopingPreview({ src, onOpen }) {
   const ref = React.useRef(null);
+  const visible = React.useRef(false);
   const canObserve = typeof IntersectionObserver !== "undefined";
+  const [near, setNear] = React.useState(!canObserve);
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el || near) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some(e => e.isIntersecting)) { io.disconnect(); setNear(true); }
+    }, { root: el.closest(".chat-scroller"), rootMargin: "600px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [near]);
   React.useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -92,6 +109,7 @@ function LoopingPreview({ src, onOpen }) {
     if (!canObserve) return;
     const io = new IntersectionObserver((entries) => {
       for (const e of entries) {
+        visible.current = e.isIntersecting;
         if (e.isIntersecting) { const p = el.play && el.play(); if (p && p.catch) p.catch(() => {}); }
         else if (el.pause) el.pause();
       }
@@ -99,9 +117,15 @@ function LoopingPreview({ src, onOpen }) {
     io.observe(el);
     return () => io.disconnect();
   }, [src, canObserve]);
+  React.useEffect(() => {
+    // the play observer fired before there was a source: play it now
+    const el = ref.current;
+    if (!near || !canObserve || !el || !visible.current) return;
+    const p = el.play && el.play(); if (p && p.catch) p.catch(() => {});
+  }, [near, src, canObserve]);
   return (
-    <video ref={ref} src={src} className="chat-media chat-media-video"
-           muted loop playsInline preload="metadata" autoPlay={!canObserve}
+    <video ref={ref} src={near ? src : undefined} className="chat-media chat-media-video"
+           muted loop playsInline preload={near ? "metadata" : "none"} autoPlay={!canObserve}
            title="click to open with sound"
            onClick={(e) => { e.preventDefault(); if (onOpen) onOpen(); }} />
   );
@@ -124,7 +148,7 @@ function InlineMedia({ media, shown, onOpen }) {
   if (media.kind === "video") {
     return <LoopingPreview src={media.src} onOpen={onOpen} />;
   }
-  return <audio src={media.src} controls preload="metadata" className="chat-media chat-media-audio" />;
+  return <audio src={media.src} controls preload="none" className="chat-media chat-media-audio" />;
 }
 
 // The full-size viewer. `items` is the gallery snapshot taken when it

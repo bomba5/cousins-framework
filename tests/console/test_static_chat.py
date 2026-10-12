@@ -468,13 +468,23 @@ process.stdout.write(JSON.stringify(cases));
     def test_inline_players_by_kind(self):
         preview = _function_body(self.media, "LoopingPreview")
         tag = re.search(r"<video.*?/>", preview, re.S).group(0)
-        for attr in ("muted", "loop", "playsInline", 'preload="metadata"'):
+        for attr in ("muted", "loop", "playsInline"):
             self.assertIn(attr, tag)
         self.assertNotIn("controls", tag, "the inline preview is silent, the viewer has the controls")
         self.assertIn("IntersectionObserver", preview)
+        # #314: no clip loads before it nears the view, or a long thread
+        # queues every one of them ahead of the newest
+        self.assertIn("src={near ? src : undefined}", tag)
+        self.assertIn('preload={near ? "metadata" : "none"}', tag)
+        self.assertIn("useState(!canObserve)", preview, "no observer: load at once")
+        self.assertIn('closest(".chat-scroller")', preview)
+        self.assertIn("rootMargin", preview)
+        self.assertIn("visible.current", preview, "a clip already on screen plays once loaded")
+        self.assertIn('className="chat-scroller"', self.chat)
         inline = _function_body(self.media, "InlineMedia")
         self.assertIn("[{media.kind} hidden]", inline)
         self.assertRegex(inline, r"<audio[^>]*controls")
+        self.assertRegex(inline, r'<audio[^>]*preload="none"')
         bubble = _function_body(self.chat, "ChatBubble")
         self.assertIn("attachmentMedia(msg)", bubble)
         self.assertIn("<InlineMedia", bubble)

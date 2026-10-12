@@ -864,6 +864,7 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
       )}
       <div
         ref={scrollerRef}
+        className="chat-scroller"
         onScroll={onScroll}
         style={{
           flex: 1, overflowY: "auto", overflowX: "hidden", padding: "18px 24px 10px",

@@ -3,6 +3,24 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.50.4 - 2026-10-12
+
+### Fixed
+
+- **The newest video in a long chat thread shows at once.** Every inline
+  video got its source as soon as its bubble rendered, so opening a thread
+  with 151 clips queued all of them, oldest first, and the newest one at
+  the bottom waited about 20 s behind the rest (45 s on a reopen, since
+  the cache didn't save it). A clip now loads only when it scrolls within
+  600 px of the chat's view, and stays loaded; a clip already on screen
+  plays as soon as it has its source. Inline audio loads on play. Without
+  IntersectionObserver the old eager loading stays (#314).
+- **Chat media is streamed and cached properly.** The media and inbound
+  image routes read the whole file into memory per request (a browser's
+  `bytes=0-` asked for all ~7 MB of a clip). They now stream it in 64 KiB
+  chunks and send an `ETag` and `Last-Modified`, and answer a current
+  copy with `304`; the media route also honours `If-Range` (#314).
+
 ## 3.50.3 - 2026-10-10
 
 ### Fixed

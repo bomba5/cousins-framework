@@ -30,6 +30,7 @@ already turned malformed JSON into its 400).
 """
 from __future__ import annotations
 
+import email.utils
 import json
 import pathlib
 import re
@@ -41,6 +42,7 @@ import urllib.request
 from cousin_lib.config import FrameworkConfig
 from cousin_lib.console import router
 from cousin_lib.server import chat_api
+from cousin_lib.console.sse import Stream
 from cousin_lib.console.static import RawResponse  # noqa: F401 - re-exported
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
@@ -283,6 +285,72 @@ def _byte_range(header, size):
     return start, end
 
 
+_CHUNK = 64 * 1024
+
+
+def _file_chunks(path, start, length):
+    """The file's bytes from `start`, `length` of them, 64 KiB at a time,
+    so a 7 MB clip never sits whole in memory (#314)."""
+    with open(path, "rb") as fh:
+        fh.seek(start)
+        while length > 0:
+            block = fh.read(min(_CHUNK, length))
+            if not block:
+                return
+            length -= len(block)
+            yield block
+
+
+def _not_modified(headers, etag, mtime):
+    """The client's copy is current: If-None-Match names this ETag, or,
+    without it, If-Modified-Since is at or after the file's mtime."""
+    inm = headers.get("If-None-Match")
+    if inm is not None:
+        return inm.strip() == "*" or etag in [t.strip() for t in inm.split(",")]
+    ims = headers.get("If-Modified-Since")
+    if ims:
+        try:
+            return int(mtime) <= email.utils.parsedate_to_datetime(ims).timestamp()
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return False
+    return False
+
+
+def _file_response(req, path, ctype, ranged):
+    """Stream a media file with validators: an ETag and Last-Modified, a
+    304 for a copy the client already has, and (ranged) one `bytes=`
+    range, honouring If-Range."""
+    st = path.stat()
+    size = st.st_size
+    etag = '"%x-%x"' % (size, st.st_mtime_ns)
+    common = [("Cache-Control", "private, max-age=3600"),
+              ("ETag", etag),
+              ("Last-Modified", email.utils.formatdate(st.st_mtime, usegmt=True))]
+    if ranged:
+        common.append(("Accept-Ranges", "bytes"))
+    headers = getattr(req, "headers", None) or {}
+    if _not_modified(headers, etag, st.st_mtime):
+        return 304, RawResponse(common, b"")
+    wanted = _byte_range(headers.get("Range"), size) if ranged else None
+    if_range = headers.get("If-Range")
+    if wanted is not None and if_range and if_range.strip() != etag:
+        wanted = None   # the client's partial copy is stale: send it whole
+    if wanted == "unsatisfiable":
+        return 416, RawResponse([
+            ("Content-Range", "bytes */%d" % size),
+            ("Content-Length", "0")], b"")
+    if wanted is None:
+        status, start, length, extra = 200, 0, size, []
+    else:
+        start, end = wanted
+        status, length = 206, end - start + 1
+        extra = [("Content-Range", "bytes %d-%d/%d" % (start, end, size))]
+    stream = Stream(_file_chunks(path, start, length),
+                    headers=common + extra + [("Content-Length", str(length))])
+    stream.content_type = ctype
+    return status, stream
+
+
 def guarded(fn):
     """Turn a RouteError raised inside a handler into its (status, body)."""
     def wrapper(req, **kw):
@@ -387,12 +455,8 @@ def register():
         candidate = (inbox / name).resolve()
         if candidate.parent != inbox or not candidate.is_file():
             raise RouteError(404, {"error": "not found"})
-        payload = candidate.read_bytes()
-        return 200, RawResponse([
-            ("Content-Type", _INBOX_TYPES[candidate.suffix.lower()]),
-            ("Cache-Control", "private, max-age=3600"),
-            ("Content-Length", str(len(payload))),
-        ], payload)
+        return _file_response(req, candidate, _INBOX_TYPES[candidate.suffix.lower()],
+                              ranged=False)
 
     @router.route("GET", "/api/chat/media/{slug}/{folder}/{name}")
     @guarded
@@ -409,27 +473,6 @@ def register():
         if (ctype is None or candidate.parent != base
                 or not candidate.is_file()):
             raise RouteError(404, {"error": "not found"})
-        size = candidate.stat().st_size
-        headers = getattr(req, "headers", None)
-        wanted = _byte_range(headers.get("Range") if headers else None, size)
-        if wanted == "unsatisfiable":
-            return 416, RawResponse([
-                ("Content-Range", "bytes */%d" % size),
-                ("Content-Length", "0")], b"")
-        common = [("Content-Type", ctype),
-                  ("Cache-Control", "private, max-age=3600"),
-                  ("Accept-Ranges", "bytes")]
-        if wanted is None:
-            payload = candidate.read_bytes()
-            return 200, RawResponse(
-                common + [("Content-Length", str(len(payload)))], payload)
-        start, end = wanted
-        with candidate.open("rb") as fh:
-            fh.seek(start)
-            payload = fh.read(end - start + 1)
-        return 206, RawResponse(common + [
-            ("Content-Range", "bytes %d-%d/%d" % (start, end, size)),
-            ("Content-Length", str(len(payload)))], payload)
-
+        return _file_response(req, candidate, ctype, ranged=True)
 
 register()

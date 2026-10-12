@@ -500,11 +500,14 @@ has no search, archive, effort or pane.
 ### Pictures, video and audio
 
 Attachments render inline: images as thumbnails, video as a muted looping
-preview that only plays while it's on screen, audio as a player. Click an
-image or video to open the viewer: full size, video with sound and controls,
-prev/next through every image and video in the thread (arrow keys, the side
-buttons, or a swipe), a counter, and links to open or download the original.
-Escape or a click outside closes it.
+preview that loads only as it scrolls near the view and plays only while
+it's on screen, audio as a player that loads when you press play. So a
+thread with hundreds of clips opens without fetching them all, and the
+newest one shows first. Click an image or video to open the viewer: full
+size, video with sound and controls, prev/next through every image and
+video in the thread (arrow keys, the side buttons, or a swipe), a counter,
+and links to open or download the original. Escape or a click outside
+closes it.
 
 "media on" / "media off" hides every attachment behind a one-line
 placeholder like `[image hidden]`. The choice is stored in your browser.

@@ -53,6 +53,10 @@ jobs:
       BUILDKIT_PROGRESS: plain
     steps:
       - uses: actions/checkout@v4
+      - name: Docker Hub pulls through a mirror (its anonymous limit, #303)
+        run: |
+          set -euo pipefail
+          sh .github/scripts/docker-mirror.sh
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"

@@ -18,6 +18,8 @@ jobs:
       IMAGE: cousins-framework:ci
     steps:
       - uses: actions/checkout@v4
+      - name: Docker Hub pulls through a mirror (its anonymous limit, #303)
+        run: sh .github/scripts/docker-mirror.sh
       - name: Build the image
         run: docker build -t "$IMAGE" .
       - name: The contract suite inside the image

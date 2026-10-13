@@ -307,6 +307,12 @@ class TestWorkflow(unittest.TestCase):
             self.assertNotEqual(proc.returncode, 0)
             self.assertNotIn("reached", proc.stdout)
 
+    def test_docker_hub_goes_through_the_mirror_before_the_quick_start(self):
+        # #303: Docker Hub's anonymous pull limit failed the build with 429
+        flat = [l for body in self.runs for l in body]
+        mirror = flat.index("sh .github/scripts/docker-mirror.sh")
+        self.assertLess(mirror, flat.index('python "$QS" run "$RUNNER_TEMP/quickstart.sh"'))
+
     def test_the_steps_run_the_helper_in_order(self):
         calls = [l for body in self.runs for l in body if '"$QS"' in l]
         names = [re.search(r'"\$QS" (\w+)', l).group(1) for l in calls]

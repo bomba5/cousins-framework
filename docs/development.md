@@ -195,6 +195,12 @@ edit the extractor makes has to match exactly once, so if you change the
 quick start block, the job fails until
 `quickstart.py` agrees with it.
 
+Both jobs first point the runner's Docker daemon at mirror.gcr.io
+(`.github/scripts/docker-mirror.sh`), because Docker Hub's anonymous pull
+limit failed them with 429. Builds go through it too, and an image the
+mirror lacks comes from Docker Hub. The Dockerfile, the compose files and
+the README stay on docker.io.
+
 ## The image's pins
 
 The Dockerfile's inputs are pinned, so a build of one checkout installs the

@@ -1413,6 +1413,37 @@ class TestImageWorkflow(unittest.TestCase):
         self.text.encode("ascii")
         self.assertNotIn("/home/", self.text)
 
+    def test_docker_hub_goes_through_the_mirror_before_the_build(self):
+        # #303: Docker Hub's anonymous pull limit failed the job with 429
+        self.assertIn("sh .github/scripts/docker-mirror.sh", self.flat)
+        self.assertLess(self.flat.index("docker-mirror.sh"), self.flat.index("docker build"))
+
+
+class TestDockerMirrorScript(unittest.TestCase):
+    """The CI step that points the runner's daemon at a Docker Hub mirror
+    (#303): POSIX sh, merges daemon.json instead of replacing it, and fails
+    when the daemon did not take the mirror."""
+
+    def setUp(self):
+        self.path = _REPO / ".github" / "scripts" / "docker-mirror.sh"
+        self.text = self.path.read_text()
+
+    def test_posix_sh_that_stops_on_error(self):
+        self.text.encode("ascii")
+        self.assertTrue(self.text.startswith("#!/bin/sh\n"))
+        self.assertIn("\nset -eu\n", self.text)
+        self.assertEqual(subprocess.run(["sh", "-n", str(self.path)]).returncode, 0)
+
+    def test_it_keeps_the_runner_s_daemon_settings(self):
+        self.assertIn('conf["registry-mirrors"] = [mirror]', self.text)
+        self.assertIn("json.load(f)", self.text)
+        self.assertIn("os.replace(", self.text)
+
+    def test_it_checks_the_daemon_took_the_mirror(self):
+        self.assertIn("mirror=https://mirror.gcr.io\n", self.text)
+        self.assertIn(".RegistryConfig.Mirrors", self.text)
+        self.assertIn("exit 1", self.text)
+
 
 if __name__ == "__main__":
     unittest.main()

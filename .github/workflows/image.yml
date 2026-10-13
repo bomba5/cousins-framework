@@ -1,4 +1,5 @@
-# The image job: build the image from this checkout, run the runner
+# The image job: point docker.io pulls at a mirror (Docker Hub's anonymous
+# limit, #303), build the image from this checkout, run the runner
 # contract suite inside it (tests/ is never in the image, so it is
 # mounted read-only for the run), run the opt-in image and compose tests
 # on the runner host against that image, then hold the compressed size

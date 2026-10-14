@@ -803,8 +803,10 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
 
   const textareaRef = React.useRef(null);
 
-  const send = async () => {
-    const text = draft.trim();
+  // `typed` is the box's text as the browser has it (a phone keyboard's
+  // send key can arrive before its last word reaches the draft state)
+  const send = async (typed) => {
+    const text = (typeof typed === "string" ? typed : draft).trim();
     if ((!text && !attachment) || sending || !c || !chatUser) return;
     setSending(true);
     try {
@@ -836,7 +838,7 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
-  // A phone keyboard's Enter often never reaches onKey as "Enter" (it
+  // An Android keyboard's Enter often never reaches onKey as "Enter" (it
   // arrives as an input event, keyCode 229): catch the line break it
   // would insert and send instead. Shift+Enter on a hardware keyboard
   // still makes a new line.
@@ -849,7 +851,7 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
       if (e.inputType !== "insertLineBreak" && e.inputType !== "insertParagraph") return;
       if (shiftEnterRef.current) { shiftEnterRef.current = false; return; }
       e.preventDefault();
-      sendRef.current();
+      sendRef.current(el.value);
     };
     el.addEventListener("beforeinput", onBeforeInput);
     return () => el.removeEventListener("beforeinput", onBeforeInput);

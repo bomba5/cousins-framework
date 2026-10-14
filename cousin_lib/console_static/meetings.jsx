@@ -41,8 +41,10 @@ function meetingTurnText(m, now) {
   return `Round ${m.round || 1}: ${m.turn_slug} is speaking${since}`;
 }
 
-// Deep link: ?view=meetings&meeting=<id> opens that thread on load (read
-// once by app.jsx, like ?cousin=; the address bar is not rewritten).
+// Deep link: ?view=meetings&meeting=<id> opens that thread on load. The
+// open meeting is written back to ?meeting= (replaceState, like app.jsx
+// does ?view= and ?cousin=), so a reload, or coming back to this view from
+// another, reopens the meeting you had, not the one the link named.
 function MeetingsView({ cousins, sessionUser, initialMeeting }) {
   const [meetings, setMeetings] = React.useState(null);
   const [selectedId, setSelectedId] = React.useState(() => {
@@ -75,6 +77,16 @@ function MeetingsView({ cousins, sessionUser, initialMeeting }) {
   }, [pullList, pullMeeting]);
 
   React.useEffect(() => { pullMeeting(selectedId); }, [selectedId, pullMeeting]);
+
+  React.useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (selectedId) p.set("meeting", String(selectedId)); else p.delete("meeting");
+    const next = "?" + p.toString();
+    if (next !== window.location.search) {
+      window.history.replaceState(window.history.state, "",
+        window.location.pathname + next + window.location.hash);
+    }
+  }, [selectedId]);
 
   // Live: every meeting-change refetches the list and the open thread.
   // The poll is the fallback for a dropped event stream, and runs only

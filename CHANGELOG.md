@@ -12,8 +12,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   after the system reclaimed it, lost the chat you had open. Picking a
   view or a cousin now rewrites `?view=` and `?cousin=` in place with
   `history.replaceState` (no extra back-button entries); `?user=` and
-  `?embed=` stay as given, and `?meeting=` is dropped off the meetings
-  view (#317).
+  `?embed=` stay as given. The meetings view does the same for
+  `?meeting=` (the open meeting), and it is dropped off that view (#317).
 
 ## 3.50.4 - 2026-10-12
 

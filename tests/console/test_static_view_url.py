@@ -37,5 +37,18 @@ class ViewInAddress(unittest.TestCase):
         self.assertIn("new URLSearchParams(window.location.search)", self.effect)
 
 
+class MeetingInAddress(unittest.TestCase):
+    """The open meeting follows the selection, so a reload reopens it."""
+
+    def test_selected_meeting_written_back(self):
+        src = (_APP.parent / "meetings.jsx").read_text(encoding="utf-8")
+        m = re.search(r"useEffect\(\(\) => \{\n(?:(?!\n  \}, \[).)*"
+                      r"replaceState(?:(?!\n  \}, \[).)*\n  \}, \[selectedId\]\);",
+                      src, re.S)
+        self.assertIsNotNone(m, "no effect writes ?meeting=")
+        self.assertIn('p.set("meeting", String(selectedId))', m.group(0))
+        self.assertNotIn("pushState", m.group(0))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -473,8 +473,10 @@ Right-click a message (long-press on a phone) to reply to it or react. A
 reply shows a quote you can click to jump to the original. Clicking an
 existing reaction taps it again; right-click removes yours.
 
-The message box sends on Enter (Shift+Enter for a new line), from a phone's keyboard too, which shows a send key. Attach a
-picture with the button, by pasting it, or by dropping it on the box.
+The message box sends on Enter (Shift+Enter for a new line). On a phone
+the keyboard shows a send key and it always sends; a new line needs a
+hardware keyboard's Shift+Enter. Attach a picture with the button, by
+pasting it, or by dropping it on the box.
 
 The header has:
 

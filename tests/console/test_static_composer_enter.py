@@ -23,7 +23,8 @@ class ComposerEnter(unittest.TestCase):
     def test_a_line_break_input_sends(self):
         self.assertIn('addEventListener("beforeinput"', self.src)
         self.assertIn('"insertLineBreak"', self.src)
-        self.assertIn("sendRef.current()", self.src)
+        # the box's own text: the keyboard's last word may not be in the draft yet
+        self.assertIn("sendRef.current(el.value)", self.src)
 
     def test_shift_enter_still_makes_a_line(self):
         self.assertIn('shiftEnterRef.current = e.key === "Enter" && e.shiftKey', self.src)

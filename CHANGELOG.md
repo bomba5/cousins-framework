@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.52.2 - 2026-10-14
+
+### Fixed
+
+- **A phone's send key sends the whole message.** The send key could
+  arrive before the keyboard committed the last word to the box's state,
+  so that word could be left out; the send now reads the box's own text
+  (#327). The docs now say that on a phone the send key always sends and
+  a new line needs a hardware keyboard's Shift+Enter. (3.52.1's entry
+  says a phone keyboard; it is an Android keyboard's Enter that arrives
+  as an input event.)
+
 ## 3.52.1 - 2026-10-14
 
 ### Fixed

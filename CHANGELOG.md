@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.51.0 - 2026-10-14
+
+### Changed
+
+- **The console's address follows the view and the cousin.** Every page
+  load landed on Overview, so a reload, or a phone app's WebView restored
+  after the system reclaimed it, lost the chat you had open. Picking a
+  view or a cousin now rewrites `?view=` and `?cousin=` in place with
+  `history.replaceState` (no extra back-button entries); `?user=` and
+  `?embed=` stay as given, and `?meeting=` is dropped off the meetings
+  view (#317).
+
 ## 3.50.4 - 2026-10-12
 
 ### Fixed

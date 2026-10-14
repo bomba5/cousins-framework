@@ -105,6 +105,10 @@ A few URL parameters are handy for bookmarks and embedding:
 /?view=chat&cousin=wren&embed=1      chat only, no sidebar or top bar
 ```
 
+The address follows you: picking a view or a cousin rewrites `?view=` and
+`?cousin=` in place (no extra history entries), so a reload or a restored
+phone WebView opens where you were.
+
 ## Overview
 
 The landing page. It opens with one sentence of fleet health: how many

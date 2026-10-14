@@ -436,11 +436,28 @@ function App() {
     return () => document.body.classList.remove("chat-fullscreen", "chat-embed");
   }, [embedMode]);
 
-  // Every page load lands on Overview - no persistence. User navigates from there.
+  // A page load lands on ?view= (else Overview); the effect below keeps
+  // the address in step with what you pick.
   const [view, setView] = useStateApp(initialView);
   const [cousins, setCousins] = useStateApp([]);
   const [loops, setLoops] = useStateApp([]);
   const [activeCousin, setActiveCousin] = useStateApp(initialCousin);
+
+  // The view and the cousin live in the address, replaced in place (no
+  // history entries), so a reload, or a phone app restoring its WebView,
+  // comes back where you were. ?user= and ?embed= stay as given;
+  // ?meeting= only means something on the meetings view.
+  useEffectApp(() => {
+    const p = new URLSearchParams(window.location.search);
+    p.set("view", view);
+    if (activeCousin) p.set("cousin", activeCousin); else p.delete("cousin");
+    if (view !== "meetings") p.delete("meeting");
+    const next = "?" + p.toString();
+    if (next !== window.location.search) {
+      window.history.replaceState(window.history.state, "",
+        window.location.pathname + next + window.location.hash);
+    }
+  }, [view, activeCousin]);
   const [clock, setClock] = useStateApp(() => new Date());
   // Reveal cousins/loops marked hidden=true in cousin.toml. Drives sidebar
   // and CousinsView filters; mirrors the Settings visibility toggle.

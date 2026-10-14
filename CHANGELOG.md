@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.52.1 - 2026-10-14
+
+### Fixed
+
+- **Enter sends from a phone keyboard too.** The console's message box
+  sent on an Enter keydown, but a phone keyboard's Enter reaches the
+  textarea as an input event (keyCode 229), so it inserted a new line
+  instead. The box now shows a send key (`enterKeyHint="send"`) and sends
+  on the line break the keyboard would insert; Shift+Enter on a hardware
+  keyboard still makes a new line (#327).
+
 ## 3.52.0 - 2026-10-14
 
 ### Added

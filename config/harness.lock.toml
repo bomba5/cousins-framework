@@ -12,8 +12,8 @@
 [sdk]
 # the Agent SDK (pip: claude-agent-sdk), and the Claude Code CLI its wheel
 # bundles (claude_agent_sdk._cli_version.__cli_version__)
-claude-agent-sdk = "0.2.163"
-bundled_cli = "2.1.286"
+claude-agent-sdk = "0.2.166"
+bundled_cli = "2.1.299"
 
 [opencode]
 # the opencode release the default image pins (Dockerfile, opencode-fetch)
@@ -23,6 +23,7 @@ version = "1.18.31"
 # the Claude models tested on the locked CLI; DEFAULT_MODELS in
 # cousin_lib/config.py lists the same ids in the same order
 claude = ["claude-opus-5-5", "claude-opus-5", "claude-opus-5[1m]", "claude-fable-5-1",
-          "claude-sonnet-5", "claude-sonnet-5[1m]", "claude-haiku-4-5-20251001"]
+          "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-5[1m]",
+          "claude-haiku-5-5", "claude-haiku-4-5-20251001"]
 # the opencode model the README's quick start runs
 opencode_default = "opencode/big-pickle"

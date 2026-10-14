@@ -3,6 +3,24 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.52.0 - 2026-10-14
+
+### Added
+
+- **Claude Haiku 5.5 and Sonnet 5.5 in the model catalogue**
+  (`claude-haiku-5-5`, `claude-sonnet-5-5`), so the spawn dialog and the
+  console's model picker offer them (#324).
+
+### Changed
+
+- **The harness moves to the Agent SDK 0.2.166, which bundles Claude Code
+  2.1.299.** The CLI 0.2.163 bundled (2.1.286) answered on
+  `claude-haiku-5-5` but flagged it as an unrecognized model, so its token
+  counts and cost were wrong; Haiku 5.5 arrived in 2.1.293. The live
+  matrix passes on the new pair, every catalogue model included. The
+  image's lock was re-resolved with it (mcp 2.3.0, pydantic 2.14.1,
+  starlette 1.8.0 and a few patch releases ride along) (#324).
+
 ## 3.51.0 - 2026-10-14
 
 ### Changed

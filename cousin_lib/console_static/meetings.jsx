@@ -43,8 +43,8 @@ function meetingTurnText(m, now) {
 
 // Deep link: ?view=meetings&meeting=<id> opens that thread on load. The
 // open meeting is written back to ?meeting= (replaceState, like app.jsx
-// does ?view= and ?cousin=), so a reload, or coming back to this view from
-// another, reopens the meeting you had, not the one the link named.
+// does ?view= and ?cousin=), so a reload on this view reopens the meeting
+// you had, not the one the link named.
 function MeetingsView({ cousins, sessionUser, initialMeeting }) {
   const [meetings, setMeetings] = React.useState(null);
   const [selectedId, setSelectedId] = React.useState(() => {

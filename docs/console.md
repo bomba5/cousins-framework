@@ -103,7 +103,12 @@ A few URL parameters are handy for bookmarks and embedding:
 /?view=chat&cousin=wren              open Wren's chat
 /?view=chat&cousin=wren&user=ana     ...as ana's thread
 /?view=chat&cousin=wren&embed=1      chat only, no sidebar or top bar
+/?view=meetings&meeting=12           open meeting 12's thread
 ```
+
+The address follows you: picking a view, a cousin or a meeting rewrites
+`?view=`, `?cousin=` and `?meeting=` in place (no extra history entries),
+so a reload or a restored phone WebView opens where you were.
 
 ## Overview
 

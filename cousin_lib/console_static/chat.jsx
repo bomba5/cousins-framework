@@ -830,9 +830,30 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
     }
   };
 
+  const shiftEnterRef = React.useRef(false);
   const onKey = (e) => {
+    shiftEnterRef.current = e.key === "Enter" && e.shiftKey;
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
+
+  // A phone keyboard's Enter often never reaches onKey as "Enter" (it
+  // arrives as an input event, keyCode 229): catch the line break it
+  // would insert and send instead. Shift+Enter on a hardware keyboard
+  // still makes a new line.
+  const sendRef = React.useRef(send);
+  sendRef.current = send;
+  React.useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const onBeforeInput = (e) => {
+      if (e.inputType !== "insertLineBreak" && e.inputType !== "insertParagraph") return;
+      if (shiftEnterRef.current) { shiftEnterRef.current = false; return; }
+      e.preventDefault();
+      sendRef.current();
+    };
+    el.addEventListener("beforeinput", onBeforeInput);
+    return () => el.removeEventListener("beforeinput", onBeforeInput);
+  }, []);
 
   const noUser = !chatUser;
   const showSecondaryBar = searchActive || !loaded || !!error || noUser;
@@ -977,6 +998,7 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
           onChange={e => setDraft(e.target.value)}
           onKeyDown={onKey}
           onPaste={onPaste}
+          enterKeyHint="send"
           placeholder={noUser ? "composer disabled: no chat user" : `message @${c.slug}...${dragOver ? " (drop image to attach)" : ""}`}
           disabled={sending || noUser}
           rows={1}

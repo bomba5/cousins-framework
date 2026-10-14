@@ -123,7 +123,10 @@ class TestRollover(OpencodeCase):
             out = r.rollover("contract")
         self.assertTrue(out["ok"], out)
         self.assertEqual(r._system, before)
-        done = [p for p in self.payloads(r, "rollover") if p.get("phase") == "done"]
+        # the done event can land after rollover() returns: wait for it
+        done = lambda: [p for p in self.payloads(r, "rollover") if p.get("phase") == "done"]
+        self.assertTrue(_wait(lambda: len(done()) == 1))
+        done = done()
         self.assertIn("system prompt not recomposed: OSError: portrait unreadable",
                       done[0]["problems"])
 

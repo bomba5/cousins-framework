@@ -14,7 +14,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 ### Changed
 
 - **The harness moves to the Agent SDK 0.2.166, which bundles Claude Code
-  2.1.299.** The CLI 0.2.163 bundled (2.1.286) answered on
+  2.1.299.** The CLI that 0.2.163 bundled (2.1.286) answered on
   `claude-haiku-5-5` but flagged it as an unrecognized model, so its token
   counts and cost were wrong; Haiku 5.5 arrived in 2.1.293. The live
   matrix passes on the new pair, every catalogue model included. The

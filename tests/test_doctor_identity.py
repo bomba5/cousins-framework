@@ -249,7 +249,9 @@ class TestLane(_Case):
         text = ("# Wren - helper\n\n## Talking to people\n\nReply with cousin-reply --user Ana.\n\n"
                 "## Identity\n\nI keep notes.\n\n%s\n" % template_sync.MARKER)
         self.cousin("wren", claude=text)
-        self.assertEqual(self.items(), [])
+        # the section is not read for the lane; that it never reaches the
+        # prompt is the one thing said about it
+        self.assertEqual(self.rules(), [("dropped", 3)])
 
     def test_a_template_paragraph_below_the_marker_is_not_read(self):
         home = self.cousin("wren", claude="")
@@ -465,3 +467,27 @@ class TestMain(_Case):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ------------------------------------------------------------- dropped
+
+class TestDropped(_Case):
+    def above(self, *sections):
+        """A CLAUDE.md with `sections` above the marker."""
+        return "# Wren - helper\n\n%s\n\n%s\n" % ("\n\n".join(sections), template_sync.MARKER)
+
+    def test_a_section_the_template_lacks_above_the_marker_is_reported(self):
+        self.cousin("wren", claude=self.above("## Identity\n\nFront door.",
+                                              "## Routing\n\nHealth questions go to the doctor."))
+        [item] = self.items()
+        self.assertEqual((item["rule"], item["line"]), ("dropped", 7))
+        self.assertEqual(item["match"], "## Routing")
+        self.assertIn("never reaches the system prompt", item["fact"])
+
+    def test_template_sections_kept_sections_subsections_and_below_are_not(self):
+        self.cousin("wren", claude=(
+            "# Wren - helper\n\n## Identity\n\nFront door.\n\n### Routing\n\nHealth.\n\n"
+            "## Hard rules\n\nOld template text.\n\n## Session bookends\n\nAn older"
+            " template's.\n\n<!--\n## Commented\n-->\n\n%s\n\n"
+            "## Mine\n\nBelow the marker.\n" % template_sync.MARKER))
+        self.assertEqual(self.rules(), [])

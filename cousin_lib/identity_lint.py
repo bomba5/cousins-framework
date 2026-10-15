@@ -40,6 +40,11 @@ The rules, each with its source of truth:
   that takes delivery.
 - tool: an `mcp__cousin__<name>` the cousin's registry does not serve
   (runner.tools.tool_definitions).
+- dropped: a `## ` section in CLAUDE.md above the template marker that
+  the template (now or in an earlier release, FORMER_HEADINGS) does not
+  have. runner.prompt keeps only ## Identity
+  and ## Voice there, so the section never reaches the system prompt
+  (the template's own sections are framework text, left out on purpose).
 
 Precision over recall: a line whose clause negates or dates the phrase
 (not, never, no longer, used to, was, replied, logged ...), names a
@@ -66,7 +71,7 @@ from cousin_lib.runner import contract, prompt
 # "Tools, not the terminal CLIs" applies (the fake runner runs none).
 MODEL_LANES = tuple(k for k in delivery.RUNNER_KINDS if k != "fake")
 
-RULES = ("lane", "billing", "peer", "tool")
+RULES = ("lane", "billing", "peer", "tool", "dropped")
 
 # What an account kind is billed as. claude-token is a subscription's
 # OAuth token; the opencode lane never carries subscription traffic
@@ -608,13 +613,67 @@ def tool_findings(facts, path, numbered):
 
 # ------------------------------------------------------------ the check
 
+# Sections earlier releases of the CLAUDE.md template shipped: framework
+# text in a home spawned from one, not an authored section.
+FORMER_HEADINGS = frozenset((
+    "## Chat handling - IN-CHARACTER vs OUT-OF-CHARACTER",
+    "## Meetings",
+    "## Memory",
+    "## Session bookends",
+    "## Tools: MCP first, CLIs as the fallback",
+))
+
+
+def _template_headings(root, home):
+    """The `## ` heading lines of the rendered CLAUDE.md template and of
+    its earlier releases; None when there is no template to read
+    (nothing is then reported)."""
+    try:
+        text = template_sync._render(template_sync._template_text(root),
+                                     template_sync._values(home))
+    except Exception:  # noqa: BLE001 - a missing template reports nothing
+        return None
+    return FORMER_HEADINGS | {line.strip() for line in text.splitlines()
+                              if line.startswith("## ")}
+
+
+def dropped_findings(facts, path):
+    """A `## ` section above the template marker that the template does
+    not have: the runner prompt keeps only ## Identity and ## Voice there
+    (runner/prompt.py), so what it holds never reaches the system prompt.
+    A spawn's role paragraph or voice guide with headings of its own was
+    the way in (spawn.nest_headings now makes them ###)."""
+    if path.name != "CLAUDE.md":
+        return []
+    known = _template_headings(facts.root, facts.home)
+    text = _read(path)
+    if known is None or text is None:
+        return []
+    out = []
+    for lineno, line in enumerate(_blank_comments(text).split("\n"), 1):
+        if template_sync.MARKER in line:
+            break
+        title = line.strip()
+        if line.startswith("## ") and title not in known \
+                and title not in prompt._KEEP_HEADINGS:
+            out.append(_finding(
+                facts, path, lineno, line, (0, len(line)), "dropped",
+                "the runner prompt keeps only the title line, ## Identity,"
+                " ## Voice and what is below the template marker"
+                " (runner/prompt.py): this section never reaches the system"
+                " prompt",
+                "make it a ### subsection of ## Identity or ## Voice, or move"
+                " it below the marker"))
+    return out
+
+
 def lint_home(facts, others, fw):
     """Every finding for one cousin, in file and line order."""
     out = []
     for path, numbered in identity_files(facts.home, facts.root):
         found = (lane_findings(facts, path, numbered) + billing_findings(facts, path, numbered)
                  + peer_findings(facts, path, numbered, others, fw)
-                 + tool_findings(facts, path, numbered))
+                 + tool_findings(facts, path, numbered) + dropped_findings(facts, path))
         out += sorted(found, key=lambda f: (f["line"], RULES.index(f["rule"])))
     return out
 

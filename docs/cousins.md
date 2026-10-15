@@ -133,6 +133,10 @@ Nothing else writes one. Spawn fills in five placeholders:
 | `{{ROLE_PARAGRAPH}}` | `--role-paragraph`, else the role |
 | `{{VOICE_GUIDE}}` | `--voice` (the `## Voice` section) |
 
+A `#` or `##` heading in the role paragraph or the voice guide becomes
+`###`: it stays a subsection of `## Identity` or `## Voice`, the only
+sections above the template marker the runner prompt keeps.
+
 HTML comments in the template are notes for whoever edits the template and
 are stripped. If any `{{` is left after rendering, spawn fails before writing
 anything. That's why `--voice` is required: a cousin with an empty voice

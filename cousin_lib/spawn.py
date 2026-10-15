@@ -213,6 +213,19 @@ def _check_opencode_binary():
         raise SpawnError(opencode_http.missing_binary(argv0))
 
 
+_TOP_HEADING = re.compile(r"^#{1,2}(?=[ \t])", re.M)
+
+
+def nest_headings(text):
+    """`text` with its `#` and `##` headings made `###`. The role paragraph
+    and the voice guide land inside the template's ## Identity and
+    ## Voice; a `##` of their own would start a section of its own, and
+    the runner prompt keeps only those two sections above the template
+    marker (runner/prompt.py), so the text under it would never reach the
+    system prompt."""
+    return _TOP_HEADING.sub("###", text)
+
+
 def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
                   voice=None, port=None, template_path=None, operator=None,
                   model=None, effort=None, heartbeat=None, memory_scope=None,
@@ -277,10 +290,10 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
         "NAME": name,
         "SLUG": slug,
         "ROLE_ONE_LINE": role,
-        "ROLE_PARAGRAPH": role_paragraph or role,
+        "ROLE_PARAGRAPH": nest_headings(role_paragraph or role),
     }
     if voice is not None:
-        values["VOICE_GUIDE"] = voice
+        values["VOICE_GUIDE"] = nest_headings(voice)
     try:
         claude_md = render_template(template_text, values)
     except TemplateError as err:

@@ -615,13 +615,7 @@ def tool_findings(facts, path, numbered):
 
 # Sections earlier releases of the CLAUDE.md template shipped: framework
 # text in a home spawned from one, not an authored section.
-FORMER_HEADINGS = frozenset((
-    "## Chat handling - IN-CHARACTER vs OUT-OF-CHARACTER",
-    "## Meetings",
-    "## Memory",
-    "## Session bookends",
-    "## Tools: MCP first, CLIs as the fallback",
-))
+FORMER_HEADINGS = frozenset("## " + t for t in template_sync.RETIRED_SECTIONS)
 
 
 def _template_headings(root, home):

@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.52.3 - 2026-10-15
+
+### Fixed
+
+- **`cousin-upgrade --switch --deps` installs the extras' pins too.** It
+  ran `pip install -e <checkout>` without the extras, so a pin moved in
+  the `sdk` extra (the Agent SDK) was never installed, and the check
+  still passed. It now installs `-e <checkout>[<extras>]` with the
+  extras the venv has, and the check fails, before any restart, when an
+  exact pin of the dependencies or of those extras is not the installed
+  version (#325).
+
 ## 3.52.2 - 2026-10-14
 
 ### Fixed

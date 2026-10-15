@@ -573,6 +573,9 @@ class _FakeOps:
         self.pip_rc = 0
         self.probe_checkout = str(checkout)
         self.probe_version = None           # else the version at head
+        self.extras = []                    # the extras the venv has
+        self.unmet = []                     # pins the probe finds missed
+        self.pip_extras = None
         self.children = {"loops": {"state": "running", "pid": 101},
                          "console": {"state": "running", "pid": 102},
                          "runner:toki": {"state": "running", "pid": 103},
@@ -598,14 +601,16 @@ class _FakeOps:
             return 0, self.head_sha + "\n", ""
         return 0, "", ""
 
-    def pip_install(self, deps):
+    def pip_install(self, deps, extras=()):
         self.calls.append(("pip", deps))
+        self.pip_extras = tuple(extras)
         return self.pip_rc, "pip said no" if self.pip_rc else ""
 
     def probe(self):
         self.calls.append(("probe",))
         return {"version": self.probe_version or self.versions[self.head_sha],
-                "checkout": self.probe_checkout, "commit": self.head_sha[:7]}
+                "checkout": self.probe_checkout, "commit": self.head_sha[:7],
+                "extras": list(self.extras), "unmet": list(self.unmet)}
 
     def supervisor(self, op, timeout=10.0, **args):
         from cousin_lib.supervisor import SupervisorUnavailable
@@ -703,6 +708,42 @@ class _Switch(_Install):
         return [(r["name"], r["status"]) for r in result["restarts"]]
 
 
+class TestProbe(unittest.TestCase):
+    """PROBE, run against a stand-in cousin_lib.version whose checkout
+    has a pyproject of its own."""
+
+    def probe(self, project):
+        import sys
+        import types
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / "pyproject.toml").write_text(project)
+            fake = types.ModuleType("cousin_lib.version")
+            fake.CHECKOUT = pathlib.Path(tmp)
+            fake.read_version = lambda: "9.9.9"
+            fake.git_commit = lambda: "abc1234"
+            out = io.StringIO()
+            with mock.patch.dict(sys.modules, {"cousin_lib.version": fake}), \
+                    mock.patch("cousin_lib.version", fake, create=True), \
+                    contextlib.redirect_stdout(out):
+                exec(upgrade_switch.PROBE, {})
+        return json.loads(out.getvalue())
+
+    def test_installed_extras_and_unmet_pins(self):
+        found = self.probe(
+            '[project]\nname = "x"\n'
+            'dependencies = ["pip==0.0.1", "tomli-not-here>=1"]\n'
+            '[project.optional-dependencies]\n'
+            'have = ["pip"]\nmissing = ["no-such-dist-for-the-probe==1.0"]\n')
+        self.assertEqual(found["version"], "9.9.9")
+        self.assertEqual(found["extras"], ["have"])
+        self.assertEqual(len(found["unmet"]), 1)
+        self.assertRegex(found["unmet"][0], r"^pip==0\.0\.1 \(installed: ")
+
+    def test_no_pyproject_says_nothing_is_missing(self):
+        found = self.probe("not toml [")
+        self.assertEqual((found["extras"], found["unmet"]), ([], []))
+
+
 class TestSwitchPlan(_Switch):
 
     def test_the_dry_run_shows_the_switch_the_order_and_the_rollback(self):
@@ -779,6 +820,25 @@ class TestSwitch(_Switch):
             ("runner:wren", "detached")])
         self.assertIn("runs 3.11.0", result["restarts"][0]["detail"])
         self.assertIn("the branch work stays at", result["steps"][0]["detail"])
+
+    def test_deps_installs_with_the_extras_the_venv_has(self):
+        self.ops.extras = ["mcp", "sdk"]
+        result = self.switch()
+        self.assertEqual(result["outcome"], "done", result)
+        self.assertEqual(self.ops.pip_extras, ("mcp", "sdk"))
+        self.assertIn("-e %s[mcp,sdk]" % self.repo,
+                      result["steps"][1]["detail"])
+        self.assertIn("[mcp,sdk]", " ".join(result["rollback"]["by_hand"]))
+
+    def test_a_pin_pip_left_unmet_fails_the_check(self):
+        self.ops.extras = ["sdk"]
+        self.ops.unmet = ["claude-agent-sdk==0.2.166 (installed: 0.2.163)"]
+        result = self.switch()
+        self.assertEqual(result["outcome"], "failed")
+        self.assertEqual(result["steps"][-1]["step"], "check")
+        self.assertIn("claude-agent-sdk==0.2.166 (installed: 0.2.163)",
+                      result["steps"][-1]["detail"])
+        self.assertEqual(self.ops.restarts(), [])
 
     def test_the_callers_runner_restarts_detached_with_its_environment(self):
         self.switch()

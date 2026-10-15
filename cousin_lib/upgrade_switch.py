@@ -12,9 +12,12 @@ The switch, once the plan is computed (upgrade.build_plan, after a
 3. `git checkout --detach <TO commit>` in that checkout. A branch HEAD
    was on is left where it was, so FROM stays one checkout away.
 4. `<python> -m pip install --no-deps -e <checkout>` (with --deps, pip
-   also installs the dependencies) into the venv this command runs in.
+   also installs the dependencies, and `-e <checkout>[<extras>]` names
+   the extras the venv has, so an extra's moved pin is installed too)
+   into the venv this command runs in.
 5. A fresh interpreter of that venv must import cousin_lib at TO's
-   version from the checkout.
+   version from the checkout; with --deps, every exact (==) pin of the
+   dependencies and of those extras must be the installed version.
 6. The restarts, unless --no-restart (restart_all).
 
 The restarts, in the plan's order (loops, console, each runner, the
@@ -71,9 +74,37 @@ UNIT_PREFIX = "cousin-upgrade-restart-"
 RESTART_PROTOCOL = 1
 # What a fresh interpreter imports: run from / so the working directory
 # (a checkout, perhaps) is not what `import cousin_lib` finds.
-PROBE = ("import json; from cousin_lib import version as v; print(json.dumps("
-         "{'version': v.read_version(), 'checkout': str(v.CHECKOUT),"
-         " 'commit': v.git_commit()}))")
+# It also says which of the checkout's extras this venv has (every
+# requirement of the extra installed) and which exact (==) pins of the
+# dependencies and of those extras the installed versions miss: stdlib
+# only, so it reads the same under any release's cousin_lib.
+PROBE = """\
+import json, re, tomllib, importlib.metadata as md
+from cousin_lib import version as v
+def installed(req):
+    name = re.split(r"[\\s<>=!~;\\[(]", req.strip(), maxsplit=1)[0]
+    try:
+        return name, md.version(name)
+    except md.PackageNotFoundError:
+        return name, None
+try:
+    project = tomllib.loads((v.CHECKOUT / "pyproject.toml").read_text())["project"]
+except (OSError, KeyError, ValueError):
+    project = {}
+optional = project.get("optional-dependencies") or {}
+extras = sorted(e for e, reqs in optional.items()
+                if reqs and all(installed(r)[1] for r in reqs))
+unmet = []
+for req in (project.get("dependencies") or []) + [
+        r for e in extras for r in optional[e]]:
+    pin = re.search(r"==\\s*([^\\s,;]+)", req)
+    name, have = installed(req)
+    if pin and have != pin.group(1):
+        unmet.append("%s==%s (installed: %s)" % (name, pin.group(1), have))
+print(json.dumps({"version": v.read_version(), "checkout": str(v.CHECKOUT),
+                  "commit": v.git_commit(), "extras": extras,
+                  "unmet": unmet}))
+"""
 # The outcomes a row can have; the last three leave something for a person.
 DONE = ("done", "already", "skipped", "detached")
 LEFT = ("pending", "by hand", "not reached")
@@ -105,10 +136,11 @@ class Ops:
             return 1, "", str(err)
         return r.returncode, r.stdout, r.stderr
 
-    def pip_install(self, deps):
+    def pip_install(self, deps, extras=()):
         """(returncode, the output's last lines) of pip_argv."""
         try:
-            r = subprocess.run(pip_argv(self.python, self.checkout, deps),
+            r = subprocess.run(pip_argv(self.python, self.checkout, deps,
+                                        extras),
                                capture_output=True, text=True, timeout=1800,
                                check=False, cwd="/")
         except (OSError, subprocess.SubprocessError) as err:
@@ -206,9 +238,15 @@ class Ops:
         return time.time()
 
 
-def pip_argv(python, checkout, deps):
+def pip_argv(python, checkout, deps, extras=()):
+    """pip install -e of the checkout; with --deps, with the extras the
+    venv has, so their pins move too (an extra left out keeps its old
+    version)."""
+    target = str(checkout)
+    if deps and extras:
+        target += "[%s]" % ",".join(extras)
     return [str(python), "-m", "pip", "install", "--quiet"] \
-        + ([] if deps else ["--no-deps"]) + ["-e", str(checkout)]
+        + ([] if deps else ["--no-deps"]) + ["-e", target]
 
 
 # ------------------------------------------------------------ the record
@@ -225,7 +263,7 @@ def write_state(root, state):
     upgrade._write(Path(root) / STATE, json.dumps(state, indent=2) + "\n")
 
 
-def rollback(plan, python, deps=False):
+def rollback(plan, python, deps=False, extras=()):
     """How to put FROM back: {"command", "by_hand": [lines]}."""
     f, checkout = plan["from"], plan["checkout"]
     sha = f.get("sha") or f["commit"]
@@ -234,7 +272,7 @@ def rollback(plan, python, deps=False):
     return {"command": "cousin-upgrade --switch --to %s%s --yes"
                        % (sha[:12], " --deps" if plan["dependencies"] else ""),
             "by_hand": ["git -C %s %s" % (checkout, to_from),
-                        " ".join(pip_argv(python, checkout, deps)),
+                        " ".join(pip_argv(python, checkout, deps, extras)),
                         "cousin-upgrade --restart --yes (or: systemctl"
                         " --user restart cousin-supervisor.service)"]}
 
@@ -517,12 +555,18 @@ def run_switch(plan, ops, *, deps=False, restart=True,
     "done" | "left" | "failed"}. Every step is recorded in
     data/upgrade.json as it goes."""
     t, f = plan["to"], plan["from"]
+    extras = []
+    if deps:
+        try:
+            extras = list(ops.probe().get("extras") or [])
+        except SwitchError:
+            pass
     state = {"from": {"version": f["version"], "ref": f["ref"],
                       "sha": f.get("sha"), "branch": f.get("branch")},
              "to": {"version": t["version"], "ref": t["ref"], "sha": t["sha"]},
              "checkout": plan["checkout"], "at": int(ops.wall()),
              "stage": "switching", "restarts": {},
-             "rollback": rollback(plan, ops.python, deps)}
+             "rollback": rollback(plan, ops.python, deps, extras)}
     previous = read_state(ops.root)
     if previous.get("to", {}).get("sha") == t["sha"]:
         # the same switch again: what it did stands (a runner it stopped
@@ -568,11 +612,12 @@ def run_switch(plan, ops, *, deps=False, restart=True,
             t["ref"], t["commit"], "; the branch %s stays at %s"
             % (f["branch"], (f.get("sha") or "")[:12]) if f.get("branch")
             else ""))
-    rc, out = ops.pip_install(deps)
+    rc, out = ops.pip_install(deps, extras)
     if rc != 0:
         step("install", "failed", "pip: %s" % (out or "exit %d" % rc))
         return result
-    step("install", "done", " ".join(pip_argv(ops.python, ops.checkout, deps)))
+    step("install", "done", " ".join(pip_argv(ops.python, ops.checkout, deps,
+                                              extras)))
     try:
         found = ops.probe()
     except SwitchError as err:
@@ -582,6 +627,10 @@ def run_switch(plan, ops, *, deps=False, restart=True,
     bad = mismatch(found, expect)
     if bad:
         step("check", "failed", "a fresh %s imports %s" % (ops.python, bad))
+        return result
+    if deps and found.get("unmet"):
+        step("check", "failed", "pip left pins unmet: %s"
+             % "; ".join(found["unmet"]))
         return result
     step("check", "done", "a fresh interpreter imports %s from %s"
          % (found["version"], found["checkout"]))
@@ -662,7 +711,8 @@ def render_switch_plan(plan, *, deps=False, fetched=None, restart=True):
             refused = "  [refused now: tracked changes]"
         say("  1. git checkout --detach %s (%s)%s" % (t["ref"], t["commit"],
                                                       refused))
-    pip = " ".join(pip_argv(sw["python"], plan["checkout"], deps))
+    pip = " ".join(pip_argv(sw["python"], plan["checkout"], deps,
+                            ["<the extras installed now>"]))
     refused = "  [refused now: dependencies changed, --deps installs them]" \
         if plan["dependencies"] and not deps and not at_target(plan) else ""
     say("  2. %s%s" % (pip, refused))

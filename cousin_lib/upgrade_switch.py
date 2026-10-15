@@ -77,7 +77,13 @@ RESTART_PROTOCOL = 1
 # It also says which of the checkout's extras this venv has (every
 # requirement of the extra installed) and which exact (==) pins of the
 # dependencies and of those extras the installed versions miss: stdlib
-# only, so it reads the same under any release's cousin_lib.
+# only, so it reads the same under any release's cousin_lib. A pin is a
+# string compare (`==1.0` against an installed 1.0.0 counts as unmet), and
+# not read: environment markers (a requirement under a marker that does
+# not apply counts as missing) and wildcard or `===` pins; the pyproject
+# uses none of these. After the install the extras are those of the target
+# pyproject, so a new extra whose requirements happen to be installed has
+# its pins checked too.
 PROBE = """\
 import json, re, tomllib, importlib.metadata as md
 from cousin_lib import version as v
@@ -711,8 +717,9 @@ def render_switch_plan(plan, *, deps=False, fetched=None, restart=True):
             refused = "  [refused now: tracked changes]"
         say("  1. git checkout --detach %s (%s)%s" % (t["ref"], t["commit"],
                                                       refused))
-    pip = " ".join(pip_argv(sw["python"], plan["checkout"], deps,
-                            ["<the extras installed now>"]))
+    # not probed for a plan: the extras the venv has are named at the switch
+    extras = ["<the extras the venv has, if any>"]
+    pip = " ".join(pip_argv(sw["python"], plan["checkout"], deps, extras))
     refused = "  [refused now: dependencies changed, --deps installs them]" \
         if plan["dependencies"] and not deps and not at_target(plan) else ""
     say("  2. %s%s" % (pip, refused))
@@ -720,7 +727,7 @@ def render_switch_plan(plan, *, deps=False, fetched=None, restart=True):
         % (sw["python"], t["version"], plan["checkout"]))
     say("  4. %s" % ("the restarts below, in order" if restart
                      else "no restarts (--no-restart)"))
-    rb = rollback(plan, sw["python"], deps)
+    rb = rollback(plan, sw["python"], deps, extras)
     say("rollback: %s" % rb["command"])
     say("  by hand: %s" % "; ".join(rb["by_hand"][:2]))
     if f.get("branch"):

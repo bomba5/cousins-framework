@@ -995,12 +995,15 @@ python does not import `cousin_lib` from the checkout being upgraded. Then:
    moved.
 3. `<python> -m pip install --no-deps -e <checkout>` with the python of the
    venv the command runs in. `--deps` lets pip install the dependencies too,
-   as `-e <checkout>[<extras>]` with the extras the venv already has (`mcp`,
-   `sdk`), so a pin moved in an extra is installed as well.
+   as `-e <checkout>[<extras>]` with the extras the venv already has (of
+   `mcp` and `sdk`; an extra counts as had when every requirement it names
+   is installed, at any version), so a pin moved in an extra is installed as
+   well.
 4. A fresh interpreter of that venv must import `cousin_lib` at the target
    version from the checkout. With `--deps`, every exact (`==`) pin of the
-   dependencies and of those extras must match the installed version, or
-   the switch stops here, before any restart.
+   dependencies and of those extras must match the installed version. Else
+   the switch stops here, before any restart, with the checkout already on
+   the target: the report says what failed and prints the rollback.
 5. The restarts, in order (`--no-restart` stops after step 4): the loops
    daemon, the console, each runner, each through the supervisor (`stop`, then
    `start`; a runner's Telegram bridge stops and starts with it). Each one

@@ -431,6 +431,36 @@ class ChatMediaViewer(unittest.TestCase):
             self.assertRegex(self.media, r"%s: \[[^\]]*%s" % (kind, ext))
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_poll_keeps_the_rows_older_than_its_window(self):
+        # #315: loadMore prepends older rows; the next poll answered only
+        # the newest window and replaced them.
+        probe = _function_body(self.chat, "mergePolled") + """
+const older = [{id: 1}, {id: 2}];
+const win = [{id: 3, t: "old"}, {id: 4}];
+const cases = [
+  mergePolled([...older, ...win], [{id: 3, t: "new"}, {id: 4}, {id: 5}]),
+  mergePolled([...older, ...win], [{id: 4}, {id: 5}]),
+  mergePolled(win, [{id: 3}, {id: 4}]),
+  mergePolled([...older, ...win], []),
+].map(rows => rows.map(r => r.t ? r.id + r.t : r.id));
+process.stdout.write(JSON.stringify(cases));
+"""
+        out = subprocess.run(["node", "-e", probe], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout), [
+            [1, 2, "3new", 4, 5],      # the window's rows are the poll's
+            [1, 2, "3old", 4, 5],      # a row pushed out of the window stays
+            [3, 4],
+            [],                        # an empty answer is the poll's word
+        ])
+
+    def test_the_first_pull_replaces_and_later_polls_merge(self):
+        body = _function_body(self.chat, "ChatBody")
+        self.assertIn("if (searchActive || fresh) setMessages(list);", body)
+        self.assertIn("else setMessages(prev => mergePolled(prev, list));", body)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_kind_detection_behaves(self):
         # The pure helpers run under node, lifted out of the file as is.
         src = self.media[self.media.index("const _MEDIA_EXT"):

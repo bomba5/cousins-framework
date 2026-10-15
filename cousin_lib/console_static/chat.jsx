@@ -549,6 +549,17 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
   );
 }
 
+function mergePolled(prev, list) {
+  // A live poll's newest rows over what the pane holds: the rows older
+  // than the poll's window (paged in by loadMore, or pushed out of the
+  // window by new ones) stay in front, so a thread longer than the window
+  // does not lose them every poll (#315).
+  const first = list.length ? list[0].id : null;
+  if (first == null) return list;
+  const older = prev.filter(m => m.id != null && m.id < first);
+  return older.length ? [...older, ...list] : list;
+}
+
 function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShown }) {
   const c = cousin;
   const [messages, setMessages] = React.useState([]);
@@ -599,6 +610,9 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
     if (!c) return;
     if (!chatUser) { setLoaded(true); return; }
     let cancelled = false;
+    // The first pull for this chat (cousin, user, archive view or search)
+    // replaces what the pane held; the polls after it merge.
+    let fresh = true;
     async function pull() {
       try {
         const url = searchActive
@@ -612,7 +626,9 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
         // Both routes answer { messages: [...] }; search is newest-first,
         // so reverse it into chat order.
         const list = searchActive ? (d.messages || []).slice().reverse() : (d.messages || []);
-        setMessages(list);
+        if (searchActive || fresh) setMessages(list);
+        else setMessages(prev => mergePolled(prev, list));
+        fresh = false;
         setTotalCount(typeof d.total === "number" ? d.total : list.length);
         setLoaded(true);
       } catch (e) {

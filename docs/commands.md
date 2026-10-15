@@ -807,7 +807,7 @@ cousin-doctor
   `CLAUDE.md` (the title line, the Identity and Voice sections and everything
   below the template marker, less any paragraph that is the template's word for
   word: the part the runner puts in the system prompt), `self-portrait.md`, and
-  the live open-loops section of `STATUS.md`. Four rules:
+  the live open-loops section of `STATUS.md`. Five rules:
   - `lane`: on a runner lane (`[agent] runner` is sdk, opencode or tmux), a
     `cousin-*` command that a served tool replaces: `cousin-reply` is the
     `reply` tool, and the rest come from the cousin's MCP registry (each
@@ -823,12 +823,18 @@ cousin-doctor
     registered cousin whose registry serves `send`, when both are peer-visible
     and this cousin takes delivery on a runner lane.
   - `tool`: an `mcp__cousin__<name>` the cousin's registry does not serve.
+  - `dropped`: a `## ` section in `CLAUDE.md` above the template marker that
+    the template (now or in an earlier release) does not have. The runner
+    prompt keeps only `## Identity` and `## Voice` there, so the section
+    never reaches the system prompt; the fix is to make it a `###`
+    subsection of one of them, or to move it below the marker.
 
-  A line is not reported when the phrase is negated or dated in its sentence
-  (not, never, no longer, used to, was, replied, logged), names a fallback or
-  a condition, or claims both ways. A `lane` line about a command's syntax
-  (its `--help`, arguments, flags, usage, a CLI's shape) is not reported
-  either; "verify" or "shape" in their ordinary sense do not make a line one.
+  A `lane`, `billing`, `peer` or `tool` line is not reported when the phrase
+  is negated or dated in its sentence (not, never, no longer, used to, was,
+  replied, logged), names a fallback or a condition, or claims both ways. A
+  `lane` line about a command's syntax (its `--help`, arguments, flags,
+  usage, a CLI's shape) is not reported either; "verify" or "shape" in their
+  ordinary sense do not make a line one.
   A line that names two commands to state a distinction (only, vs, not, but
   ...) or says what "reaches you via" a command is reported with a fix that
   keeps the distinction: "rewrite the distinction in tool terms:
@@ -839,12 +845,6 @@ cousin-doctor
   `mcp__cousin__reply` tool; peers: the `mcp__cousin__send` tool". A fact
   that cannot be read (an unknown account, a registry that does not parse)
   skips its rule with a note.
-
-  `dropped`: a `## ` section in `CLAUDE.md` above the template marker that
-  the template (now or in an earlier release) does not have. The runner
-  prompt keeps only `## Identity` and `## Voice` there, so the section never
-  reaches the system prompt; the fix is to make it a `###` subsection of
-  one of them, or to move it below the marker.
 
   A long line is shown cut to 200 characters around the matched phrase, with
   `...` on each side cut; `--json` gives the phrase itself as `match`. The

@@ -840,6 +840,12 @@ cousin-doctor
   that cannot be read (an unknown account, a registry that does not parse)
   skips its rule with a note.
 
+  `dropped`: a `## ` section in `CLAUDE.md` above the template marker that
+  the template (now or in an earlier release) does not have. The runner
+  prompt keeps only `## Identity` and `## Voice` there, so the section never
+  reaches the system prompt; the fix is to make it a `###` subsection of
+  one of them, or to move it below the marker.
+
   A long line is shown cut to 200 characters around the matched phrase, with
   `...` on each side cut; `--json` gives the phrase itself as `match`. The
   summary counts findings per rule; when one claim is repeated (the same rule

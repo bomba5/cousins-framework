@@ -76,6 +76,30 @@ class TestCreateCousin(CreateCase):
         self.assertIn("## Open loops", status)
         self.assertTrue((home / "MEMORY.md").is_file())
 
+    def test_role_paragraph_headings_stay_inside_identity(self):
+        # #326: a role paragraph's own ## heading started a section the
+        # runner prompt drops; spawn nests it under ## Identity.
+        from cousin_lib.runner import prompt
+        root = self._framework_root()
+        self._create(root, role_paragraph="Front door.\n\n## Routing\n\n"
+                     "Health questions go to the doctor.\n\n# Phone\n\nShort lines.",
+                     voice="## Register\n\nWarm.")
+        home = root / "cousins" / "wren"
+        claude_md = (home / "CLAUDE.md").read_text()
+        self.assertIn("### Routing", claude_md)
+        self.assertIn("### Phone", claude_md)
+        self.assertIn("### Register", claude_md)
+        self.assertNotIn("\n## Routing", claude_md)
+        text, _degraded = prompt.authored_identity(home, root=root)
+        for kept in ("Health questions go to the doctor.", "Short lines.", "Warm."):
+            self.assertIn(kept, text)
+
+    def test_nest_headings_leaves_deeper_headings_and_hashes_alone(self):
+        from cousin_lib.spawn import nest_headings
+        self.assertEqual(nest_headings("### Deep\n#### Deeper\n#tag and ## inline"),
+                         "### Deep\n#### Deeper\n#tag and ## inline")
+        self.assertEqual(nest_headings("# One\n## Two"), "### One\n### Two")
+
     def test_bad_slug_is_rejected_before_anything_is_written(self):
         root = self._framework_root()
         for slug in ("Wren", "1wren", "w" * 40, "wr en", ""):

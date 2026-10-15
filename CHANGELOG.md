@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.52.4 - 2026-10-15
+
+### Fixed
+
+- **A role paragraph's own headings reach the prompt.** A `##` heading in
+  a spawn's role paragraph or voice guide started a section of its own,
+  and the runner prompt keeps only `## Identity` and `## Voice` above the
+  template marker, so the text under it was silently left out. Spawn now
+  makes those headings `###`, and `cousin-doctor identity` has a `dropped`
+  rule for such a section already on disk (#326).
+
 ## 3.52.3 - 2026-10-15
 
 ### Fixed

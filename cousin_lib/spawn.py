@@ -222,8 +222,14 @@ def nest_headings(text):
     ## Voice; a `##` of their own would start a section of its own, and
     the runner prompt keeps only those two sections above the template
     marker (runner/prompt.py), so the text under it would never reach the
-    system prompt."""
-    return _TOP_HEADING.sub("###", text)
+    system prompt. A line inside a ``` fence (a shell comment, say) is
+    left as it is."""
+    out, fenced = [], False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        out.append(line if fenced else _TOP_HEADING.sub("###", line))
+    return "\n".join(out)
 
 
 def create_cousin(root, *, slug, role, name=None, role_paragraph=None,

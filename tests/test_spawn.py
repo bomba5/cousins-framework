@@ -99,6 +99,8 @@ class TestCreateCousin(CreateCase):
         self.assertEqual(nest_headings("### Deep\n#### Deeper\n#tag and ## inline"),
                          "### Deep\n#### Deeper\n#tag and ## inline")
         self.assertEqual(nest_headings("# One\n## Two"), "### One\n### Two")
+        self.assertEqual(nest_headings("## Run\n```sh\n# a comment\n```\n# After"),
+                         "### Run\n```sh\n# a comment\n```\n### After")
 
     def test_bad_slug_is_rejected_before_anything_is_written(self):
         root = self._framework_root()

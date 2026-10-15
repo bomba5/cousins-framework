@@ -42,9 +42,9 @@ The rules, each with its source of truth:
   (runner.tools.tool_definitions).
 - dropped: a `## ` section in CLAUDE.md above the template marker that
   the template (now or in an earlier release, FORMER_HEADINGS) does not
-  have. runner.prompt keeps only ## Identity
-  and ## Voice there, so the section never reaches the system prompt
-  (the template's own sections are framework text, left out on purpose).
+  have. runner.prompt keeps only ## Identity and ## Voice there, so the
+  section never reaches the system prompt (the template's own sections
+  are framework text, left out on purpose).
 
 Precision over recall: a line whose clause negates or dates the phrase
 (not, never, no longer, used to, was, replied, logged ...), names a

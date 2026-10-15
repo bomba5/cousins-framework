@@ -467,7 +467,7 @@ within a few seconds (it polls every 3.5 s) with a short reveal animation;
 Settings picks the speed and style, or turns it off. The view follows new
 messages while you're at the bottom and leaves you alone when you've
 scrolled up; "jump to latest" brings you back. Scroll to the top to load
-older messages.
+older messages; they stay while the poll brings in new ones.
 
 Right-click a message (long-press on a phone) to reply to it or react. A
 reply shows a quote you can click to jump to the original. Clicking an

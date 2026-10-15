@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.52.5 - 2026-10-15
+
+### Fixed
+
+- **Older chat rows stay after a poll.** In a thread longer than the
+  500 rows a poll fetches, the rows scrolling up paged in were replaced
+  by the next poll (every 3.5 s), so the pane shrank back under a reader
+  in the older part. A poll now keeps the rows older than its window;
+  the first fetch of a chat still replaces (#315).
+
 ## 3.52.4 - 2026-10-15
 
 ### Fixed

@@ -3,6 +3,15 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.52.6 - 2026-10-17
+
+### Fixed
+
+- **The suite runs on Python 3.11.0-3.11.3.** One test unpacked a tarball
+  with `extractall(filter="data")`, which those releases don't have, so
+  the install check failed there with a `TypeError` (seen on Debian 12's
+  3.11.2). The test passes the filter only where `tarfile` has it (#333).
+
 ## 3.52.5 - 2026-10-15
 
 ### Fixed

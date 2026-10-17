@@ -120,8 +120,10 @@ class TestArchiveInstalls(SpawnNodeCase):
         # render the unit from inside, as the operator would.
         import subprocess
         tarball = self._build(name="Testa Two", tell_home=True)["tarball"]
+        # filter= came in 3.11.4; an older 3.11 extracts without it.
+        safe = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
         with tarfile.open(tarball) as tar:
-            tar.extractall(self.out, filter="data")
+            tar.extractall(self.out, **safe)
         unpacked = self.out / "testa-node"
         result = subprocess.run(
             ["bash", "./install.sh", "--print-unit"], cwd=unpacked,

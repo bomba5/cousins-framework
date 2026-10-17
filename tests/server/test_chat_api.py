@@ -146,6 +146,20 @@ class TestRunnerCousin(ApiCase):
         [stored] = chat_api.history(self.home, {"user": "Priya"})["messages"]
         self.assertEqual(stored["message"], "")
 
+    def test_a_caption_less_picture_that_does_not_decode_is_refused(self):
+        # it would store an empty row and deliver nothing at all
+        for image in ("not a data uri", "data:image/png;base64,***", "data:image/png;base64,"):
+            with self.assertRaisesRegex(chat_api.BadRequest, "^image is not a decodable"):
+                chat_api.send(self.config, {"user": "Priya", "image": image},
+                              deliver=lambda **k: self.fail("delivered"))
+        self.assertEqual(chat_api.history(self.home, {"user": "Priya"})["messages"], [])
+
+    def test_an_image_that_is_not_a_string_is_a_400(self):
+        for body in ({"user": "Priya", "image": True},
+                     {"user": "Priya", "message": "hi", "image": {"x": 1}}):
+            with self.assertRaisesRegex(chat_api.BadRequest, "^image must be a data:image"):
+                chat_api.send(self.config, body, deliver=lambda **k: None)
+
     def test_storing_a_message_writes_no_last_user_msg_marker(self):
         # the marker was the legacy pane line's time baseline; nothing
         # reads it any more, so a stored message leaves no file behind

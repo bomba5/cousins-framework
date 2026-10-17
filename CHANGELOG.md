@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.53.3 - 2026-10-17
+
+### Fixed
+
+- **A caption-less picture that does not decode is refused.** Since
+  3.53.2 a send without text could carry an image that was not a
+  decodable `data:image` URI; it stored an empty row and delivered the
+  cousin a message with nothing in it. Such a send is now `400` before
+  anything is stored. An `image` that is not a string was a `500`
+  (`TypeError`) and is now `400`.
+
 ## 3.53.2 - 2026-10-17
 
 ### Fixed

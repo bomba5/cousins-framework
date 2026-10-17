@@ -124,7 +124,7 @@ class TestRunnerSend(RunnerProxyCase):
 
     def test_a_bad_request_is_the_chat_servers_400(self):
         self.assertEqual(self._post("/api/chat/send", cousin="testa", user="Priya", message=""),
-                         (400, {"error": "user and a non-empty message are required"}))
+                         (400, {"error": "user and a non-empty message or an image are required"}))
 
 
 class TestTmuxCousinStillProxied(RunnerProxyCase):

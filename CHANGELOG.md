@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.53.2 - 2026-10-17
+
+### Fixed
+
+- **A picture sends without a caption.** The chat page turned send on for
+  an attached picture with no text, but the send refused a message
+  without text ("user and a non-empty message are required"), so the
+  picture never went. A send now takes text, a picture, or both; a
+  caption-less picture is stored with empty text, delivered with its file,
+  and never read as a login code. A hive node still needs text: it takes
+  no picture.
+
 ## 3.53.1 - 2026-10-17
 
 ### Fixed

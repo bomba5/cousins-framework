@@ -223,11 +223,13 @@ def send(config, body, *, deliver=None, key=None):
     row already carries (a peer's retry after a crash) delivers that row,
     never a second one."""
     user = body.get("user")
-    message = body.get("message")
-    if not user or not message:
-        raise BadRequest("user and a non-empty message are required")
+    message = body.get("message") or ""
+    # A picture with no caption is a message, as it is on reply.
+    if not user or not (message or body.get("image")):
+        raise BadRequest("user and a non-empty message or an image are required")
     home = config.home
-    diverted = divert_login_code(config, user, message)
+    # a login code is text: a caption-less picture is never one
+    diverted = divert_login_code(config, user, message) if message else None
     if diverted is not None:
         row = _with_store(home, lambda store: store.add_message(
             chat_user=normalize_chat_user(user), user=user, message=diverted,

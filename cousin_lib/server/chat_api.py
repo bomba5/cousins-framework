@@ -24,7 +24,7 @@ from pathlib import Path
 from cousin_lib import chat_hooks, delivery
 from cousin_lib.crashpoint import crashpoint
 from cousin_lib.server.inbound import divert_login_code
-from cousin_lib.server.storage import ChatStore, normalize_chat_user, save_data_uri
+from cousin_lib.server.storage import ChatStore, decode_data_uri, normalize_chat_user, save_data_uri
 
 
 class BadRequest(ValueError):
@@ -224,9 +224,16 @@ def send(config, body, *, deliver=None, key=None):
     never a second one."""
     user = body.get("user")
     message = body.get("message") or ""
+    image = body.get("image")
     # A picture with no caption is a message, as it is on reply.
-    if not user or not (message or body.get("image")):
+    if not user or not (message or image):
         raise BadRequest("user and a non-empty message or an image are required")
+    if image is not None and not isinstance(image, str):
+        raise BadRequest("image must be a data:image/...;base64 URI")
+    # without a caption the picture is the whole message: one that does
+    # not decode would deliver nothing, so refuse it before storing
+    if not message and not decode_data_uri(image)[0]:
+        raise BadRequest("image is not a decodable data:image/...;base64 URI")
     home = config.home
     # a login code is text: a caption-less picture is never one
     diverted = divert_login_code(config, user, message) if message else None

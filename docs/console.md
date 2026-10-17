@@ -463,7 +463,9 @@ none of those the message box is disabled and says why.
 
 Messages render as Markdown (tables, code, lists), and ```` ```mermaid ````
 blocks are drawn as diagrams once the reply is complete. New replies appear
-within a few seconds (it polls every 3.5 s) with a short reveal animation;
+within a few seconds (it polls every 3.5 s, and a poll asks only for what
+changed since the last one: new messages, reactions, archiving) with a
+short reveal animation;
 Settings picks the speed and style, or turns it off. The view follows new
 messages while you're at the bottom and leaves you alone when you've
 scrolled up; "jump to latest" brings you back. Scroll to the top to load

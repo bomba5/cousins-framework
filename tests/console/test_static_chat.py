@@ -455,6 +455,47 @@ process.stdout.write(JSON.stringify(cases));
             [],                        # an empty answer is the poll's word
         ])
 
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_change_poll_updates_drops_and_appends(self):
+        # #316: a poll answers only the rows changed since its cursor.
+        probe = _function_body(self.chat, "mergeChanged") + """
+const pane = [{id: 3}, {id: 5, t: "old"}, {id: 7}];
+const live = (id, t, archived) => ({id, t, archived: archived ? 1 : 0});
+const show = rows => rows.map(r => r.t ? r.id + r.t : r.id);
+const same = mergeChanged(pane, [], [], false);
+const cases = [
+  show(mergeChanged(pane, [live(5, "new")], [], false)),
+  show(mergeChanged(pane, [live(9, "new")], [], false)),
+  show(mergeChanged(pane, [live(3, "", true), live(5, "", true)], [], false)),
+  show(mergeChanged(pane, [], [7], false)),
+  show(mergeChanged(pane, [live(1, "unseen")], [], false)),
+  show(mergeChanged(pane, [live(4, "arch", true)], [], true)),
+  show(mergeChanged([], [live(2, "a"), live(4, "b", true)], [], false)),
+  same === pane,
+];
+process.stdout.write(JSON.stringify(cases));
+"""
+        out = subprocess.run(["node", "-e", probe], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout), [
+            [3, "5new", 7],            # a changed row is replaced in place
+            [3, "5old", 7, "9new"],    # a new row lands after the pane
+            [7],                       # archived rows leave the live view
+            [3, "5old"],               # a deleted row leaves
+            [3, "5old", 7],            # a row never paged in stays out
+            [3, "4arch", "5old", 7],   # the archived view takes archived rows
+            ["2a"],
+            True,                      # nothing changed: same array, no render
+        ])
+
+    def test_the_poll_asks_for_changes_once_the_store_gives_a_cursor(self):
+        body = _function_body(self.chat, "ChatBody")
+        self.assertIn('rev = !searchActive && typeof d.rev === "number" ? d.rev : null;', body)
+        self.assertIn("rev != null ? `${base}&changed=${rev}` : base", body)
+        self.assertIn("if (asked && d.reset) {", body)
+        self.assertIn("if (asked) setMessages(prev => mergeChanged(prev, list, d.gone || [], showArchived));", body)
+
     def test_the_first_pull_replaces_and_later_polls_merge(self):
         body = _function_body(self.chat, "ChatBody")
         self.assertIn("if (searchActive || fresh) setMessages(list);", body)

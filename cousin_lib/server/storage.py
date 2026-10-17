@@ -104,6 +104,62 @@ CREATE TABLE IF NOT EXISTS reactions (
     UNIQUE(message_id, user, emoji)
 );
 CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id);
+
+-- The change log a poll reads (#316): one counter for the database, a
+-- message's `rev` set from it on every change a reader sees (the row
+-- itself, its archive mark, its reactions), and a tombstone per deleted
+-- row. Triggers keep it, so a writer that is not this class counts too.
+CREATE TABLE IF NOT EXISTS chat_rev (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    n  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chat_gone (
+    id        INTEGER PRIMARY KEY,
+    chat_user TEXT NOT NULL,
+    rev       INTEGER NOT NULL
+);
+"""
+
+# Created after the `rev` column exists (an older database gains it in
+# _add_reserved_columns). The update trigger names the columns a reader
+# sees, so a delivery mark or a rev write does not count as a change.
+_TRIGGERS = """
+CREATE INDEX IF NOT EXISTS idx_messages_rev ON messages(rev) WHERE rev IS NOT NULL;
+
+CREATE TRIGGER IF NOT EXISTS chat_rev_message_insert AFTER INSERT ON messages BEGIN
+    UPDATE chat_rev SET n = n + 1;
+    UPDATE messages SET rev = (SELECT n FROM chat_rev) WHERE id = NEW.id;
+    DELETE FROM chat_gone WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_rev_message_update AFTER UPDATE OF
+    chat_user, user, message, timestamp, type, archived, reply_to,
+    reply_to_user, attachment_kind, attachment_path ON messages BEGIN
+    UPDATE chat_rev SET n = n + 1;
+    UPDATE messages SET rev = (SELECT n FROM chat_rev) WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_rev_message_delete AFTER DELETE ON messages BEGIN
+    UPDATE chat_rev SET n = n + 1;
+    INSERT OR REPLACE INTO chat_gone (id, chat_user, rev)
+        VALUES (OLD.id, OLD.chat_user, (SELECT n FROM chat_rev));
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_rev_reaction_insert AFTER INSERT ON reactions BEGIN
+    UPDATE chat_rev SET n = n + 1;
+    UPDATE messages SET rev = (SELECT n FROM chat_rev) WHERE id = NEW.message_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_rev_reaction_update AFTER UPDATE ON reactions BEGIN
+    UPDATE chat_rev SET n = n + 1;
+    UPDATE messages SET rev = (SELECT n FROM chat_rev) WHERE id = NEW.message_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_rev_reaction_delete AFTER DELETE ON reactions BEGIN
+    UPDATE chat_rev SET n = n + 1;
+    UPDATE messages SET rev = (SELECT n FROM chat_rev) WHERE id = OLD.message_id;
+END;
 """
 
 
@@ -141,6 +197,14 @@ class ChatStore:
         # the key that put runs under (chat_api.deliver_stored).
         add_column(self.conn, "messages", "delivery", "TEXT")
         add_column(self.conn, "messages", "delivery_key", "TEXT")
+        # The change log's per-row mark (#316); NULL on a row older than
+        # it, which a change poll never returns.
+        add_column(self.conn, "messages", "rev", "INTEGER")
+        # Seeded only when missing: a store opens per request, and a poll
+        # should not take the write lock to learn the row is there.
+        if self.conn.execute("SELECT 1 FROM chat_rev").fetchone() is None:
+            self.conn.execute("INSERT OR IGNORE INTO chat_rev (id, n) VALUES (1, 0)")
+        self.conn.executescript(_TRIGGERS)
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_delivery"
                           " ON messages(delivery) WHERE delivery IS NOT NULL")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_delivery_key"
@@ -227,14 +291,48 @@ class ChatStore:
             )
         return out
 
+    def rev(self):
+        """The change log's counter: every change a reader sees raises it."""
+        return self.conn.execute("SELECT n FROM chat_rev").fetchone()[0]
+
+    def changes(self, user, *, changed, limit=500, archived="0"):
+        """One thread's rows changed after rev `changed` (new, edited,
+        archived, reacted to), whatever their archive mark, so a reader
+        drops the ones that left its view; `gone` names the rows deleted
+        since. More than `limit` changed rows is `reset`: read the thread
+        again. The counter is read first, so a change racing the read is
+        sent again on the next poll rather than missed."""
+        chat_user = normalize_chat_user(user)
+        rev = self.rev()
+        total = self.conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE chat_user=?"
+            + self._archive_clause(archived), [chat_user]).fetchone()[0]
+        rows = self.conn.execute(
+            "SELECT * FROM messages WHERE chat_user=? AND rev>?"
+            " ORDER BY id LIMIT ?", (chat_user, changed, limit + 1)).fetchall()
+        if len(rows) > limit:
+            return {"messages": [], "gone": [], "rev": rev, "total": total,
+                    "has_more": False, "reset": True}
+        messages = [dict(r) for r in rows]
+        reactions = self._reactions_for([m["id"] for m in messages])
+        for m in messages:
+            m["reactions"] = reactions.get(m["id"], [])
+        gone = [r[0] for r in self.conn.execute(
+            "SELECT id FROM chat_gone WHERE chat_user=? AND rev>? ORDER BY id",
+            (chat_user, changed))]
+        return {"messages": messages, "gone": gone, "rev": rev, "total": total,
+                "has_more": False}
+
     def history(self, user, *, since=None, before=None, limit=200,
                 archived="0"):
         """One thread's messages. `before` pages backward (rows below that
         id), `since` polls forward (rows above it), neither returns the
         newest `limit`. Rows always come back oldest-first; has_more is
         computed from the thread's actual row count, not guessed from a
-        full page."""
+        full page. `rev` is the change log's counter, read before the
+        rows: the cursor a `changes` poll starts from."""
         chat_user = normalize_chat_user(user)
+        rev = self.rev()
         where = "chat_user=?" + self._archive_clause(archived)
         args = [chat_user]
         total = self.conn.execute(
@@ -273,6 +371,7 @@ class ChatStore:
             "messages": messages,
             "total": total,
             "has_more": window > len(messages),
+            "rev": rev,
         }
 
     def search(self, q, *, user=None, archived="0", cap=50):

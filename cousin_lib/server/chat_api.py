@@ -86,6 +86,11 @@ def history(home, query):
     if not user:
         raise BadRequest("user is required")
     since, before, limit = _int(query, "since"), _int(query, "before"), _int(query, "limit")
+    changed = _int(query, "changed")
+    if changed is not None:
+        return _with_store(home, lambda store: store.changes(
+            user, changed=changed, limit=limit or 500,
+            archived=query.get("archived") or "0"))
     return _with_store(home, lambda store: store.history(
         user, since=since, before=before, limit=limit or 200,
         archived=query.get("archived") or "0"))

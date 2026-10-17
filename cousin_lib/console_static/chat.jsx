@@ -560,6 +560,22 @@ function mergePolled(prev, list) {
   return older.length ? [...older, ...list] : list;
 }
 
+function mergeChanged(prev, rows, gone, showArchived) {
+  // A change poll's answer over what the pane holds (#316): rows deleted
+  // or changed are taken out, a changed row comes back in when it still
+  // belongs to this view (live or archived) and sits inside the pane's
+  // span or after it, so a reaction on a row never paged in does not
+  // land alone above the pane. Nothing changed keeps the same array.
+  if (!rows.length && !gone.length) return prev;
+  const want = showArchived ? 1 : 0;
+  const out = new Set([...gone, ...rows.map(m => m.id)]);
+  const kept = prev.filter(m => !out.has(m.id));
+  const first = prev.length ? prev[0].id : null;
+  const back = rows.filter(m => (m.archived ? 1 : 0) === want
+                                && (first == null || m.id >= first));
+  return [...kept, ...back].sort((a, b) => a.id - b.id);
+}
+
 function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShown }) {
   const c = cousin;
   const [messages, setMessages] = React.useState([]);
@@ -613,20 +629,34 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
     // The first pull for this chat (cousin, user, archive view or search)
     // replaces what the pane held; the polls after it merge.
     let fresh = true;
+    // The change log's cursor (#316): with it a poll asks only for what
+    // changed since. A store too old to answer `rev` (a remote node on
+    // an older framework) leaves it null, and the poll reads the window.
+    let rev = null;
     async function pull() {
       try {
+        const base = `/api/messages?cousin=${c.slug}&limit=500&user=${encodeURIComponent(chatUser)}${showArchived ? "&archived=1" : ""}`;
         const url = searchActive
           ? `/api/search?cousin=${c.slug}&q=${encodeURIComponent(search.trim())}&user=${encodeURIComponent(chatUser)}${showArchived ? "&archived=all" : ""}`
-          : `/api/messages?cousin=${c.slug}&limit=500&user=${encodeURIComponent(chatUser)}${showArchived ? "&archived=1" : ""}`;
+          : rev != null ? `${base}&changed=${rev}` : base;
+        const asked = !searchActive && rev != null;
         const r = await fetch(url, { cache: "no-store" });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = await r.json();
         if (cancelled) return;
         setError(d.error || null);
+        rev = !searchActive && typeof d.rev === "number" ? d.rev : null;
+        if (asked && d.reset) {
+          // more changed than a poll carries (a whole thread archived):
+          // read the window again
+          rev = null; fresh = true;
+          return pull();
+        }
         // Both routes answer { messages: [...] }; search is newest-first,
         // so reverse it into chat order.
         const list = searchActive ? (d.messages || []).slice().reverse() : (d.messages || []);
-        if (searchActive || fresh) setMessages(list);
+        if (asked) setMessages(prev => mergeChanged(prev, list, d.gone || [], showArchived));
+        else if (searchActive || fresh) setMessages(list);
         else setMessages(prev => mergePolled(prev, list));
         fresh = false;
         setTotalCount(typeof d.total === "number" ? d.total : list.length);
@@ -637,8 +667,8 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
     }
     pull();
     // Only poll in live mode; keep search results stable while typing.
-    // 3.5s rather than 2s: a 500-message payload over a slow link makes
-    // every saved poll real, and a new reply still shows within 4s.
+    // A quiet poll answers only the cursor; one against an older store
+    // still carries the whole window, so 3.5s keeps that cheap enough.
     const id = !searchActive ? setInterval(pull, 3500) : null;
     return () => { cancelled = true; if (id) clearInterval(id); };
   }, [c.slug, chatUser, search, searchActive, showArchived]);

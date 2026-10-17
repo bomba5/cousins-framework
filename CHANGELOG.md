@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.53.0 - 2026-10-17
+
+### Added
+
+- **A chat poll asks only for what changed.** The console read the newest
+  500 rows of a thread every 3.5 s (about 415 KB a poll on a busy chat).
+  `chat.db` now keeps a change log: one counter, a `rev` on each message
+  set by triggers on every change a reader sees (a new row, an edit, an
+  archive mark, a reaction added, bumped or removed), and a tombstone per
+  deleted row. `/api/messages` answers `rev`, and with `changed=<rev>` it
+  returns only the thread's rows changed since, whatever their archive
+  mark, plus the ids deleted (`gone`); more than `limit` changes is
+  `reset`, and the page reads the window again. A quiet poll is now a few
+  bytes. A store that answers no `rev` (a remote node) is still polled
+  for the whole window. The migration only adds things (#316).
+
 ## 3.52.6 - 2026-10-17
 
 ### Fixed

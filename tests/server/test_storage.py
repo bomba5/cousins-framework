@@ -329,5 +329,149 @@ class TestAttachments(StoreCase):
         self.assertIn("attachment_path", cols)
 
 
+class TestChanges(StoreCase):
+    """The change log a poll reads instead of the whole window (#316)."""
+
+    def _add(self, store, text, chat_user="sam"):
+        return store.add_message(chat_user=chat_user, user="Sam",
+                                 message=text, msg_type="user")["id"]
+
+    def _ids(self, out):
+        return [m["id"] for m in out["messages"]]
+
+    def test_history_carries_the_cursor_and_a_quiet_poll_is_empty(self):
+        store = self._store()
+        self._add(store, "a")
+        rev = store.history("sam")["rev"]
+        out = store.changes("sam", changed=rev)
+        self.assertEqual((out["messages"], out["gone"], out["rev"], out["total"]),
+                         ([], [], rev, 1))
+        self.assertNotIn("reset", out)
+
+    def test_a_new_row_is_a_change(self):
+        store = self._store()
+        self._add(store, "a")
+        rev = store.history("sam")["rev"]
+        new = self._add(store, "b")
+        out = store.changes("sam", changed=rev)
+        self.assertEqual(self._ids(out), [new])
+        self.assertGreater(out["rev"], rev)
+        self.assertEqual(store.changes("sam", changed=out["rev"])["messages"], [])
+
+    def test_a_reaction_on_an_old_row_brings_the_row_with_its_reactions(self):
+        store = self._store()
+        old = self._add(store, "a")
+        self._add(store, "b")
+        for action, want in (("tap", 1), ("tap", 2), ("remove", None)):
+            rev = store.rev()
+            store.react(old, user="Sam", emoji="+1", action=action)
+            out = store.changes("sam", changed=rev)
+            self.assertEqual(self._ids(out), [old], action)
+            counts = [r["tap_count"] for r in out["messages"][0]["reactions"]]
+            self.assertEqual(counts, [want] if want else [])
+
+    def test_archived_rows_come_back_marked_so_the_reader_drops_them(self):
+        store = self._store()
+        ids = [self._add(store, t) for t in "abc"]
+        rev = store.rev()
+        store.archive("sam", keep=1)
+        out = store.changes("sam", changed=rev)
+        self.assertEqual(self._ids(out), ids[:2])
+        self.assertEqual([m["archived"] for m in out["messages"]], [1, 1])
+        self.assertEqual(out["total"], 1)
+
+    def test_a_deleted_row_is_named_in_gone_until_its_id_returns(self):
+        store = self._store()
+        keep, drop = self._add(store, "a"), self._add(store, "b")
+        rev = store.rev()
+        store.delete_message(drop)
+        out = store.changes("sam", changed=rev)
+        self.assertEqual((out["messages"], out["gone"]), ([], [drop]))
+        # an import rewrites rows under their old ids: back, not gone
+        store.conn.execute(
+            "INSERT INTO messages (id, chat_user, user, message, timestamp, type)"
+            " VALUES (?, 'sam', 'Sam', 'b', 't', 'user')", (drop,))
+        store.conn.commit()
+        out = store.changes("sam", changed=rev)
+        self.assertEqual((self._ids(out), out["gone"]), ([drop], []))
+        self.assertNotIn(keep, self._ids(out))
+
+    def test_a_delivery_mark_is_not_a_change(self):
+        store = self._store()
+        row = store.add_message(chat_user="sam", user="Sam", message="a",
+                                msg_type="user", pending=True)
+        rev = store.rev()
+        store.mark_delivered(row["id"])
+        self.assertEqual(store.changes("sam", changed=rev)["messages"], [])
+
+    def test_changes_are_per_thread(self):
+        store = self._store()
+        rev = store.rev()
+        self._add(store, "other", chat_user="vimes")
+        mine = self._add(store, "mine")
+        self.assertEqual(self._ids(store.changes("Sam", changed=rev)), [mine])
+
+    def test_more_changes_than_the_limit_is_a_reset(self):
+        store = self._store()
+        rev = store.rev()
+        for t in "abc":
+            self._add(store, t)
+        out = store.changes("sam", changed=rev, limit=2)
+        self.assertTrue(out["reset"])
+        self.assertEqual((out["messages"], out["total"]), ([], 3))
+        self.assertEqual(len(store.changes("sam", changed=rev, limit=3)["messages"]), 3)
+
+    def test_a_writer_on_another_connection_counts(self):
+        # chat_import and the old servers write with plain SQL: the
+        # triggers keep the log, not this class.
+        path = self._db_path()
+        store = ChatStore(path)
+        self.addCleanup(store.close)
+        old = self._add(store, "a")
+        rev = store.rev()
+        con = sqlite3.connect(path)
+        con.execute("UPDATE messages SET message='edited' WHERE id=?", (old,))
+        con.execute("INSERT INTO reactions (message_id, user, emoji, created)"
+                    " VALUES (?, 'Sam', 'x', 't')", (old,))
+        con.commit()
+        con.close()
+        out = store.changes("sam", changed=rev)
+        self.assertEqual(self._ids(out), [old])
+        self.assertEqual(out["messages"][0]["message"], "edited")
+        self.assertEqual(out["rev"], rev + 2)
+
+    def test_an_older_database_gains_the_log_and_its_rows_are_not_changes(self):
+        path = self._db_path()
+        path.parent.mkdir(parents=True)
+        con = sqlite3.connect(path)
+        con.execute(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " chat_user TEXT NOT NULL, user TEXT NOT NULL, message TEXT NOT NULL,"
+            " timestamp TEXT NOT NULL, type TEXT NOT NULL,"
+            " archived INTEGER NOT NULL DEFAULT 0, reply_to TEXT,"
+            " reply_to_user TEXT, attachment_kind TEXT, attachment_path TEXT,"
+            " delivery TEXT, delivery_key TEXT)")
+        con.execute("INSERT INTO messages (chat_user, user, message, timestamp, type)"
+                    " VALUES ('sam', 'Sam', 'old', 't', 'user')")
+        con.commit()
+        con.close()
+        store = ChatStore(path)
+        self.addCleanup(store.close)
+        self.assertEqual(store.rev(), 0)
+        self.assertEqual(store.changes("sam", changed=0)["messages"], [])
+        new = self._add(store, "new")
+        self.assertEqual(self._ids(store.changes("sam", changed=0)), [new])
+
+    def test_reopening_a_store_does_not_reset_the_counter(self):
+        path = self._db_path()
+        store = ChatStore(path)
+        self._add(store, "a")
+        rev = store.rev()
+        store.close()
+        again = ChatStore(path)
+        self.addCleanup(again.close)
+        self.assertEqual(again.rev(), rev)
+
+
 if __name__ == "__main__":
     unittest.main()

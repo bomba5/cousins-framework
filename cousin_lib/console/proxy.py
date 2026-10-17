@@ -370,7 +370,8 @@ def register():
         _require(q, "cousin", "user")
         cousin = find_cousin(req, q.get("cousin"))
         query = {"user": q.get("user"), "since": q.get("since"),
-                 "before": q.get("before"), "limit": q.get("limit") or "200",
+                 "before": q.get("before"), "changed": q.get("changed"),
+                 "limit": q.get("limit") or "200",
                  "archived": q.get("archived") or "0"}
         if serves_locally(cousin):
             status, body = _local(chat_api.history, cousin.home,

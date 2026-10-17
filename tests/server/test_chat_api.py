@@ -58,6 +58,16 @@ class TestReads(ApiCase):
         with self.assertRaisesRegex(chat_api.BadRequest, "^limit must be an integer$"):
             chat_api.history(self.home, {"user": "Priya", "limit": "ten"})
 
+    def test_changed_reads_the_change_log(self):
+        self._seed(("Priya", "one", "user"))
+        rev = chat_api.history(self.home, {"user": "Priya"})["rev"]
+        new = self._seed(("Priya", "two", "user"))[0]["id"]
+        out = chat_api.history(self.home, {"user": "Priya", "changed": str(rev)})
+        self.assertEqual([m["id"] for m in out["messages"]], [new])
+        self.assertEqual((out["gone"], out["total"]), ([], 2))
+        with self.assertRaisesRegex(chat_api.BadRequest, "^changed must be an integer$"):
+            chat_api.history(self.home, {"user": "Priya", "changed": "x"})
+
     def test_search_wraps_the_hits(self):
         self._seed(("Priya", "the quokka ledger", "user"), ("Priya", "ferns", "user"))
         out = chat_api.search(self.home, {"q": "quokka"})

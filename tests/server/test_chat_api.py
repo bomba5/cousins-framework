@@ -110,7 +110,7 @@ class TestWrites(ApiCase):
 
     def test_send_refuses_an_empty_message(self):
         with self.assertRaisesRegex(chat_api.BadRequest,
-                                    "^user and a non-empty message are required$"):
+                                    "^user and a non-empty message or an image are required$"):
             chat_api.send(self.config, {"user": "Priya", "message": ""})
 
 
@@ -134,6 +134,17 @@ class TestRunnerCousin(ApiCase):
         [path] = seen["attachments"]
         self.assertEqual(path, str(self.home / "chat" / "inbound" / ("%d.png" % out["id"])))
         self.assertTrue(pathlib.Path(path).is_file())
+
+    def test_a_picture_without_a_caption_is_sent(self):
+        # the page lets a picture go with no text; the send took only text
+        out = chat_api.send(self.config, {"user": "Priya",
+                                          "image": "data:image/png;base64," + _PNG},
+                            deliver=chat_api.make_deliver(self.config))
+        [row] = Inbox(self.home).open_rows("chat")
+        self.assertEqual((row["body"], row["message_id"]), ("", out["id"]))
+        self.assertTrue((self.home / "chat" / "inbound" / ("%d.png" % out["id"])).is_file())
+        [stored] = chat_api.history(self.home, {"user": "Priya"})["messages"]
+        self.assertEqual(stored["message"], "")
 
     def test_storing_a_message_writes_no_last_user_msg_marker(self):
         # the marker was the legacy pane line's time baseline; nothing

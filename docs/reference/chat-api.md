@@ -65,7 +65,7 @@ curl -s 127.0.0.1:8210/api/send -H 'Content-Type: application/json' \
   -d '{"user": "ana", "message": "can you check the backups?"}'
 ```
 
-Body: `user` and a non-empty `message` (both required), plus optional `reply_to` (any JSON) and `image` (a `data:image/<type>;base64,...` URI). A node reads `user`, `message` and an optional `msg_id` (below). The answer is `200 {"ok": true, "id": 413, "timestamp": "..."}` once the row is stored and the cousin's inbox took it. It doesn't wait for the cousin to read it.
+Body: `user` (required), a non-empty `message` or an `image` (a `data:image/<type>;base64,...` URI) or both, plus optional `reply_to` (any JSON). A picture with no caption is stored with an empty `message` and never checked as a login code. A node reads `user`, a non-empty `message` (required there) and an optional `msg_id` (below); it takes no image. The answer is `200 {"ok": true, "id": 413, "timestamp": "..."}` once the row is stored and the cousin's inbox took it. It doesn't wait for the cousin to read it.
 
 On this machine, before any of that, every send checks whether the message is a login
 code a running `cousin-account login|token --via <this cousin>` is waiting

@@ -45,6 +45,70 @@ def _net_bytes():
     return rx, tx
 
 
+def _cpu_capacity():
+    """CPUs this system may use: a cgroup v2 quota (cpu.max), else the
+    CPUs the process may run on, else the core count."""
+    quota = _read("/sys/fs/cgroup/cpu.max").split()
+    if len(quota) == 2 and quota[0] != "max":
+        try:
+            return max(0.01, int(quota[0]) / int(quota[1]))
+        except (ValueError, ZeroDivisionError):
+            pass
+    try:
+        return float(len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        return float(os.cpu_count() or 1)
+
+
+def _cpu_sample():
+    """(busy seconds, wall seconds) for this system, None when neither
+    source is readable. The cgroup's usage_usec comes first: in a
+    container it is the container's own time (a host reads its root
+    cgroup), where /proc/stat and the load average can be the host's.
+    /proc/stat is the fallback, busy over all its jiffies."""
+    for line in _read("/sys/fs/cgroup/cpu.stat").splitlines():
+        if line.startswith("usage_usec "):
+            try:
+                return int(line.split()[1]) / 1e6, None
+            except ValueError:
+                break
+    line = _read("/proc/stat").split("\n", 1)[0].split()
+    if len(line) >= 5 and line[0] == "cpu":
+        try:
+            ticks = [int(v) for v in line[1:]]
+        except ValueError:
+            return None
+        idle = ticks[3] + (ticks[4] if len(ticks) > 4 else 0)
+        return sum(ticks) - idle, sum(ticks)
+    return None
+
+
+def _cpu_pct(server, now):
+    """CPU in use since the previous call, as a percentage of what this
+    system may use (#335). The load average is not that: in an LXC it
+    is the host's load over the container's cores. The first call has
+    no previous sample and takes a short one."""
+    sample = _cpu_sample()
+    if sample is None:
+        return 0.0
+    snap = server.state.get("cpu_snapshot")
+    if not snap or snap.get("kind") != (sample[1] is None):
+        time.sleep(0.1)
+        snap = {"ts": now, "busy": sample[0], "total": sample[1],
+                "kind": sample[1] is None}
+        now, sample = time.time(), _cpu_sample() or sample
+    busy = max(0.0, sample[0] - snap["busy"])
+    if sample[1] is None:                       # cgroup: seconds of CPU
+        wall = now - snap["ts"]
+        pct = busy * 100.0 / (wall * _cpu_capacity()) if wall > 0 else 0.0
+    else:                                       # /proc/stat: jiffies
+        total = sample[1] - snap["total"]
+        pct = busy * 100.0 / total if total > 0 else 0.0
+    server.state["cpu_snapshot"] = {"ts": now, "busy": sample[0],
+                                    "total": sample[1], "kind": sample[1] is None}
+    return round(min(100.0, max(0.0, pct)), 1)
+
+
 def host_stats(server):
     now = time.time()
     out = {"host": socket.gethostname(), "kernel": "", "uptime": 0}
@@ -55,11 +119,10 @@ def host_stats(server):
     out["kernel"] = _read("/proc/sys/kernel/osrelease").strip()
     try:
         l1, l5, l15 = os.getloadavg()
-        cpus = os.cpu_count() or 1
-        out["cpu"] = {"pct": round(min(100.0, l1 * 100.0 / cpus), 1),
-                      "load1": l1, "load5": l5, "load15": l15}
     except OSError:
-        out["cpu"] = {"pct": 0.0, "load1": 0.0, "load5": 0.0, "load15": 0.0}
+        l1 = l5 = l15 = 0.0
+    out["cpu"] = {"pct": _cpu_pct(server, now),
+                  "load1": l1, "load5": l5, "load15": l15}
     total = avail = cached = 0
     for line in _read("/proc/meminfo").splitlines():
         try:

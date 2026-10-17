@@ -964,7 +964,7 @@ No login needed. `{"version", "commit", "repo_url", "commit_url"}`. Version and 
  "console_uptime": 3600}
 ```
 
-Memory and disk in GB (used memory is MemTotal minus MemAvailable, disk is `/`), network in MB/s since the previous call, loopback and container interfaces left out. CPU `pct` is the 1-minute load over the core count. On a system without `/proc` the blocks read as zeros.
+Memory and disk in GB (used memory is MemTotal minus MemAvailable, disk is `/`), network in MB/s since the previous call, loopback and container interfaces left out. CPU `pct` is the CPU time used since the previous call over what the system may use: the cgroup's `cpu.stat` (in a container, the container's own) against its `cpu.max` quota or the CPUs it may run on, else `/proc/stat` busy over all jiffies; a first call samples 0.1 s. `load1`/`load5`/`load15` are the load average as the kernel reports it, which in an LXC is the host's. On a system without `/proc` the blocks read as zeros.
 
 ### `GET /api/health`
 

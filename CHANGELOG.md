@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.53.1 - 2026-10-17
+
+### Fixed
+
+- **Host CPU is CPU time, not the load average.** The console's cpu meter
+  was the 1-minute load over the core count. In an LXC the load average is
+  the host's, so a 4-core container on a busy 12-core host read 100% while
+  it used under 3% of one core. `pct` is now the CPU time used since the
+  previous read over what the system may use: the cgroup's `cpu.stat`
+  against its `cpu.max` quota or the CPUs it may run on, else
+  `/proc/stat`. The load average is still shown, as load (#335).
+
 ## 3.53.0 - 2026-10-17
 
 ### Added

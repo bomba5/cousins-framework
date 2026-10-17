@@ -129,7 +129,7 @@ Answer: `{"messages": [...], "total": n, "has_more": bool, "rev": n}`. `total` c
 
 ### Changes
 
-`since` only sees new rows; a reaction, an archive mark or a deletion on an older row passes it by. `chat.db` keeps a change log for that: one counter (`rev` in every answer, read before the rows), set on a row by triggers on each change a reader sees (a new row, an edit, an archive mark, a reaction added, bumped or removed; a delivery mark is not one), and a tombstone per deleted row. Triggers keep it, so a writer that is not the chat store counts too. A row older than the log has no `rev` and is never a change.
+`since` only sees new rows; a reaction, an archive mark or a deletion on an older row passes it by. `chat.db` keeps a change log for that: one counter (`rev` in every history answer, read before the rows), set on a row by triggers on each change a reader sees (a new row, an edit, an archive mark, a reaction added, bumped or removed; a delivery mark is not one), and a tombstone per deleted row. Triggers keep it, so a writer that is not the chat store counts too. A row older than the log has no `rev` until its next change.
 
 `changed=<rev>` wins over `before` and `since` and answers `{"messages", "gone", "rev", "total", "has_more": false}`: the thread's rows changed after that `rev`, oldest first, whatever their archive mark (a reader drops the ones that left its view), and `gone`, the ids deleted since. `limit` (default 500 here) caps it: more changed rows than that answers `"reset": true` with no rows, and the reader reads the thread again. Keep the answer's `rev` for the next poll; a change racing the read comes again rather than being missed. A node answers no `rev`, so a reader keeps polling it with `since` or the window.
 

@@ -552,7 +552,7 @@ Each cousin's spend split into upkeep, self, work and other over `?days=` (1-90,
 
 ### `GET /api/messages`
 
-Query: `cousin`, `user` (both required), `limit` (default 200), `before`, `since`, `archived` (`0`, `1`, `all`; default `0`). Answers the chat API's `/api/history` body, `{"messages", "total", "has_more"}`, plus `"cousin"`. Each message gets an `attachment: {"url", "kind"}` when there is a file for it: an inbound image under `chat/inbound/<id>.<ext>` (kind `image`), or the row's `attachment_path` when it sits in `chat/images/`, `chat/audio/` or `chat/video/`. `kind` is `image`, `audio` or `video` (a stored `voice` shows as `audio`).
+Query: `cousin`, `user` (both required), `limit` (default 200, also for `changed`), `before`, `since`, `changed`, `archived` (`0`, `1`, `all`; default `0`). Answers the chat API's [history](chat-api.md#history) body, `{"messages", "total", "has_more", "rev"}`, plus `"cousin"`; with `changed=<rev>` its [changes](chat-api.md#changes) body, `{"messages", "gone", "rev", "total", "has_more"}` and `"reset": true` when more than `limit` rows changed. The chat pane reads the window once, then polls `changed` with `limit=500`; a cousin whose answer has no `rev` (a hive node) it keeps polling for the window. Each message gets an `attachment: {"url", "kind"}` when there is a file for it: an inbound image under `chat/inbound/<id>.<ext>` (kind `image`), or the row's `attachment_path` when it sits in `chat/images/`, `chat/audio/` or `chat/video/`. `kind` is `image`, `audio` or `video` (a stored `voice` shows as `audio`).
 
 ### `GET /api/search`
 

@@ -3,7 +3,8 @@
 Off until configured, like every media kind: no section, no url, no
 request. The provider is any server that takes the OpenAI
 transcription request, a multipart POST with `file`, `model`,
-`language` and `response_format=json`, and answers `{"text": ...}`:
+`language`, `prompt` and `response_format=json`, and answers
+`{"text": ...}`:
 OpenAI's /v1/audio/transcriptions, or whisper.cpp's whisper-server
 (/inference, run with --convert so it takes Telegram's ogg), or a
 local shim in front of a speech-to-text engine. The audio

@@ -34,7 +34,7 @@ Then add these when you want what they do:
 | `net-allowlist.json` | console and chat access from outside the private ranges |
 | `external-peers.toml` | messaging cousins on another install |
 | `hive.toml` | the console as queen for cousins on other machines |
-| `media.toml` | image, voice and video generation |
+| `media.toml` | image, voice and video generation, and speech to text for Telegram voice notes |
 | `shared-reviewers.json` | promoting memory into the [shared tier](glossary.md#shared-tier) |
 | `outbound-filter.json` | blocking words from leaving in chat and media captions |
 | `law.md` | a block of rules every cousin boots with |
@@ -552,14 +552,19 @@ key_file = "config/media-key"
 timeout_s = 120
 ```
 
-One table per kind, `[image]`, `[voice]`, `[video]`:
+One table per kind, `[image]`, `[voice]`, `[video]`, `[transcribe]`:
 
 | key | default | meaning |
 |---|---|---|
 | `url` | required | the provider endpoint |
-| `model` | `""` | sent with the prompt |
+| `model` | `""` | sent with the prompt (for `[transcribe]`, sent with the audio and only when set) |
 | `key_file` | none | a file under the root holding a bearer token |
-| `timeout_s` | 120 | seconds per request |
+| `timeout_s` | 120 (300 for `[transcribe]`) | seconds per request |
+| `language` | none | `[transcribe]` only: the spoken language (e.g. `da`); unset lets the provider detect it |
+| `prompt` | none | `[transcribe]` only: words the speaker is likely to use, such as names |
+
+`[transcribe]` turns a Telegram voice note into text for the cousin
+([telegram](telegram.md#voice-notes)).
 
 A request goes to the configured provider or fails; it's never rerouted. See
 [media](media.md).

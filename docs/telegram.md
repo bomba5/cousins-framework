@@ -14,7 +14,9 @@ Code: `cousin_lib/telegram.py` (entry point `telegram_main`, CLI
 ## What it does
 
 - **What leaves the machine:** HTTPS to `api.telegram.org`, and nothing
-  else. The bridge long-polls Telegram (`getUpdates`) for your messages
+  else, unless you configure a transcribe provider: then a voice note's
+  audio also goes to that provider's `url` ([below](#voice-notes)). The
+  bridge long-polls Telegram (`getUpdates`) for your messages
   and posts the cousin's replies back. It opens no port and needs no
   public URL or webhook. Everything in the Telegram chat passes through
   Telegram's servers.
@@ -53,7 +55,9 @@ whether the message came from Telegram or from the console.
 |---|---|---|---|
 | in | text message | a normal line from `<operator name>` (`relay_inbound`) | works |
 | in | photo, with or without a caption | an image attachment. The caption is the text, or `[photo]` if there is none. Telegram's largest size is taken, up to 10 MB (`_MAX_INBOUND_BYTES`); a bigger photo is logged and skipped | works (0.9.0) |
-| in | voice, video, sticker, document, anything else | not relayed. The log says `skipped a message from <id> that is neither text nor a photo` | not supported |
+| in | voice note, audio file, round video note | a line with what was said: `[voice note 0:42] <transcript>`, the caption above it if there is one ([voice notes](#voice-notes)) | works (3.54.0) |
+| in | a sound message that could not be transcribed (no provider, provider down, over 10 MB, nothing heard) | a line that says so: `[voice note 0:42, not transcribed: <reason>]`, so the cousin can ask for text. The log has the same reason | works (3.54.0) |
+| in | video, sticker, document, anything else | not relayed. The log says `skipped a message from <id> that is neither text, a photo nor sound` | not supported |
 | in | a message from an id not in `operators` | dropped, and the stranger gets no answer. The log says `rejected message from unauthorized Telegram id <id>` | by design |
 | out | a text reply | `sendMessage` to every Telegram id of that thread's operator | works |
 | out | an image reply (`cousin-reply --image`, `cousin-image`) | `sendPhoto`, uploaded as a file (`_tg_upload`), with the reply text as the caption | works (0.11.0) |
@@ -86,6 +90,28 @@ correction capture keys off that name (`is_operator` in
 `cousin_lib/server/storage.py`). An
 entry with no `name` lands in a thread called `operator`
 (`_thread_name`).
+
+## Voice notes
+
+A voice note, an audio file or a round video note becomes text before
+it reaches the cousin. The bridge downloads it (up to 10 MB) and sends
+it to the `[transcribe]` provider in `config/media.toml`
+([media](media.md#transcription)), then relays the transcript with its
+length: `[voice note 0:42] what was said`. The cousin answers in text,
+as for any message.
+
+A sound message always reaches the cousin as a line, never as silence.
+When there is no transcript, the line says why
+(`[voice note 0:42, not transcribed: no transcribe provider configured; ...]`),
+so the cousin can ask for the message in writing. A failed download
+from Telegram is retried like a photo; a failed transcription is not,
+so one bad note never holds up the messages behind it.
+
+The bridge handles one update at a time, so while a note is being
+transcribed the messages after it wait. On a slow CPU a local model can
+take a few times the note's length.
+
+The audio file is not kept: only the text is stored in the chat.
 
 ## Set it up
 

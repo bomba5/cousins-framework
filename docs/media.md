@@ -5,7 +5,8 @@
 [Cousins](glossary.md#cousin) can generate images, voice clips and short videos through a
 service you point them at. It's off until you configure it, and the
 framework doesn't ship or pick a provider. This page covers the config,
-the three commands, and exactly what goes over the network.
+the three commands, speech to text for Telegram voice notes, and
+exactly what goes over the network.
 
 ## Off by default
 
@@ -79,6 +80,34 @@ A local media gateway, or anything else, can sit behind `url` the
 same way. The framework doesn't care what's there as long as
 it answers with the file.
 
+## Transcription
+
+The `[transcribe]` kind is the other direction: speech to text. Today
+its one user is the Telegram bridge, which relays a voice note to the
+cousin as a line of text ([telegram](telegram.md#voice-notes)).
+
+```toml
+[transcribe]
+url = "http://127.0.0.1:8178/inference"
+model = "some-speech-model"     # optional, passed through
+language = "da"                 # optional; unset lets the provider detect it
+prompt = "names to expect"      # optional: words the speaker is likely to use
+timeout_s = 600                 # default 300
+key_file = "config/media-keys/transcribe.key"   # optional, sent as Bearer
+```
+
+The framework sends the OpenAI transcription request: a multipart POST
+with `file` (the audio as Telegram serves it, usually Ogg/Opus),
+`response_format=json`, and `model`, `language` and `prompt` when set.
+It takes `{"text": "..."}` from the answer, or a plain-text body as the
+text. OpenAI's `/v1/audio/transcriptions` and whisper.cpp's
+`whisper-server` (`/inference`, started with `--convert` so it takes
+Ogg) both speak it, and so can a small shim in front of any engine.
+
+Point it at something local if the speaker's voice should not leave
+the house: the audio goes to `url` and nowhere else. A failure is a
+line in the chat that names the provider, never a reroute.
+
 ## Using it
 
 Each command has two subcommands: `gen` makes a file, `chat` makes a
@@ -144,6 +173,9 @@ With media configured:
 - The generated file stays on your machine. It only leaves if you run
   the Telegram bridge, which uploads a reply's image, video or voice
   file to Telegram ([telegram](telegram.md#interface)).
+
+With `[transcribe]` configured, a Telegram voice note's audio goes to
+that kind's `url` too, with your key if you set one.
 
 To turn a kind off again, remove its section (or its `url`) from
 `config/media.toml`. The next command refuses.

@@ -526,6 +526,21 @@ class TomlConfig(ConsoleCase):
         self.assertEqual(status, 200, body)
         self.assertNotIn("image", tomllib.loads(self.cfg("media.toml").read_text()))
 
+    def test_the_transcribe_kind_takes_a_language(self):
+        self.serve()
+        status, body = self.change("media", [("transcribe", "url", "http://127.0.0.1:8178/inference"),
+                                             ("transcribe", "language", "da")])
+        self.assertEqual(status, 200, body)
+        data = tomllib.loads(self.cfg("media.toml").read_text())
+        self.assertEqual(data["transcribe"]["language"], "da")
+        _, body = self.get("/api/system/config")
+        self.assertEqual(body["files"]["media"]["kinds"]["transcribe"]["language"], "da")
+        # language is the transcribe kind's own field
+        status, body = self.change("media", [("image", "language", "da")])
+        self.assertEqual(status, 400, body)
+        status, body = self.change("media", [("transcribe", "prompt", "names to expect")])
+        self.assertEqual(status, 200, body)
+
     def test_a_path_field_is_not_free_text(self):
         self.serve()
         status, body = self.change("media", [("image", "key_file", "/etc/passwd")])

@@ -3,6 +3,30 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.54.0 - 2026-10-19
+
+### Added
+
+- **Telegram voice notes become text.** A voice note, an audio file or
+  a round video note is downloaded and sent to the new `[transcribe]`
+  provider in `config/media.toml`. The cousin gets the transcript with
+  its length: `[voice note 0:42] what was said`. Before this, the bridge
+  dropped every voice note with only a log line, so the sender got no
+  answer at all.
+- **A sound message is never silent.** When there is no transcript (no
+  provider, provider down, over 10 MB, nothing heard), the cousin gets
+  `[voice note 0:42, not transcribed: <reason>]` and can ask for text.
+  A failed download is retried like a photo; a failed transcription is
+  not, so it never holds up the messages behind it.
+- **`[transcribe]` media kind** (`cousin_lib/transcribe.py`). It speaks
+  the OpenAI transcription request (multipart `file`, `model`,
+  `language`, `prompt`, `response_format=json`) and takes `{"text"}` or
+  a plain-text answer. OpenAI's endpoint, whisper.cpp's whisper-server
+  and a local shim all fit. `language` and `prompt` are new keys of
+  this kind. The audio goes to its `url` and nowhere else.
+- **Console:** the System view's media panel has a `transcribe` kind
+  with `language` and `prompt` fields, and its key.
+
 ## 3.53.3 - 2026-10-17
 
 ### Fixed

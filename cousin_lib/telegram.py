@@ -269,7 +269,7 @@ def _default_log(line):
 
 
 def relay_inbound(cfg, *, update, chat_send=None, tg_send=None,
-                  tg_fetch=None, log=None):
+                  tg_fetch=None, transcribe=None, log=None):
     """One Telegram update -> the cousin's chat (_default_chat_send
     picks the lane), if the sender is authorized. An unauthorized sender is dropped SILENTLY ON THE
     WIRE - nothing forwarded, nothing sent back, so the bot never
@@ -302,7 +302,7 @@ def relay_inbound(cfg, *, update, chat_send=None, tg_send=None,
     user = _thread_name(cfg, sender["id"])
     try:
         _relay_one(cfg, message, chat_send=chat_send, user=user,
-                   tg_fetch=tg_fetch, log=log)
+                   tg_fetch=tg_fetch, transcribe=transcribe, log=log)
     except chat_api.NotDelivered as err:
         # Stored but not delivered: say so on the wire, and let the
         # offset move on (a retry would store the row again).
@@ -315,9 +315,10 @@ def relay_inbound(cfg, *, update, chat_send=None, tg_send=None,
             log("could not tell %r: %s" % (sender.get("id"), _describe(notice_err)))
 
 
-def _relay_one(cfg, message, *, chat_send, user, tg_fetch, log):
-    """The text or the largest photo of one authorized message into
-    `chat_send`; anything else is logged and skipped."""
+def _relay_one(cfg, message, *, chat_send, user, tg_fetch, log, transcribe=None):
+    """The text, the largest photo or the transcribed speech of one
+    authorized message into `chat_send`; anything else is logged and
+    skipped."""
     sender = message.get("from") or {}
     photo = message.get("photo")
     if photo:
@@ -334,12 +335,57 @@ def _relay_one(cfg, message, *, chat_send, user, tg_fetch, log):
                   attachment="data:%s;base64,%s"
                   % (mime, base64.b64encode(payload).decode()))
         return
+    for field, label in _SOUND:
+        if message.get(field):
+            chat_send(user=user, message=_sound_line(
+                cfg, message, field, label, tg_fetch=tg_fetch,
+                transcribe=transcribe, log=log))
+            return
     text = message.get("text") or ""
     if not text:
-        log("skipped a message from %r that is neither text nor a photo"
+        log("skipped a message from %r that is neither text, a photo nor sound"
             % sender.get("id"))
         return
     chat_send(user=user, message=text)
+
+
+# The message fields that carry speech, and how the relayed line names each.
+_SOUND = (("voice", "voice note"), ("audio", "audio"), ("video_note", "video note"))
+
+
+def _sound_line(cfg, message, field, label, *, tg_fetch, transcribe, log):
+    """The chat line for a voice note, audio file or video note: its
+    transcript, or why there is none. Never nothing: a sender who spoke
+    gets an answer either way."""
+    sound = message[field]
+    seconds = int(sound.get("duration") or 0)
+    head = "%s %d:%02d" % (label, seconds // 60, seconds % 60)
+    caption = message.get("caption") or ""
+    tg_fetch = tg_fetch or (lambda file_id: _tg_fetch(cfg, file_id))
+    if transcribe is None:
+        from cousin_lib.transcribe import transcribe
+    # A failed download raises, as for a photo, and the update is retried;
+    # a failed transcription is told to the cousin, so it never holds
+    # the messages behind it.
+    fetched = tg_fetch(sound["file_id"])
+    try:
+        if fetched is None:
+            raise _NoText("over %d bytes" % _MAX_INBOUND_BYTES)
+        text = transcribe(*fetched)
+        if not text:
+            raise _NoText("nothing was heard")
+    except Exception as err:
+        reason = _describe(err)
+        log("%s from %r not transcribed: %s"
+            % (label, (message.get("from") or {}).get("id"), reason))
+        line = "[%s, not transcribed: %s]" % (head, reason)
+    else:
+        line = "[%s] %s" % (head, text)
+    return "%s\n%s" % (caption, line) if caption else line
+
+
+class _NoText(Exception):
+    """A sound message the bridge could not turn into text."""
 
 
 def relay_outbound(cfg, *, new_replies, tg_send_text,

@@ -304,12 +304,12 @@ class TestPumpInbound(_BridgeFixture):
         self.assertEqual(state["tg_offset"], 6)
         self.assertTrue(any("5" in line for line in logged))
 
-    def test_a_voice_message_is_skipped_with_a_log_line(self):
+    def test_a_sticker_is_skipped_with_a_log_line(self):
         cfg = self._bridge()
         sent, logged = [], []
         relay_inbound(
             cfg, update={"message": {"from": {"id": 42},
-                                     "voice": {"file_id": "v"}}},
+                                     "sticker": {"file_id": "s"}}},
             chat_send=lambda **kw: sent.append(kw), log=logged.append)
         self.assertEqual(sent, [])
         self.assertTrue(logged)
@@ -539,6 +539,90 @@ class TestInboundPhoto(_BridgeFixture):
             tg_fetch=lambda file_id: fetched.append(file_id),
             log=lambda line: None)
         self.assertEqual(fetched, [])
+
+
+class TestInboundVoice(_BridgeFixture):
+    """Speech becomes text through the transcribe seam; a sender who
+    spoke always gets a line to the cousin, never silence."""
+
+    def _relay(self, message, *, transcribe, fetch=None, logged=None):
+        cfg = self._bridge()
+        sent = []
+        message = dict({"from": {"id": 42}}, **message)
+        relay_inbound(
+            cfg, update={"message": message},
+            chat_send=lambda **kw: sent.append(kw),
+            tg_fetch=fetch or (lambda file_id: (b"OGG", "voice/file_7.oga")),
+            transcribe=transcribe,
+            log=(logged.append if logged is not None else lambda line: None))
+        return sent
+
+    def test_a_voice_note_goes_in_as_its_transcript(self):
+        heard = []
+        sent = self._relay({"voice": {"file_id": "v", "duration": 42}},
+                           transcribe=lambda payload, name, **kw: heard.append((payload, name, kw))
+                           or "hello wren")
+        self.assertEqual(heard, [(b"OGG", "voice/file_7.oga", {})])
+        self.assertEqual(sent, [{"user": "Sam", "message": "[voice note 0:42] hello wren"}])
+
+    def test_audio_and_video_notes_are_heard_too(self):
+        for field, label in (("audio", "audio"), ("video_note", "video note")):
+            sent = self._relay({field: {"file_id": "a", "duration": 125}},
+                               transcribe=lambda payload, name, **kw: "words")
+            self.assertEqual(sent[0]["message"], "[%s 2:05] words" % label)
+
+    def test_a_caption_rides_above_the_transcript(self):
+        sent = self._relay({"audio": {"file_id": "a", "duration": 3}, "caption": "listen"},
+                           transcribe=lambda payload, name, **kw: "words")
+        self.assertEqual(sent[0]["message"], "listen\n[audio 0:03] words")
+
+    def test_with_no_provider_the_cousin_is_told_a_voice_note_came(self):
+        from cousin_lib.media import NoProviderConfigured
+
+        def off(payload, name, **kw):
+            raise NoProviderConfigured("no transcribe provider configured")
+        logged = []
+        sent = self._relay({"voice": {"file_id": "v", "duration": 5}},
+                           transcribe=off, logged=logged)
+        self.assertEqual(sent[0]["message"],
+                         "[voice note 0:05, not transcribed: no transcribe provider configured]")
+        self.assertTrue(any("not transcribed" in line for line in logged))
+
+    def test_a_failing_provider_or_silence_is_told_not_retried(self):
+        from cousin_lib.media import MediaError
+
+        def down(payload, name, **kw):
+            raise MediaError("transcribe provider http://h/x failed: refused")
+        sent = self._relay({"voice": {"file_id": "v"}}, transcribe=down)
+        self.assertIn("not transcribed: transcribe provider", sent[0]["message"])
+        sent = self._relay({"voice": {"file_id": "v"}}, transcribe=lambda p, n, **kw: "")
+        self.assertEqual(sent[0]["message"], "[voice note 0:00, not transcribed: nothing was heard]")
+
+    def test_an_oversize_note_is_told_without_transcribing(self):
+        heard = []
+        sent = self._relay({"voice": {"file_id": "v", "duration": 4000}},
+                           fetch=lambda file_id: None,
+                           transcribe=lambda p, n, **kw: heard.append(p))
+        self.assertEqual(heard, [])
+        self.assertIn("not transcribed: over", sent[0]["message"])
+
+    def test_a_failed_download_raises_so_the_update_is_retried(self):
+        def fetch(file_id):
+            raise OSError("network down")
+        with self.assertRaises(OSError):
+            self._relay({"voice": {"file_id": "v"}}, fetch=fetch,
+                        transcribe=lambda p, n, **kw: "never")
+
+    def test_a_stranger_voice_note_is_never_downloaded_or_heard(self):
+        cfg = self._bridge()
+        touched = []
+        relay_inbound(
+            cfg, update={"message": {"from": {"id": 999}, "voice": {"file_id": "v"}}},
+            chat_send=lambda **kw: touched.append("sent"),
+            tg_fetch=lambda file_id: touched.append("fetched"),
+            transcribe=lambda p, n, **kw: touched.append("heard"),
+            log=lambda line: None)
+        self.assertEqual(touched, [])
 
 
 class TestRootFromHome(TelegramCase):

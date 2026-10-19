@@ -538,8 +538,11 @@ function SysMediaEditor({ file, reload }) {
   const fieldsFor = (kind) => [
     { table: kind, key: "url", label: "url", kind: "url", placeholder: "http(s)://... (unset: kind off)" },
     { table: kind, key: "model", label: "model", kind: "str" },
-    { table: kind, key: "timeout_s", label: "timeout_s", kind: "num", placeholder: "120" },
-  ];
+    { table: kind, key: "timeout_s", label: "timeout_s", kind: "num", placeholder: kind === "transcribe" ? "300" : "120" },
+  ].concat(kind === "transcribe" ? [
+    { table: kind, key: "language", label: "language", kind: "str", placeholder: "auto (or da, en, it...)" },
+    { table: kind, key: "prompt", label: "prompt", kind: "str", hint: "words to expect: names, places" },
+  ] : []);
   const secret = async (kind, value) => {
     const res = await sysSend("POST", `/api/system/config/media/${kind}/secret`, { value });
     setMsg(res.ok ? { ok: true, text: `${kind} key saved` } : { ok: false, text: res.d.error || "refused" });
@@ -555,10 +558,10 @@ function SysMediaEditor({ file, reload }) {
     setMsg(res.ok ? { ok: true, text: `[${kind}] removed` } : { ok: false, text: res.d.error || "refused" });
     reload();
   };
-  return <SysPanel title="media" sub="config/media.toml: image, voice, video providers">
+  return <SysPanel title="media" sub="config/media.toml: image, voice, video providers, and transcribe (speech to text for Telegram voice notes)">
     <SysFileHead file={file} />
     <SysNote msg={msg} />
-    {["image", "voice", "video"].map(kind => {
+    {["image", "voice", "video", "transcribe"].map(kind => {
       const k = file.kinds[kind] || {};
       return <div key={kind} style={{ borderTop: "1px solid var(--line-soft)", paddingTop: 8 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

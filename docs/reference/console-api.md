@@ -1053,7 +1053,7 @@ The same for one cousin (`?all=1` for its history, 100 at most).
 
 `{"ok": true, "files": {...}}`: the install config files by name, each `{"path", "exists", "error", "applies", "restart"}` plus its values:
 
-- `media`: `kinds.<image|voice|video>` = `{url, model, timeout_s, key_file, key: {set, last4, error}}` or null; `key` is read as media reads it (a plain read under the root);
+- `media`: `kinds.<image|voice|video|transcribe>` = `{url, model, timeout_s, language, prompt, key_file, key: {set, last4, error}}` or null (`language` and `prompt` are set only on `transcribe`, the one kind that takes them); `key` is read as media reads it (a plain read under the root);
 - `embedding`, `hive`: `values` by key (`recall.min_score` for a subtable key);
 - `peers`: `peers.<slug>` = `{url, send_path, name, sender, reach, token_file, inbound_token_file, token, inbound_token, shadowed, unknown_reach}`; a token is read as `chat.read_secret` reads it, so a file group or others can read shows its refusal in `error`;
 - `outbound_filter`, `law`: `{content, sha}`;

@@ -59,7 +59,7 @@ _PEER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 PROMPT_MAX_CHARS = 8000
 TEXT_MAX_CHARS = 256 * 1024
 BACKUPS_KEPT = 20
-MEDIA_KINDS = ("image", "voice", "video")
+MEDIA_KINDS = ("image", "voice", "video", "transcribe")
 COMMAND_FILES = ("agent-cmd", "worker-cmd")
 CONSOLE_RESTART_ROUTE = "/api/admin/restart/framework"
 
@@ -470,6 +470,9 @@ def _check_media(text):
             _check_value("str", section["model"], "%s.model" % kind)
         if section.get("timeout_s") is not None:
             _check_value("posnum", section["timeout_s"], "%s.timeout_s" % kind)
+        for key in ("language", "prompt"):
+            if section.get(key) is not None:
+                _check_value("str", section[key], "%s.%s" % (kind, key))
         key_file = section.get("key_file")
         if key_file is not None and (not isinstance(key_file, str) or os.path.isabs(key_file)
                                      or ".." in Path(key_file).parts):
@@ -509,10 +512,12 @@ def _check_peers(text):
 TOML_FILES = {
     "media": {
         "file": "media.toml",
-        "fields": {(r"^(image|voice|video)$", "url"): "url",
-                   (r"^(image|voice|video)$", "model"): "str",
-                   (r"^(image|voice|video)$", "timeout_s"): "posnum"},
-        "removable": r"^(image|voice|video)$",
+        "fields": {(r"^(image|voice|video|transcribe)$", "url"): "url",
+                   (r"^(image|voice|video|transcribe)$", "model"): "str",
+                   (r"^(image|voice|video|transcribe)$", "timeout_s"): "posnum",
+                   (r"^transcribe$", "language"): "str",
+                   (r"^transcribe$", "prompt"): "str"},
+        "removable": r"^(image|voice|video|transcribe)$",
         "check": _check_media,
         "applies": "read at every generation: no restart",
     },
@@ -689,6 +694,8 @@ def _file_state(server, name):
                 continue
             kinds[kind] = {"url": section.get("url"), "model": section.get("model"),
                            "timeout_s": section.get("timeout_s"),
+                           "language": section.get("language"),
+                           "prompt": section.get("prompt"),
                            "key_file": section.get("key_file"),
                            "key": _secret_state_rel(server, section.get("key_file"), "media")}
         out["kinds"] = kinds

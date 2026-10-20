@@ -598,10 +598,11 @@ recover.
 **The console page loads but stays blank**
 - Check: the browser's console, and the console's stderr. React and the
   app's compiled code come from the install (`vendor/`, `compiled/`); a
-  404 there means the install is missing files (reinstall it). If stderr
-  says `serving the JSX uncompiled`, a `.jsx` changed since the last
-  build and the page needs Babel from unpkg, so a browser without
-  internet gets a blank page.
+  404 under `vendor/` means the install is missing files (reinstall it).
+  If stderr says `serving the JSX uncompiled`, the compiled copy is stale
+  or missing (a `.jsx` changed since the last build, or a `compiled/`
+  file is gone) and the page needs Babel from unpkg, so a browser
+  without internet gets a blank page.
 - Fix: for the stale build, run `python -m cousin_lib.console.build`
   (needs Node) or switch to a release, which ships its compiled copy.
 

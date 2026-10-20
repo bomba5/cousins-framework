@@ -389,9 +389,9 @@ daemon and every cousin's runner, and two timers.
   you know you won't use it. Everything else in the framework is standard library.
 - **Ollama with `nomic-embed-text`** (optional). Gives memory search a
   semantic leg. Without it, search is keyword only.
-- **A browser with internet access** for the console. The page loads React,
-  Babel, marked, mermaid and xterm from unpkg and jsdelivr. The backend
-  fetches nothing.
+- **A browser** for the console. The page opens without internet; only
+  diagrams in chat need it (mermaid comes from jsdelivr on the first one).
+  The backend fetches nothing.
 
 ### 1. System packages
 

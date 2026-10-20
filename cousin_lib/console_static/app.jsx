@@ -427,13 +427,14 @@ function App() {
   const needLogin = !!(auth && auth.configured && !auth.user);
   const sessionUser = (auth && auth.user) || "";
 
-  // Embed mode: pin fullscreen chat class on body so the chrome is hidden
-  // (reuses the body.chat-fullscreen CSS).
+  // Embed mode: mark the body; ChatView (embed prop) pins the
+  // body.chat-fullscreen class that hides the chrome. Setting it here
+  // too would lose to ChatView's own effect, which runs after it
+  // (ChatView mounts in a later commit than App).
   useEffectApp(() => {
     if (!embedMode) return;
-    document.body.classList.add("chat-fullscreen", "chat-embed");
-    try { localStorage.setItem("console_chat_fullscreen", "1"); } catch (_e) {}
-    return () => document.body.classList.remove("chat-fullscreen", "chat-embed");
+    document.body.classList.add("chat-embed");
+    return () => document.body.classList.remove("chat-embed");
   }, [embedMode]);
 
   // A page load lands on ?view= (else Overview); the effect below keeps

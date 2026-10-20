@@ -165,12 +165,16 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   };
   // The header goes compact when the chat column is narrow, not only on a phone.
   const [chatColRef, narrowCol] = window.useNarrowerThan ? useNarrowerThan(CHAT_COMPACT_PX) : [null, false];
+  // Embedded (?embed=1), the chat is always full screen and the choice
+  // is not saved: an embed must not leave the console full screen.
   React.useEffect(() => {
-    try { localStorage.setItem("fw_chat_fullscreen", fullscreen ? "1" : "0"); }
-    catch (e) { /* ignore */ }
-    document.body.classList.toggle("chat-fullscreen", fullscreen);
+    if (!embed) {
+      try { localStorage.setItem("fw_chat_fullscreen", fullscreen ? "1" : "0"); }
+      catch (e) { /* ignore */ }
+    }
+    document.body.classList.toggle("chat-fullscreen", fullscreen || !!embed);
     return () => document.body.classList.remove("chat-fullscreen");
-  }, [fullscreen]);
+  }, [fullscreen, embed]);
   React.useEffect(() => {
     if (!archiveArmed) return;
     const t = setTimeout(() => setArchiveArmed(false), 3500);
@@ -232,7 +236,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
       <div ref={splitRef} className={"chat-split" + (paneShown ? " pane-open" : "") + (chatHidden ? " chat-collapsed" : "")} style={{ "--pane-w": paneW + "%" }}>
         <div className="chat-col" ref={chatColRef} aria-hidden={chatHidden || undefined}>
           <ChatHeader cousin={c} chatUser={chatUser} paneOpen={paneShown} setPaneOpen={setPaneOpen} search={search} setSearch={setSearch} onArchive={onArchive} fullscreen={fullscreen} setFullscreen={embed ? null : setFullscreen} embed={embed} showArchived={showArchived} setShowArchived={setShowArchived} mediaShown={mediaShown} setMediaShown={setMediaShown} narrow={narrowCol} />
-          {fullscreen && (
+          {fullscreen && !embed && (
             <button className="chat-fullscreen-exit"
                     onClick={() => setFullscreen(false)}
                     title="exit fullscreen">x exit</button>

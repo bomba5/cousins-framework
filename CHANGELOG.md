@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.55.1 - 2026-10-20
+
+### Fixed
+
+- **`?embed=1` hides the console's chrome again.** app.jsx put
+  `chat-fullscreen` on the body, then ChatView's own effect (which owns
+  the class and runs after it, ChatView mounting later) took it off, so an embedded chat showed the
+  top bar and the chat header. ChatView now holds the class while
+  embedded and does not save that as your full-screen choice. The
+  phone app's bubbles load a cousin's chat this way.
+
 ## 3.55.0 - 2026-10-20
 
 ### Added

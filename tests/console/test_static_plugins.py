@@ -87,9 +87,11 @@ class NoPluginsNoUi(unittest.TestCase):
         view = _component(_read("chat.jsx"), "ChatView")
         col = view[view.index('<div className="chat-col"'):view.index("{paneShown && !chatHidden && (")]
         # less what the chat layout adds since: the column's measuring ref and collapse
-        # (the compact header) and the narrow flag it hands the header
+        # (the compact header), the narrow flag it hands the header, and 3.55.1's
+        # exit button hidden while embedded
         col = col.replace(' ref={chatColRef} aria-hidden={chatHidden || undefined}', '', 1)
         col = col.replace(' narrow={narrowCol} />', ' />', 1)
+        col = col.replace('{fullscreen && !embed && (', '{fullscreen && (', 1)
         strip = re.search(r"\{chatStrips\.length > 0 && window\.PluginChatStrips && \(\s*"
                           r"<PluginChatStrips slug=\{c\.slug\} tabs=\{chatStrips\} />\s*\)\}",
                           col)

@@ -90,17 +90,20 @@ class StaticFilesPresent(unittest.TestCase):
             self.assertTrue(path.is_file(), "missing static file: %s" % path)
             self.assertGreater(path.stat().st_size, 0, "empty static file: %s" % path)
 
-    def test_index_loads_every_jsx_through_babel_from_pinned_cdn_tags(self):
+    def test_index_loads_every_jsx_through_babel_and_react_from_vendor(self):
+        # as written; static.py swaps the app block for compiled/ while
+        # it is current (test_console_build)
         html = (_STATIC / "index.html").read_text(encoding="utf-8")
         for name in REQUIRED:
             if name.endswith(".jsx"):
                 self.assertRegex(
                     html, r'<script[^>]*type="text/babel"[^>]*src="%s"' % re.escape(name),
                     "index.html does not load %s through Babel" % name)
-        for lib in ("react@18", "react-dom@18", "@babel/standalone@"):
-            self.assertIn(lib, html, "index.html does not pin %s" % lib)
-        self.assertRegex(html, r"react@18\.\d+\.\d+", "React tag is not pinned to a version")
-        self.assertRegex(html, r"@babel/standalone@\d+\.\d+\.\d+", "Babel tag is not pinned to a version")
+        for lib in ("vendor/react.production.min.js",
+                    "vendor/react-dom.production.min.js"):
+            self.assertIn('src="%s"' % lib, html, "index.html does not load %s" % lib)
+        self.assertRegex(html, r'src="https://unpkg\.com/@babel/standalone@\d+\.\d+\.\d+/[^"]+" integrity="sha384-',
+                         "Babel tag is not pinned to a version with its hash")
 
 
 class StaticFilesBrand(unittest.TestCase):

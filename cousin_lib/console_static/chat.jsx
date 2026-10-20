@@ -1122,6 +1122,17 @@ function PaneView({ cousin, onClose, serial }) {
   const paneStateRef = React.useRef(null);
   const pendingStateRef = React.useRef(null);
   const [held, setHeld] = React.useState(false);
+  // xterm loads on first use (window.loadLib, index.html): the pane
+  // boots no terminal and opens no stream until it is in.
+  const [xtermReady, setXtermReady] = React.useState(!!window.Terminal);
+  React.useEffect(() => {
+    if (xtermReady) return;
+    let live = true;
+    window.loadLib("xterm").then(
+      () => { if (live) setXtermReady(true); },
+      () => { if (live) setStatus("error"); });
+    return () => { live = false; };
+  }, [xtermReady]);
 
   // Rewrite the terminal with one full frame and land on its last line.
   // Only refs are read, so the closure a stale render captured still
@@ -1153,7 +1164,7 @@ function PaneView({ cousin, onClose, serial }) {
   // the terminal; `delta` frames append, so the cursor stays at the tail
   // and scrollback survives.
   React.useEffect(() => {
-    if (!slug || !hostRef.current || !window.Terminal) return;
+    if (!xtermReady || !slug || !hostRef.current) return;
     const term = new window.Terminal({
       convertEol: true,
       cursorBlink: true,
@@ -1376,14 +1387,14 @@ function PaneView({ cousin, onClose, serial }) {
       fitRef.current = null;
       lastTextRef.current = "";
     };
-  }, [slug]);
+  }, [slug, xtermReady]);
 
   // SSE stream -> xterm. Auto-reconnect on error with capped backoff so a
   // console restart, a backgrounded tab and transient network blips heal
   // without user action. The contract allows any mix of `pane` and `delta`
   // frames; both are handled.
   React.useEffect(() => {
-    if (!slug) return;
+    if (!slug || !xtermReady) return;
     let es;
     let reconnectTimer;
     let attempt = 0;
@@ -1468,7 +1479,7 @@ function PaneView({ cousin, onClose, serial }) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       try { if (es) es.close(); } catch (_e) {}
     };
-  }, [slug]);
+  }, [slug, xtermReady]);
 
   // Tick for 'X s ago' labels
   const [, setNow] = React.useState(Date.now());
@@ -2990,13 +3001,17 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
 
   React.useEffect(() => {
     if (streaming) return;  // wait to render mermaid until full text is in
-    if (!divRef.current || !window.mermaid) return;
+    if (!divRef.current) return;
     const blocks = divRef.current.querySelectorAll("pre code.language-mermaid, code.language-mermaid");
+    if (!blocks.length) return;
+    // mermaid loads on the first diagram (window.loadLib, index.html)
     blocks.forEach(async (block, i) => {
       const src = block.textContent;
       const id = `mmd-${msg.id}-${i}`;
       try {
-        const { svg } = await window.mermaid.render(id, src);
+        const mermaid = await window.loadLib("mermaid");
+        if (!block.isConnected) return;
+        const { svg } = await mermaid.render(id, src);
         const container = document.createElement("div");
         container.className = "mermaid-rendered";
         container.innerHTML = svg;

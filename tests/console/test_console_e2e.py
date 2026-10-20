@@ -260,13 +260,19 @@ class ConsoleEndToEnd(ConsoleCase):
         page = body.decode()
         for name in ("data.jsx", "ui.jsx", "chat.jsx", "cousins.jsx",
                      "views.jsx", "app.jsx"):
-            self.assertRegex(page, r'<script type="text/babel" src="%s\?v=\d+">'
+            self.assertRegex(page, r'<script type="text/babel" src="%s\?v=[0-9a-f]{12}">'
                              % name.replace(".", r"\."))
         status, headers, body = self.get("/app.jsx", raw=True)
         self.assertEqual(status, 200)
         self.assertEqual(headers["Content-Type"], "text/jsx; charset=utf-8")
         self.assertEqual(headers["Cache-Control"], "no-store")
         self.assertIn(b"React", body)
+        # the URL the page names carries the content stamp: cached for good
+        stamped = re.search(r'src="(app\.jsx\?v=[0-9a-f]{12})"', page).group(1)
+        status, headers, stamped_body = self.get("/" + stamped, raw=True)
+        self.assertEqual((status, stamped_body), (200, body))
+        self.assertEqual(headers["Cache-Control"],
+                         "public, max-age=31536000, immutable")
         status, headers, _ = self.get("/styles.css", raw=True)
         self.assertEqual((status, headers["Content-Type"]),
                          (200, "text/css; charset=utf-8"))

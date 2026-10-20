@@ -3,6 +3,25 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.54.1 - 2026-10-20
+
+### Fixed
+
+- **The console opens faster.** A cold open took about 5 s on a phone,
+  on the LAN and over a VPN alike. Every load downloaded every file again
+  (`no-store` on all of them), ran React's development build and parsed
+  3.6 MB of mermaid and xterm that most opens never use.
+- **Files are cached until they change.** `index.html` now stamps each
+  local file with a content hash (`?v=<hash>`) instead of its mtime.
+  A file asked for with its current stamp is cached for good
+  (`immutable`); a changed file gets a new stamp, so a redeploy still
+  shows on the next load. The page itself stays `no-store`.
+- **Text is gzipped** when the browser accepts it.
+- **React production builds**, and marked pinned to 15.0.12 with an
+  SRI hash (it was the one unpinned library).
+- **mermaid and xterm load on first use** (a diagram in a message, the
+  live pane) through `window.loadLib`, pinned with SRI hashes.
+
 ## 3.54.0 - 2026-10-19
 
 ### Added

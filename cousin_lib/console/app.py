@@ -14,7 +14,8 @@ Extension points:
   never at module level.
 - `ConsoleServer.static_handler`: `None` means `static.serve_static`
   over `ConsoleServer.static_dir` (suffix allowlist, traversal check,
-  no-store, index for `/`); a frontend may assign
+  content stamps and their cache headers, gzip, index for `/`); a
+  frontend may assign
   `fn(handler, path)` instead.
 - `ConsoleServer.emit(kind, data)`: command handlers announce what
   they did (`cousin-status`, `cousin-flip`, `tracker-change`, the job
@@ -170,8 +171,14 @@ def load_routes():
 
 
 def default_static(handler, path):
-    """`static.serve_static` over the server's static directory."""
-    status, headers, body = serve_static(path, root=handler.console.static_dir)
+    """`static.serve_static` over the server's static directory. The
+    query comes from the raw request line: its `v` stamp sets the cache
+    header."""
+    query = urllib.parse.urlsplit(handler.path).query
+    status, headers, body = serve_static(
+        path + ("?" + query if query else ""),
+        root=handler.console.static_dir,
+        accept_encoding=handler.headers.get("Accept-Encoding", ""))
     handler.send_response(status)
     for key, value in headers:
         handler.send_header(key, value)

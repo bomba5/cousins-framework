@@ -18,65 +18,54 @@
 <div id="root"></div>
 
 <!--
-  The one runtime network fetch a browser makes for this console
-  (docs/reference/console-api.md, "Static files"). Every URL is pinned
-  and carries an SRI hash, so the browser may cache it for good:
-    react 18.3.1, react-dom 18.3.1 (unpkg, UMD production builds)
-    @babel/standalone 7.29.0 (unpkg)
-    marked 15.0.12 (jsdelivr)
-    mermaid 10.9.8, xterm 5.3.0, xterm-addon-fit 0.8.0 (jsdelivr),
-      loaded on first use through window.loadLib below
-  An install that cannot allow the fetch vendors these files under the
-  static directory and edits the URLs; nothing else changes.
+  Libraries, kept under vendor/ at pinned versions (cousin_lib/console/
+  build.py, LIBS): react 18.3.1, react-dom 18.3.1 (production UMD),
+  marked 15.0.12, and on first use xterm 5.3.0 and xterm-addon-fit
+  0.8.0. mermaid 10.9.8 comes from jsdelivr on the first diagram,
+  pinned with its SRI hash (build.py, CDN_LIBS); Babel comes from unpkg
+  only while the compiled copy is stale (below).
 -->
-<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
-<!-- markdown for the chat view -->
-<script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
+<script src="vendor/react.production.min.js"></script>
+<script src="vendor/react-dom.production.min.js"></script>
+<script src="vendor/marked.min.js"></script>
+<!-- Libraries most opens never use: mermaid on the first diagram, xterm
+     when the live pane opens. Inert here; window.loadLib(name) copies a
+     library's tags into <head> and resolves with the library. -->
+<template id="lazy-libs">
+<script data-lib="mermaid" src="https://cdn.jsdelivr.net/npm/mermaid@10.9.8/dist/mermaid.min.js" integrity="sha384-N3QqR/7q+xm3BGX+CBbNI8AUmRRqcsDzToy+0z1NLDI0QmTKW8zvwLvqulJgk3dP" crossorigin="anonymous"></script>
+<link data-lib="xterm" rel="stylesheet" href="vendor/xterm.min.css" />
+<script data-lib="xterm" src="vendor/xterm.min.js"></script>
+<script data-lib="xterm" src="vendor/xterm-addon-fit.min.js"></script>
+</template>
 <script>
-  // Libraries most opens never use load on first use: mermaid on the
-  // first diagram, xterm when the live pane opens. Together they are
-  // 3.6 MB a phone would otherwise parse on every open.
-  // window.loadLib(name) -> Promise of the library, one load per name.
   (function () {
-    var CDN = "https://cdn.jsdelivr.net/npm/";
-    var LIBS = {
-      mermaid: {
-        scripts: [["mermaid@10.9.8/dist/mermaid.min.js", "sha384-N3QqR/7q+xm3BGX+CBbNI8AUmRRqcsDzToy+0z1NLDI0QmTKW8zvwLvqulJgk3dP"]],
-        ready: function () {
-          window.mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "loose" });
-          return window.mermaid;
-        },
+    var READY = {
+      mermaid: function () {
+        window.mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "loose" });
+        return window.mermaid;
       },
-      xterm: {
-        styles: [["xterm@5.3.0/css/xterm.min.css", "sha384-9ftsg11+LSxVUaknegCfeKvlkO9EdIPI2op725RqY87IvhyGjElmpjZlP3LhTQjn"]],
-        scripts: [["xterm@5.3.0/lib/xterm.min.js", "sha384-xjfWUeCWdMtvpAb/SmM6lMzS6pQGcQa0loOl1d97j6Odw0vjK9nW3+dTb/bn/mwH"],
-                  ["xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js", "sha384-dpjGwSSISUTz2taP54Bor7qkyMR20sSO9oe11UVYnGs2/YdUBf7HW30XKQx9PCzn"]],
-        ready: function () { return window.Terminal; },
-      },
+      xterm: function () { return window.Terminal; },
     };
     var loading = {};
-    function tag(kind, path, hash) {
+    function copy(tag) {
       return new Promise(function (resolve, reject) {
-        var el = document.createElement(kind === "css" ? "link" : "script");
-        if (kind === "css") { el.rel = "stylesheet"; el.href = CDN + path; }
-        else { el.src = CDN + path; el.async = false; }
-        el.integrity = hash;
-        el.crossOrigin = "anonymous";
+        var el = document.createElement(tag.tagName.toLowerCase());
+        if (el.tagName === "LINK") { el.rel = "stylesheet"; el.href = tag.getAttribute("href"); }
+        else { el.src = tag.getAttribute("src"); el.async = false; }  // in order: the fit addon after xterm
+        if (tag.getAttribute("integrity")) {
+          el.integrity = tag.getAttribute("integrity");
+          el.crossOrigin = "anonymous";
+        }
         el.onload = function () { resolve(); };
-        el.onerror = function () { reject(new Error("could not load " + path)); };
+        el.onerror = function () { reject(new Error("could not load " + (el.src || el.href))); };
         document.head.appendChild(el);
       });
     }
     window.loadLib = function (name) {
-      var lib = LIBS[name];
-      if (!lib) return Promise.reject(new Error("no library " + name));
+      var tags = document.getElementById("lazy-libs").content.querySelectorAll('[data-lib="' + name + '"]');
+      if (!READY[name] || !tags.length) return Promise.reject(new Error("no library " + name));
       if (!loading[name]) {
-        var css = (lib.styles || []).map(function (s) { return tag("css", s[0], s[1]); });
-        // async=false keeps the scripts in order (the fit addon after xterm)
-        var js = lib.scripts.map(function (s) { return tag("js", s[0], s[1]); });
-        loading[name] = Promise.all(css.concat(js)).then(lib.ready);
+        loading[name] = Promise.all(Array.prototype.map.call(tags, copy)).then(READY[name]);
         // a failed load is retried on the next call
         loading[name].catch(function () { delete loading[name]; });
       }
@@ -85,6 +74,12 @@
   })();
 </script>
 
+<!-- app:start
+  The app, one file per area. static.py serves compiled/<name>.js in
+  place of each .jsx while compiled/manifest.json matches the sources
+  (cousin_lib/console/build.py), and drops the Babel tag; otherwise the
+  browser compiles the .jsx itself, so an edit shows on the next reload. -->
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 <!-- Load order matters: each file publishes its exports on window for the next. -->
 <script type="text/babel" src="data.jsx"></script>
 <script type="text/babel" src="ui.jsx"></script>
@@ -104,5 +99,6 @@
 <script type="text/babel" src="system.jsx"></script>
 <script type="text/babel" src="plugins.jsx"></script>
 <script type="text/babel" src="app.jsx"></script>
+<!-- app:end -->
 </body>
 </html>

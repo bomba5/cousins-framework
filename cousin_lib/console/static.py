@@ -6,7 +6,10 @@ the server calls it for every non-`/api/` GET. Suffix allowlist, a
 resolve-then-contain traversal check (403 outside the root, 404 for
 anything else that is not a served file), and `index.html` served for
 `/` with a `?v=<hash>` stamp (the referenced file's content hash) on
-each local `src`/`href`. The page itself is `Cache-Control: no-store`,
+each local `src`/`href`. While `compiled/manifest.json` matches the
+sources (build.py), the page's app block loads `compiled/<name>.js`
+in place of each `.jsx` and drops Babel; otherwise it is served as
+written and the browser compiles the JSX. The page itself is `Cache-Control: no-store`,
 so a redeploy is seen on the next load; a file requested with its
 current stamp is cached for good (a changed file gets a new stamp, so a
 new URL), and anything else is `no-store`. Text bodies are gzipped
@@ -18,9 +21,12 @@ import gzip
 import hashlib
 import json
 import re
+import sys
 import threading
 import urllib.parse
 from pathlib import Path
+
+from cousin_lib.console import build
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "console_static"
 
@@ -50,6 +56,15 @@ IMMUTABLE = "public, max-age=31536000, immutable"
 # hashed and compressed once per version, not once per request.
 _FILE_CACHE = {}
 _FILE_CACHE_LOCK = threading.Lock()
+
+_APP_BLOCK_RE = re.compile(r"(<!-- app:start.*?-->)(.*?)(<!-- app:end -->)",
+                           re.S)
+_BABEL_TAG_RE = re.compile(
+    r'<script src="[^"]*/@babel/standalone@[^"]*"[^>]*></script>\n?')
+_JSX_TAG_RE = re.compile(
+    r'<script type="text/babel" src="([^"?#]+)\.jsx"></script>')
+# The last reason the compiled copy was passed over, said once.
+_last_stale = [None]
 
 _REF_RE = re.compile(r'\b(src|href)="([^"?#]+)"')
 _REMOTE_PREFIXES = ("http://", "https://", "//", "data:", "mailto:")
@@ -123,6 +138,35 @@ def _stamp_index(html, root):
     return _REF_RE.sub(repl, html)
 
 
+def _cached_stamp(path):
+    stamp = _stamp(path)
+    if stamp is None:
+        raise OSError("%s is not a servable file" % path.name)
+    return stamp
+
+
+def _app_block(html, root):
+    """The page with its app block on the compiled files when they are
+    current, else as written (the browser compiles the JSX)."""
+    m = _APP_BLOCK_RE.search(html)
+    if not m:
+        return html
+    why = build.stale(root, file_stamp=_cached_stamp)
+    if why:
+        if why != _last_stale[0]:
+            _last_stale[0] = why
+            print("cousin-console: serving the JSX uncompiled: %s;"
+                  " run python -m cousin_lib.console.build" % why,
+                  file=sys.stderr)
+        return html
+    _last_stale[0] = None
+    body = _BABEL_TAG_RE.sub("", m.group(2))
+    body = _JSX_TAG_RE.sub(
+        lambda t: '<script src="%s/%s.js"></script>'
+        % (build.COMPILED, t.group(1)), body)
+    return html[:m.start(2)] + body + html[m.end(2):]
+
+
 def accepts_gzip(accept_encoding):
     """True when an Accept-Encoding header allows gzip (q=0 refuses)."""
     for part in (accept_encoding or "").split(","):
@@ -163,8 +207,8 @@ def serve_static(path, *, root=None, accept_encoding=""):
     suffix = candidate.suffix.lower()
     cache = NO_STORE
     if candidate.name == "index.html" and candidate.parent == base:
-        payload = _stamp_index(payload.decode("utf-8", "replace"),
-                               base).encode()
+        html = _app_block(payload.decode("utf-8", "replace"), base)
+        payload = _stamp_index(html, base).encode()
         packed = gzip.compress(payload, compresslevel=6, mtime=0) \
             if len(payload) >= GZIP_MIN else None
     elif urllib.parse.parse_qs(split.query).get("v") == [stamp]:

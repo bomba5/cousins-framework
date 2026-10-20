@@ -3,6 +3,33 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.55.0 - 2026-10-20
+
+### Added
+
+- **The console's JSX is compiled ahead of time.** A pinned esbuild
+  compiles each `.jsx` into `console_static/compiled/`, committed with
+  a manifest of content stamps; `python -m cousin_lib.console.build`
+  makes it, `check` and `verify` test it (docs/development.md, "The
+  console build"). In headless Chromium the console's first render went
+  from about 12 s to 0.2 s: Babel compiling 745 KB in the browser was
+  nearly all of the load.
+- **The page no longer needs a CDN to open.** React, marked and xterm
+  are kept in `console_static/vendor/` at pinned versions with their SRI
+  hashes checked by `build vendor`. A console with no internet works,
+  and a CDN outage no longer breaks it. mermaid still comes from
+  jsdelivr, pinned with its SRI hash, on the first diagram only: its
+  minified identifiers trip the publish gate.
+
+### Changed
+
+- **An edited `.jsx` still shows on the next reload.** While the
+  compiled copy does not match the sources, the console serves the page
+  as written and the browser compiles it with Babel, as before; it says
+  so once on stderr. A stale build is never served.
+- CI has a `console build` job: a fresh compile must match the committed
+  one.
+
 ## 3.54.1 - 2026-10-20
 
 ### Fixed

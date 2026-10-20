@@ -177,3 +177,19 @@ jobs:
           merge-multiple: true
       - name: All three shards passed and ran every module once
         run: python3 .github/scripts/suite.py verify --of 3 shards
+
+  console-build:
+    name: console build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # The committed compiled/ is what the pinned esbuild makes of the
+      # .jsx now; the suite only checks the recorded stamps.
+      - name: A fresh compile matches the committed one
+        run: python -m cousin_lib.console.build verify

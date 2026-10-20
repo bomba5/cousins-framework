@@ -19,9 +19,10 @@ extras are optional. `sdk` (the Claude Agent SDK) is what an `sdk`
 [runner](glossary.md#runner) kind, so a working install needs it. `mcp` (the MCP SDK) is needed only by `cousin-mcp`. The suite runs
 without either, and CI runs it both ways: plain `-e .` on 3.11-3.13, and
 `.[sdk,mcp]` on 3.13 (`test (sdk lane)`), where the sdk-lane and
-MCP-serving tests run instead of skipping. The console's frontend is JSX compiled in the
-browser (React and Babel from a CDN), so there's no build step either:
-edit a `.jsx` file and reload.
+MCP-serving tests run instead of skipping. The console's frontend is JSX, compiled ahead of
+time into `console_static/compiled/` and committed, so an install needs
+no Node; see [The console build](#the-console-build). Edit a `.jsx` file
+and reload: the console compiles it in the browser until you rebuild.
 
 ## Repo layout
 
@@ -29,7 +30,7 @@ edit a `.jsx` file and reload.
 |---|---|
 | `cousin_lib/` | all the Python. One module per feature, most with a CLI: `memory.py` is `cousin-memory`, `jobs.py` is `cousin-job`, `hive.py` is `cousin-hive`, and so on. `config.py` finds the root and reads `cousin.toml` |
 | `cousin_lib/console/` | the web console's server: `app.py` (the HTTP server, login, network guard), `router.py`, one `routes_*.py` per area, `hive.py` (the queen routes), `proxy.py` (chat), `pane.py` (the tmux pane), `sse.py` (the live event stream) |
-| `cousin_lib/console_static/` | the console's frontend: `index.html`, one `.jsx` per view, `styles.css` |
+| `cousin_lib/console_static/` | the console's frontend: `index.html`, one `.jsx` per view, `styles.css`; `compiled/` (the `.jsx` compiled, generated) and `vendor/` (the pinned libraries) |
 | `cousin_lib/server/` | the chat API in-process (no per-cousin chat server runs): `chat_api.py` (history, search, send, reply, archive, reactions), `storage.py` (the SQLite chat store), `inbound.py` (what follows a stored message), `netguard.py` (who may connect) |
 | `cousin_lib/delivery.py` | the one way anything reaches a [cousin](glossary.md#cousin): a typed, thread-keyed `Item` handed to `deliver()`, which picks the backend. Producers never build an injector themselves |
 | `cousin_lib/gate/` | the contamination gate (`cousin-gate`) |
@@ -200,6 +201,44 @@ Both jobs first point the runner's Docker daemon at mirror.gcr.io
 limit failed them with 429. Builds go through it too, and an image the
 mirror lacks comes from Docker Hub. The Dockerfile, the compose files and
 the README stay on docker.io.
+
+The `console build` job sets up Node and runs
+`python -m cousin_lib.console.build verify`.
+
+## The console build
+
+The console's `.jsx` files are compiled ahead of time by a pinned
+esbuild (`cousin_lib/console/build.py`). Compiling them in the browser
+with Babel took about 12 s per load in headless Chromium; the compiled
+files render in about 0.2 s. Node is needed only to build:
+
+```sh
+python -m cousin_lib.console.build           # compile into console_static/compiled/
+python -m cousin_lib.console.build check     # the compiled copy matches the sources (no Node)
+python -m cousin_lib.console.build verify    # a fresh compile is byte for byte the committed one
+python -m cousin_lib.console.build vendor    # fetch the pinned libraries into vendor/
+```
+
+Each `.jsx` that `index.html` names compiles to its own
+`compiled/<name>.js`, unminified, so the files keep the load order and
+the shared global scope they have under Babel, and a diff of
+`compiled/` reads like the diff of its source. `compiled/manifest.json`
+records each source's and each output's content stamp.
+
+The console serves the compiled files only while every stamp matches.
+After an edit to a `.jsx`, the page is served as written: Babel comes
+from unpkg and the browser compiles, so an edit shows on the next reload
+and a stale build never runs. The console says so once on stderr. Run
+the build before you commit; the suite's `test_console_build` fails
+while `compiled/` is stale, and CI's `console build` job runs `verify`.
+
+The libraries (React, marked, xterm) sit in `vendor/` at the versions
+and SRI hashes in `build.LIBS`. mermaid is the exception: its minified
+identifiers trip the publish gate's name rules, so it stays on jsdelivr,
+pinned with its SRI hash (`build.CDN_LIBS`), and loads on the first
+diagram. Otherwise the page fetches nothing from outside unless it falls
+back to Babel. To move a library, change its
+URL and hash in `LIBS`, run `vendor`, and commit the file.
 
 ## The image's pins
 

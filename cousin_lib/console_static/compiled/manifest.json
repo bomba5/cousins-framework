@@ -1,0 +1,66 @@
+{
+ "esbuild": "esbuild@0.25.10",
+ "files": {
+  "accounts.jsx": {
+   "output": "5a065385cfdd",
+   "source": "89869a61b6f8"
+  },
+  "agent.jsx": {
+   "output": "6e921580d208",
+   "source": "6f9b8dcd6c80"
+  },
+  "app.jsx": {
+   "output": "238e2bd7228c",
+   "source": "e8d28f44b190"
+  },
+  "chat.jsx": {
+   "output": "fb8229c8cfd7",
+   "source": "01f08087f926"
+  },
+  "cousins.jsx": {
+   "output": "28a36493867d",
+   "source": "1bf0fb7bf2cd"
+  },
+  "data.jsx": {
+   "output": "d6cadf8368f8",
+   "source": "36e152e0e821"
+  },
+  "explorer.jsx": {
+   "output": "faa28ac2cddc",
+   "source": "2ab2072444c1"
+  },
+  "mcp.jsx": {
+   "output": "bb55341af1f8",
+   "source": "2f3699947c50"
+  },
+  "media.jsx": {
+   "output": "b28f87f35e21",
+   "source": "e08f21946d30"
+  },
+  "meetings.jsx": {
+   "output": "495569086401",
+   "source": "48ee014d8662"
+  },
+  "migrate.jsx": {
+   "output": "a4076562626d",
+   "source": "534129af81fe"
+  },
+  "plugins.jsx": {
+   "output": "e045d8beee2e",
+   "source": "e7d1d8496beb"
+  },
+  "system.jsx": {
+   "output": "c601334d1a12",
+   "source": "44fbf3bbbb35"
+  },
+  "ui.jsx": {
+   "output": "33b7996b3364",
+   "source": "b09d043d5ccb"
+  },
+  "views.jsx": {
+   "output": "c6c0315082e3",
+   "source": "22f40f6986ce"
+  }
+ },
+ "target": "es2020"
+}

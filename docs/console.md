@@ -33,11 +33,14 @@ Every request passes the network guard first: loopback and the private
 ranges (10/8, 172.16/12, 192.168/16) are allowed, plus anything in
 `config/net-allowlist.json`. Everything else gets a 403.
 
-The page loads React, Babel, marked, mermaid and xterm from public CDNs
-(unpkg and jsdelivr). That is the only outside fetch; the backend itself
-talks to nothing outside the install. If your browser can't reach those
-CDNs, vendor the files into `cousin_lib/console_static/` and edit the tags in
-`index.html`.
+The page's code is compiled ahead of time and served with React, marked
+and xterm from the install itself (`cousin_lib/console_static/compiled/`
+and `vendor/`), so it opens without internet. Two things still come from
+a CDN: mermaid, from jsdelivr, the first time a message has a diagram,
+and Babel, from unpkg, only while the compiled copy is stale (a `.jsx`
+edited since the last build; see
+[the console build](development.md#the-console-build)). The backend
+itself talks to nothing outside the install.
 
 ## Logins and users
 

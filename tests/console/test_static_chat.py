@@ -91,6 +91,17 @@ class StaticChatFiles(unittest.TestCase):
             self.assertTrue(p.is_file(), "%s is missing" % p)
             self.assertGreater(p.stat().st_size, 0, "%s is empty" % p)
 
+    def test_embed_pins_the_chat_full_screen_without_saving_it(self):
+        # ?embed=1 hides the chrome through body.chat-fullscreen; ChatView's
+        # own effect owns that class and runs after app.jsx's (ChatView
+        # mounts later), so it must hold it while embedded; an app.jsx-side
+        # add lost to it and the top bar showed
+        chat = (_STATIC / "chat.jsx").read_text()
+        self.assertIn('classList.toggle("chat-fullscreen", fullscreen || !!embed)', chat)
+        self.assertRegex(chat, r'if \(!embed\) \{\s*try \{ localStorage\.setItem\("fw_chat_fullscreen"')
+        app = (_STATIC / "app.jsx").read_text()
+        self.assertNotIn('classList.add("chat-fullscreen"', app)
+
     def test_chat_jsx_defines_the_contract_components(self):
         text = (_STATIC / "chat.jsx").read_text()
         for name in ("ChatView", "ChatHeader", "ChatBody", "ChatBubble",

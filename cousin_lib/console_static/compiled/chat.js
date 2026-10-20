@@ -146,13 +146,15 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   };
   const [chatColRef, narrowCol] = window.useNarrowerThan ? useNarrowerThan(CHAT_COMPACT_PX) : [null, false];
   React.useEffect(() => {
-    try {
-      localStorage.setItem("fw_chat_fullscreen", fullscreen ? "1" : "0");
-    } catch (e) {
+    if (!embed) {
+      try {
+        localStorage.setItem("fw_chat_fullscreen", fullscreen ? "1" : "0");
+      } catch (e) {
+      }
     }
-    document.body.classList.toggle("chat-fullscreen", fullscreen);
+    document.body.classList.toggle("chat-fullscreen", fullscreen || !!embed);
     return () => document.body.classList.remove("chat-fullscreen");
-  }, [fullscreen]);
+  }, [fullscreen, embed]);
   React.useEffect(() => {
     if (!archiveArmed) return;
     const t = setTimeout(() => setArchiveArmed(false), 3500);
@@ -197,7 +199,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   const pluginTabList = pluginTabAll.filter((t) => t.placement !== "chat");
   const chatStrips = embed || c.remote ? [] : pluginTabAll.filter((t) => t.placement === "chat");
   const activeTab = pluginTabList.find((t) => t.name === paneTab) || null;
-  return /* @__PURE__ */ React.createElement("div", { style: { position: "relative", height: "100%", minHeight: 0 } }, /* @__PURE__ */ React.createElement("div", { ref: splitRef, className: "chat-split" + (paneShown ? " pane-open" : "") + (chatHidden ? " chat-collapsed" : ""), style: { "--pane-w": paneW + "%" } }, /* @__PURE__ */ React.createElement("div", { className: "chat-col", ref: chatColRef, "aria-hidden": chatHidden || void 0 }, /* @__PURE__ */ React.createElement(ChatHeader, { cousin: c, chatUser, paneOpen: paneShown, setPaneOpen, search, setSearch, onArchive, fullscreen, setFullscreen: embed ? null : setFullscreen, embed, showArchived, setShowArchived, mediaShown, setMediaShown, narrow: narrowCol }), fullscreen && /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { style: { position: "relative", height: "100%", minHeight: 0 } }, /* @__PURE__ */ React.createElement("div", { ref: splitRef, className: "chat-split" + (paneShown ? " pane-open" : "") + (chatHidden ? " chat-collapsed" : ""), style: { "--pane-w": paneW + "%" } }, /* @__PURE__ */ React.createElement("div", { className: "chat-col", ref: chatColRef, "aria-hidden": chatHidden || void 0 }, /* @__PURE__ */ React.createElement(ChatHeader, { cousin: c, chatUser, paneOpen: paneShown, setPaneOpen, search, setSearch, onArchive, fullscreen, setFullscreen: embed ? null : setFullscreen, embed, showArchived, setShowArchived, mediaShown, setMediaShown, narrow: narrowCol }), fullscreen && !embed && /* @__PURE__ */ React.createElement(
     "button",
     {
       className: "chat-fullscreen-exit",

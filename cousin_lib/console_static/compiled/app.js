@@ -418,12 +418,8 @@ function App() {
   const sessionUser = auth && auth.user || "";
   useEffectApp(() => {
     if (!embedMode) return;
-    document.body.classList.add("chat-fullscreen", "chat-embed");
-    try {
-      localStorage.setItem("console_chat_fullscreen", "1");
-    } catch (_e) {
-    }
-    return () => document.body.classList.remove("chat-fullscreen", "chat-embed");
+    document.body.classList.add("chat-embed");
+    return () => document.body.classList.remove("chat-embed");
   }, [embedMode]);
   const [view, setView] = useStateApp(initialView);
   const [cousins, setCousins] = useStateApp([]);

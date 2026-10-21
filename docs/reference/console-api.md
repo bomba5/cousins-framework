@@ -350,7 +350,7 @@ Closes the meeting, or, with a facilitator, moves it to `closing` and asks the f
 
 ## Preferences
 
-Per-user console settings kept on the server, so every browser and the phone's home-screen app show the same thing. One file per console user in `data/console-prefs/<user>.json` (mode 0600); with no users file (open mode) they are shared under `_open`.
+Per-user console settings kept on the server, so every browser and the phone's home-screen app show the same thing. One file per console user in `data/console-prefs/<user>.json` (mode 0600); with no users file (open mode) they are shared under `_open`. The same file keeps the user's chat read marks under `chat_read` (see [Unread](#unread)).
 
 ### `GET /api/prefs/sidebar`
 
@@ -386,6 +386,7 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `pid`, `uptime_seconds` | the agent process in the tmux pane and its age (a runner cousin: the `cousin-runner` process); null when unknown, never 0 |
 | `activity` | first 200 characters of `data/last-activity.txt` |
 | `lastMsgTs` | unix time of the cousin's newest reply in your [thread](../glossary.md#thread) (the `[operator] name`, last 20 rows), 0 if none |
+| `lastMsgId` | that reply's message id, 0 if none |
 | `tokensSpent` | today's token total, 0 when token counting isn't set up |
 | `runner` | null for a tmux cousin. A runner cousin: `{"alive", "state", "since", "session", "kind", "pid", "unsupported"}` from its own stores: `alive` whether a runner holds its lock, `state` the last state its primary event stream recorded (with `since`, that event's time; it stays the last one recorded after the runner is gone, so read it with `alive`), `kind` (`sdk`, `fake` or `opencode`), `pid` and `unsupported` (the contract items the runner declares it does not support) from the `runner` event `cousin-runner` writes at start |
 | `supervisor` | `{"state": ...}` for a runner cousin the running `cousin-supervisor` holds as a child (`running`, `backoff`, `failing`, `stopped`), read from its `run/supervisor.json`; null when no supervisor runs (or the file is stale) or it holds no child for this cousin. Null is unknown, never stopped |
@@ -569,6 +570,18 @@ Body `{"cousin", "user", "keep": 0}`. Forwards to `/api/archive`. `{"ok": true, 
 ### `POST /api/chat/reactions`
 
 Body `{"cousin", "message_id", "user", "emoji", "action": "tap" | "remove"}` (`action` defaults to `tap`). Forwards to `/api/reactions`. `{"message_id", "op": "added" | "bumped" | "removed", "reactions": [...]}`.
+
+### Unread
+
+The number on a cousin's sidebar badge: its replies since you last had its chat on screen. What you have read is a message id the server keeps per console user, one per cousin and [thread](../glossary.md#thread), in your preferences file under `chat_read` (`{"<slug>": {"<thread>": <id>}}`), so reading a chat in one browser clears its badge in every other browser logged in as you. The count is over the thread the sidebar shows: the cousin's `[operator] name`, else your own. It covers the runner cousins on this machine (any `[agent] runner` kind, `tmux` included), whose chat this console answers itself. A hive node and a cousin with a chat host, which it forwards, have no count, and neither does a local cousin with no runner kind, which has no chat.
+
+### `GET /api/chat/unread`
+
+`{"unread": {"<slug>": n}}`: for each cousin, its live replies in the thread after your mark. Before you have a mark there (you have not had that chat open since the server kept marks), it counts the replies after the thread's last message from a person. A cousin with no chat yet is `0`; one whose `data/chat.db` cannot be read is left out. Read-only: it never creates a cousin's chat store.
+
+### `POST /api/chat/read`
+
+Body `{"cousin": "wren", "user": "ana", "id": 1234}`: you have seen the thread `user` up to message `id`. The mark only moves forward, and never past the thread's newest message; a mark already past it (the store was rebuilt and its ids started again) is replaced. When it moves, a `chat-read` event goes out with no user and no cousin in it, and every open page asks for its own counts again. Answers `{"ok": true, "cousin", "mark", "unread": {...}}` with the stored mark and your counts as `GET /api/chat/unread` gives them. `400` for an `id` that is not a whole number of at least 0, an empty `user` or a bad slug; `404` for a cousin whose chat this console does not serve. The chat pane sends this while the page is visible: when the chat opens, when the newest message it shows grows, and when the page comes back into view; never from search results or the archive. Once per browser, the page also sends the reply id of each cousin whose newest reply the old local-storage mark (`console_chat_seen_*`) says it had seen, then removes those keys.
 
 ### `GET /api/chat/inbound/<slug>/<name>`
 
@@ -1115,6 +1128,7 @@ The events come from two places: route handlers announce what they just did, and
 | `memory-change` | `{"slug", "action", ...}` | a memory change through the console: `trash` (a delete) and `restore` (with `id`), `obsolete`, `remember` and `decide` (with `topic`), `review` (verdicts settled), a maintain action by its name (`distill`, `compact-raw`, `compact-index`, `reindex`), `portrait-synthesize` and `portrait-edit`, and `portrait-commit` (with `by`) |
 | `meeting-change` | `{"id", "op": "open" \| "post" \| "skip" \| "delete" \| "close" \| "update"}` | a meeting opened, got a post or a skip, was deleted or closed through the console; `update` when the poller (every 2 s) sees a meeting's row or entry count change, as when a cousin speaks through the CLI |
 | `accounts-change` | `{"name", "what": "added" \| "edited" \| "removed" \| "key"}` | an account entry or key changed through the console (never the key) |
+| `chat-read` | `{}` | a page moved a chat read mark (`POST /api/chat/read`); every page asks `GET /api/chat/unread` for its own user's counts again |
 
 `cousin-flip` phases: `scheduled` (with `fire_at`, and `delay_seconds` or `request_id`), `started`, `complete` (with `ok: true`, and `new_generation`, `boot_packet_tokens`, `degraded_sections` when the console ran it), `failed` (with `ok: false` and `error`), `cancelled`. Timed flips the daemon runs show up through the poller: a request that turns `done` is `complete`, `failed` or `expired` is `failed`.
 

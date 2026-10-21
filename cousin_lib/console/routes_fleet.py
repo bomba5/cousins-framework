@@ -129,22 +129,28 @@ def _to_unix(ts):
     return int(when.timestamp())
 
 
-def _last_msg_ts(config, chat):
+def _last_reply(rows, slug):
+    """(time, id) of the newest reply among (id, timestamp, type) rows,
+    (0, 0) for none."""
+    replies = [(i, ts) for i, ts, kind in rows if kind == slug]
+    return (max([_to_unix(ts) for _, ts in replies] or [0]),
+            max([i for i, _ in replies if isinstance(i, int)] or [0]))
+
+
+def _last_msg(config, chat):
     if chat != "ok" or not config.operator_name:
-        return 0
+        return 0, 0
     try:
         status, body = chat_call(
             config, "/api/history?user=%s&limit=20"
             % config.operator_name.replace(" ", "%20"), timeout=1.5)
     except HttpError:
-        return 0
+        return 0, 0
     if status != 200 or not isinstance(body, dict):
-        return 0
-    newest = 0
-    for row in body.get("messages") or []:
-        if isinstance(row, dict) and row.get("type") == config.slug:
-            newest = max(newest, _to_unix(row.get("timestamp")))
-    return newest
+        return 0, 0
+    return _last_reply([(row.get("id"), row.get("timestamp"), row.get("type"))
+                        for row in body.get("messages") or []
+                        if isinstance(row, dict)], config.slug)
 
 
 def _is_runner(config):
@@ -156,29 +162,29 @@ def _is_runner(config):
     return isinstance(delivery.backend_for(config.home), delivery.InboxBackend)
 
 
-def _runner_last_msg_ts(config):
-    """The newest reply's time among the last 20 live rows of the operator's
-    thread, from chat.db (the tmux row's _last_msg_ts asks the chat server
-    for the same rows). Read-only: a GET never creates the store, and a
-    busy or missing one is "no reply yet", never a 500."""
+def _runner_last_msg(config):
+    """(time, id) of the newest reply among the last 20 live rows of the
+    operator's thread, from chat.db (the tmux row's _last_msg asks the
+    chat server for the same rows). Read-only: a GET never creates the
+    store, and a busy or missing one is "no reply yet", never a 500."""
     import sqlite3
     from cousin_lib.server import chat_api
     from cousin_lib.server.storage import normalize_chat_user
     path = chat_api.db_path(config.home)
     if not config.operator_name or not path.exists():
-        return 0
+        return 0, 0
     try:
         conn = sqlite3.connect("file:%s?mode=ro" % path, uri=True, timeout=1.0)
         try:
             rows = conn.execute(
-                "SELECT timestamp, type FROM messages WHERE chat_user=? AND archived=0"
+                "SELECT id, timestamp, type FROM messages WHERE chat_user=? AND archived=0"
                 " ORDER BY id DESC LIMIT 20",
                 (normalize_chat_user(config.operator_name),)).fetchall()
         finally:
             conn.close()
     except sqlite3.Error:
-        return 0
-    return max([_to_unix(ts) for ts, kind in rows if kind == config.slug] or [0])
+        return 0, 0
+    return _last_reply(rows, config.slug)
 
 
 def _activity(home):
@@ -310,6 +316,8 @@ def fleet_row(server, config, defaults=None, snap=_UNREAD, plugins=None):
             and not config.chat_host:
         pid = _pane_pid(server, config)
     lane = lane_fields(config.home)
+    last_ts, last_id = (_runner_last_msg(config) if runner is not None
+                        else _last_msg(config, chat))
     return {
         "slug": config.slug,
         "name": config.name,
@@ -330,8 +338,8 @@ def fleet_row(server, config, defaults=None, snap=_UNREAD, plugins=None):
         "pid": pid,
         "uptime_seconds": uptime_seconds(pid) if pid else None,
         "activity": _activity(config.home),
-        "lastMsgTs": (_runner_last_msg_ts(config) if runner is not None
-                      else _last_msg_ts(config, chat)),
+        "lastMsgTs": last_ts,
+        "lastMsgId": last_id,
         "runner": runner,
         "tokensSpent": tokens.today_total(server, config.home),
         "supervisor": supervisor_state(snap, config.slug),

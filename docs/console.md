@@ -89,9 +89,12 @@ them your cousins. The Overview entry carries a count when cousins are
 waiting on a person, and the foot of the sidebar shows the next daily [flip](glossary.md#flip):
 the earliest `flip_at` among the running cousins, how far away it is, and
 who flips then. Click a cousin to open its chat. A stopped cousin is
-greyed out and can't be clicked; start it from Cousins first. A dot next to
-a name means it has replied since you last looked at its chat. You can group
-cousins: right-click one to move it to a group or make a new group, drag
+greyed out and can't be clicked; start it from Cousins first. A pink number
+next to a name counts its replies since you last had its chat on screen (9+
+above nine). What you have read is kept on the server per console user, so
+reading a chat on one device clears its number on every other device logged
+in as you, the phone included. A cousin on another machine shows none. You
+can group cousins: right-click one to move it to a group or make a new group, drag
 cousins between groups, drag groups to reorder, right-click a group to rename
 or delete it. Groups are saved on the server per console user, so every
 browser you log in from, the phone included, shows the same groups.

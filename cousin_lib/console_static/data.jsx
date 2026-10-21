@@ -107,9 +107,9 @@ function fmtTokens(n) {
 }
 function fmtPct(n) { return (isFinite(n) ? n : 0).toFixed(1) + "%"; }
 
-// The browser-side "seen" watermark for the unread dot, keyed on the
-// cousin and the chat user (never a defaulted operator name). The chat
-// view writes it; the sidebar reads it.
+// The browser-side "seen" time an older console kept for the unread dot,
+// keyed on the cousin and the chat user. The read mark lives on the
+// server now (#380); the shell reads these once to move them there.
 function chatSeenKey(slug, user) {
   return `console_chat_seen_${slug}_${user || "-"}`;
 }

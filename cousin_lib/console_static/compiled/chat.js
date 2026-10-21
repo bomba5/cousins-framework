@@ -71,21 +71,6 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   }, [mediaShown]);
   const [paneTab, setPaneTab] = React.useState("pane");
   React.useEffect(() => {
-    if (!activeCousin || !chatUser) return;
-    const key = chatSeenKey(activeCousin, chatUser);
-    const stamp = () => {
-      if (document.visibilityState === "visible") {
-        try {
-          localStorage.setItem(key, String(Math.floor(Date.now() / 1e3)));
-        } catch (e) {
-        }
-      }
-    };
-    stamp();
-    document.addEventListener("visibilitychange", stamp);
-    return () => document.removeEventListener("visibilitychange", stamp);
-  }, [activeCousin, chatUser]);
-  React.useEffect(() => {
     try {
       localStorage.setItem("fw_pane_side", paneOpen ? "1" : "0");
     } catch (e) {
@@ -598,6 +583,29 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
       if (id) clearInterval(id);
     };
   }, [c.slug, chatUser, search, searchActive, showArchived]);
+  const readMarkRef = React.useRef({ key: "", id: 0 });
+  React.useEffect(() => {
+    if (!c || c.chat !== "console" || !chatUser || searchActive || showArchived) return;
+    const newest = messages.reduce((n, m) => typeof m.id === "number" && m.id > n ? m.id : n, 0);
+    if (!newest) return;
+    const key = `${c.slug}/${chatUser}`;
+    const post = () => {
+      if (document.visibilityState !== "visible") return;
+      const sent = readMarkRef.current;
+      if (sent.key === key && sent.id >= newest) return;
+      readMarkRef.current = { key, id: newest };
+      const retry = () => {
+        if (readMarkRef.current.key === key) readMarkRef.current = { key, id: 0 };
+      };
+      apiSend("POST", "/api/chat/read", { cousin: c.slug, user: chatUser, id: newest }).then(({ r, d }) => {
+        if (r.ok && d && d.unread) window.dispatchEvent(new CustomEvent("fw-chat-unread", { detail: d.unread }));
+        else retry();
+      }).catch(retry);
+    };
+    post();
+    document.addEventListener("visibilitychange", post);
+    return () => document.removeEventListener("visibilitychange", post);
+  }, [c?.slug, c?.chat, chatUser, messages, searchActive, showArchived]);
   const chatAnchorRef = React.useRef(null);
   const lastTailIdRef = React.useRef(null);
   React.useEffect(() => {

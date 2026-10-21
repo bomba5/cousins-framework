@@ -64,6 +64,7 @@ ROUTE_MODULES = [
     "cousin_lib.console.routes_admin",
     "cousin_lib.console.routes_tracker",
     "cousin_lib.console.routes_prefs",
+    "cousin_lib.console.routes_unread",
     "cousin_lib.console.routes_meetings",
     "cousin_lib.console.routes_telegram",
     "cousin_lib.console.routes_health",

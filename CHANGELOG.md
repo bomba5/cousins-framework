@@ -3,6 +3,28 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.56.0 - 2026-10-21
+
+### Added
+
+- **Unread counts on the sidebar, the same on every device.** A cousin's
+  pink dot is now a number: its replies since you last had its chat on
+  screen, 9+ above nine. What you have read is a message id the server
+  keeps per console user, in `data/console-prefs/<user>.json` under
+  `chat_read`, so reading a chat on the laptop clears it on the phone
+  too. Before, each browser kept its own "seen" time in local storage,
+  and a chat read in one stayed unread in the others. New routes:
+  `GET /api/chat/unread` (your counts) and `POST /api/chat/read` (the
+  chat pane moves your mark forward, never back), and a `chat-read`
+  event, with no user or cousin in it, that makes every open page ask
+  for its own counts again. Fleet rows carry `lastMsgId`. The first
+  time a browser loads this version it sends the server what its old
+  local mark said it had seen, so a dot you had cleared stays cleared.
+  Counts cover the runner cousins on this machine, any `[agent] runner`
+  kind. A cousin with a chat host, which the console forwards, loses
+  the per-browser dot it had; a hive node and a local cousin with no
+  runner kind never had one.
+
 ## 3.55.1 - 2026-10-20
 
 ### Fixed

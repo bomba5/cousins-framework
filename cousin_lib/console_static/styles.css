@@ -199,6 +199,22 @@ a { color: var(--accent); }
   background: oklch(from var(--amber) l c h / 0.14);
   color: var(--amber);
 }
+/* A cousin's unread replies: the old pink dot, grown to hold the count. */
+.navitem .unread-count {
+  margin-left: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--bg-0);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
 
 .main {
   overflow: hidden;

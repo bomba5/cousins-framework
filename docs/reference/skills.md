@@ -1,7 +1,7 @@
 # Skills
 
-**Status: specification, not built yet.** Agreed in meeting 12 (2026-10-21);
-it is built in the phases at the end, each only after the operator approves
+**Status: specification, not built yet.** Agreed in a team meeting
+(2026-10-21); it is built in the phases at the end, each only after the operator approves
 this page. Requirement words follow RFC 2119.
 
 A skill is a procedure a [cousin](../glossary.md#cousin) loads when it needs it: a folder with a
@@ -22,7 +22,8 @@ steps, maybe scripts, and a closing pass/fail check.
 - A fact or a decision stays in memory. Knowledge stays a shared reference.
 - When a skill takes over procedural memories or a procedural shared
   reference, those are retired with a pointer to the skill (obsoleted in
-  memory, removed from `shared/`) **when the skill is approved**, never at
+  memory, removed from the shared references in `<install>/shared/<name>.md`)
+  **when the skill is approved**, never at
   draft time. There MUST NOT be two copies that drift apart.
 
 ## What a skill may hold
@@ -57,9 +58,9 @@ license: MIT
 metadata:
   context: personal
   side-effect: read-only
-  reads: "bomba5/airtoy@<commit>:tools/boardhash.py"
+  reads: "wren-lab/widget@<commit>:tools/boardhash.py"
   hosts: ""
-  rests-on: "bomba5/airtoy:tools/boardhash.py, kicad-cli --version"
+  rests-on: "wren-lab/widget:tools/boardhash.py, kicad-cli --version"
 ---
 # Board verification
 
@@ -67,10 +68,11 @@ Steps...
 ```
 
 `name` and `description` are the Agent Skills keys: `name` equals the
-folder name (lowercase letters, digits and `-`, at most 64 characters), and
-`description` is one line of at most 1024 characters. `license` is an SPDX
+folder name, 1-64 lowercase letters, digits and `-`, not starting or ending
+with `-` and with no `--`; `description` is one line of 1-1024 characters. `license` is an SPDX
 identifier; it is REQUIRED for a skill from outside. The framework's own keys
-sit under `metadata`, as the format asks:
+sit under `metadata`, as the format asks. The format makes `metadata` a map
+from string keys to string *values*, so a list is one comma-separated string:
 
 | key | values | meaning |
 |---|---|---|
@@ -82,8 +84,11 @@ sit under `metadata`, as the format asks:
 | `scope` | `own`, `shared` | the cousin's folder (the default) or `shared/`; `shared` only for a general skill in `personal` |
 | `source` | `<url>@<commit>` | a skill from outside: where it came from |
 
-These names are public interface: adding a key is MINOR, renaming one is
-MAJOR.
+Public interface, under the same rule (adding is MINOR, renaming or
+removing is MAJOR): these metadata keys, the `[skills] repos` key in
+`cousin.toml`, the layout under `<install>/skills/<repo>/`, the shape of the
+approval records, the `cousin-skill` command and its arguments, and the
+console's skills routes.
 
 ## Where skills live
 
@@ -113,8 +118,8 @@ the operator, who asks other cousins to review one when he wants to.
 "Per cousin" means *loaded* only by that cousin, not hidden: every cousin
 runs as the same OS user and can read every folder with Bash. A private
 cousin's folder lives only in `private`, so its name never appears in a
-commit of a repository other cousins work in. Real separation comes with
-per-cousin OS users (#281).
+commit of a repository other cousins work in. Real separation needs
+per-cousin OS users, which are not built.
 
 When a cousin needs another cousin's skill, it asks that cousin to run it: a
 peer message naming the skill and the inputs. The answer carries the job id
@@ -135,9 +140,14 @@ console as him, so the house commit rule holds unchanged.
   the CLI, which a cousin can run. The approve view leads with the
   side-effect class, the diff against the approved state, the hosts, the
   `reads` pins and the trigger test result. Approving commits the change on
-  `main` as the operator (the house commit rule) and appends a record to
-  `<install>/data/skills/approvals.jsonl`: the console session user, the
-  repository, the commit, the skill and the sha256 of the diff shown.
+  `main` as the operator (the house commit rule) and appends a record:
+  the console session user, the repository, the commit, the skill and the
+  sha256 of the diff shown. Records for `personal` and `employer` go to
+  `<install>/data/skills/approvals.jsonl`. Records for `private` go to their
+  own file, `<install>/data/skills/private/approvals.jsonl` (mode `0600`): a
+  record names the folder, and a private cousin's folder is its name.
+  `private` never shows in System > skills, only in its own cousin's
+  inspector.
 - **The record is the evidence, not git.** Every commit on this host is made
   by one OS user under one configured identity, so a git author proves
   nothing. A repository whose `main` has moved past its last approved commit
@@ -145,25 +155,30 @@ console as him, so the house commit rule holds unchanged.
   `cousin-doctor` says so.
 - **Removing** an approved skill is a change like any other: proposed,
   shown, approved.
-- **The policy hook denies** tool writes under `<install>/skills/` and to the
-  approvals file, and any git command that writes there (`commit`, `merge`,
-  `update-ref`, `push`). This slows a confused session; it is not a wall
-  against a hostile one until #281.
+- **The policy hook denies** tool writes under `<install>/skills/`, under
+  `<home>/run/skills/` (the exports below) and to the approval records. For
+  git it allows only `log`, `show`, `diff`, `status`, `cat-file` and
+  `ls-files` with `-C` or a working directory under `<install>/skills/`;
+  every other git command there is denied (an allowlist, so `reset`,
+  `checkout`, `rebase` and the rest are covered). This slows a confused
+  session; it is not a wall against a hostile one until per-cousin OS users
+  exist.
 
 A new skill, an edit and a skill from outside all go through the same path.
 
 ## Loading, per lane
 
 Skills load when the cousin's agent starts, and a resumed session picks up
-a changed set (probed 2026-10-21 with claude-agent-sdk 0.2.166). A change
+a changed set (probed 2026-10-21 with claude-agent-sdk 0.2.166 and its
+bundled Claude Code 2.1.299). A change
 therefore takes effect at the cousin's **next restart**, which the console
 offers after an approval. Nothing reloads mid-session, so the cached prompt
 stays byte-stable.
 
 | [lane](../glossary.md#lane) | how |
 |---|---|
-| `sdk` | At start the [runner](../glossary.md#runner) exports the approved commit of each listed repository (`shared/` and the cousin's folder) to `<home>/run/skills/<plugin>/`, read-only, with a plugin manifest, and passes each as a local plugin. Settings files stay unread (`setting_sources=[]`). The agent sees `shared:<name>`, `personal:<name>`, `employer:<name>`, `private:<name>`: the plugin is named for the repository, never the cousin. |
-| `tmux` | The same exports, passed as `--plugin-dir`. This lane reads project settings (`--setting-sources project,local`), which would load `<home>/.claude/skills/` unapproved (probed), so the launcher MUST refuse to start while that directory exists, naming it, and the policy hook denies writes there. |
+| `sdk` | At every start the [runner](../glossary.md#runner) exports the approved commit of each listed repository (`shared/` and the cousin's folder) afresh to `<home>/run/skills/<plugin>/`, read-only, with a plugin manifest, and passes each as a local plugin. The agent reads a skill's body when it uses the skill, not at start, so the export is denied to tools as well. Settings files stay unread (`setting_sources=[]`). The agent sees `shared:<name>`, `personal:<name>`, `employer:<name>`, `private:<name>`: the plugin is named for the repository, never the cousin. |
+| `tmux` | The same exports, passed as `--plugin-dir`. This lane reads project settings (`--setting-sources project,local`), which load `<home>/.claude/skills/` unapproved (probed 2026-10-21 with the host's Claude Code 2.1.282), so the launcher MUST refuse to start while that directory exists, naming it, and the policy hook denies writes there. |
 | `opencode` | Not supported. opencode has a skill tool of its own; the framework passes it nothing. |
 
 ## The trigger test

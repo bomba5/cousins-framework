@@ -301,6 +301,36 @@ def make_upstream(base):
     return repo, _git(repo, "rev-parse", "HEAD")
 
 
+def _git_in(cwd, data, *args):
+    return subprocess.run(["git", "-C", str(cwd), *args], input=data, check=True,
+                          capture_output=True).stdout.decode().strip()
+
+
+def make_hostile(base, parts):
+    """A repository no honest host serves: its folder `sk` holds a SKILL.md,
+    a licence and a file under the literal path parts `parts` (`..` climbs
+    out of the folder, `.git` is git's own), written with hash-object
+    --literally since git will not make such a tree itself. Returns (path,
+    commit)."""
+    repo = pathlib.Path(base) / "hostile.git"
+    _git(base, "init", "-q", "--bare", str(repo))
+
+    def tree(entries):
+        raw = b"".join(b"%s %s\0%s" % (mode, name.encode(), bytes.fromhex(oid))
+                       for mode, name, oid in sorted(entries, key=lambda e: e[1]))
+        return _git_in(repo, raw, "hash-object", "-t", "tree", "--literally", "-w", "--stdin")
+
+    def blob(text):
+        return _git_in(repo, text.encode(), "hash-object", "-w", "--stdin")
+
+    inner = tree([(b"100644", "escaped.txt", blob("out\n"))])
+    for part in reversed(parts[1:]):
+        inner = tree([(b"40000", part, inner)])
+    sk = tree([(b"100644", "SKILL.md", blob(UPSTREAM_SKILL.replace("board-check", "sk"))),
+               (b"100644", "LICENSE", blob(MIT)), (b"40000", parts[0], inner)])
+    return repo, _git(repo, "commit-tree", tree([(b"40000", "sk", sk)]), "-m", "hostile")
+
+
 class OutsideCase(SkillsCase):
     """A skill from outside: the source names an https URL, and the fetch
     the tests hand in reads a local repository over file:// instead,
@@ -405,6 +435,89 @@ class TestImport(OutsideCase):
                       skills.drafts(self.wren, "wren")[0]["problems"])
 
 
+class TestHostileTrees(OutsideCase):
+    """Paths no honest host serves: a tree with literal `..` parts once
+    wrote outside the draft. git's object check and the path rule each
+    refuse them alone."""
+
+    PARTS = (["..", "..", ".."], [".git"], [".GIT", "hooks"])
+
+    def hostile(self, parts):
+        """The fetch of a hostile repository (over file://), and its commit."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        repo, commit = make_hostile(tmp.name, parts)
+        local, real = "file://%s" % repo, skills.fetch_folder
+        return (lambda _url, commit, folder: real(local, commit, folder, schemes=("file",))), commit
+
+    def import_from(self, parts):
+        fetch, commit = self.hostile(parts)
+        return skills.import_draft(self.wren, "wren", "https://example.test/o/r@%s:sk" % commit,
+                                   context="personal", side_effect="read-only", fetch=fetch)
+
+    def escaped(self):
+        return sorted(str(p) for p in self.root.parent.rglob("escaped.txt"))
+
+    def test_git_refuses_a_tree_out_of_the_folder_or_into_git(self):
+        for parts in self.PARTS:
+            with self.assertRaisesRegex(SkillError, "fetching file://.*has", msg=parts):
+                self.import_from(parts)
+        self.assertEqual(self.escaped(), [])
+        self.assertFalse((self.wren / "skill-drafts").exists())
+
+    def test_with_gits_check_off_the_path_rule_still_refuses_it(self):
+        lax = tuple(s for s in skills.FETCH_CONFIG if not s.startswith("fetch.fsckObjects"))
+        with mock.patch.object(skills, "FETCH_CONFIG", lax):
+            for parts in self.PARTS:
+                fetch, commit = self.hostile(parts)
+                with self.assertRaisesRegex(SkillError, "sk holds a bad path", msg=parts):
+                    fetch(None, commit, "sk")
+                with self.assertRaisesRegex(SkillError, "sk holds a bad path", msg=parts):
+                    self.import_from(parts)
+        self.assertEqual(self.escaped(), [])
+        self.assertFalse((self.wren / "skill-drafts").exists())
+
+    def test_an_import_checks_the_paths_whatever_fetched_them(self):
+        self.imported()
+        draft = self.wren / "skill-drafts" / "board-check"
+        before = sorted(str(p) for p in draft.rglob("*"))
+        sound = self.fetch(None, self.commit, "skills/board-check")
+        for bad in ("../escaped.txt", "scripts/../../escaped.txt", ".git/config", "a\nb"):
+            got = dict(sound, files=dict(sound["files"], **{bad: b"out\n"}))
+            with self.assertRaisesRegex(SkillError, "holds a bad path", msg=bad):
+                skills.import_draft(self.wren, "wren", self.source(), context="personal",
+                                    side_effect="read-only", fetch=lambda *_a, got=got: got)
+        self.assertEqual(sorted(str(p) for p in draft.rglob("*")), before)    # the draft stands
+        self.assertEqual(self.escaped(), [])
+
+    def test_the_path_rule(self):
+        for good in ("SKILL.md", "scripts/check.py", ".github/ci.yml", "a..b/c", "..a", "LICENSE.."):
+            self.assertTrue(skills._path_ok(good), good)
+        for bad in ("", ".", "..", "../x", "a/../b", "a/..", "./a", "/abs", "a//b", "a/", ".git",
+                    ".GIT/config", "x/.Git/hooks", "a\\b", "a\nb", "a\tb", "a\x7fb", "\x1b[31m"):
+            self.assertFalse(skills._path_ok(bad), repr(bad))
+
+    def test_the_fetch_sees_none_of_our_git_settings(self):
+        seen, run = [], subprocess.run
+
+        def spy(*args, **kw):
+            seen.append(kw.get("env") or {})
+            return run(*args, **kw)
+        planted = {"GIT_ASKPASS": "/bin/false", "SSH_ASKPASS": "/bin/false",
+                   "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "url.file:///nowhere/.insteadOf",
+                   "GIT_CONFIG_VALUE_0": "file://",
+                   "GIT_CONFIG_PARAMETERS": "'http.extraheader'='X-Planted: 1'"}
+        with mock.patch.dict(os.environ, planted), mock.patch.object(skills.subprocess, "run", spy):
+            got = self.fetch(None, self.commit, "skills/board-check")
+        self.assertIn("SKILL.md", got["files"])      # the planted insteadOf sends it nowhere
+        self.assertTrue(seen)
+        for env in seen:
+            self.assertEqual(sorted(k for k in env if k.startswith("GIT_") or k.endswith("ASKPASS")),
+                             ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_TERMINAL_PROMPT"])
+            self.assertEqual(env["HOME"], env["XDG_CONFIG_HOME"])
+            self.assertIn("cousin-skill-fetch-", env["HOME"])
+
+
 class TestOutsideApproval(OutsideCase):
     def test_approval_needs_it_as_published_and_a_dry_run(self):
         self.imported()
@@ -442,6 +555,26 @@ class TestOutsideApproval(OutsideCase):
         entry = skills.approve_draft(self.root, self.wren, "wren", "board-check", user="ana",
                                      diff_sha=sha, fetch=self.fetch)
         self.assertEqual(entry["dry_run"], "fail")
+
+    def test_one_allow_takes_one_run(self):
+        self.imported()
+        _text, sha = skills.diff_draft(self.root, self.wren, "wren", "board-check")
+        allowed = skills.allow_dry_run(self.root, self.wren, "wren", "board-check", user="ana",
+                                       diff_sha=sha)
+        skills.record_dry_run(self.root, self.wren, "wren", "board-check", 7,
+                              job=self.job(allowed, status="failed", exit_code=1))
+        with self.assertRaisesRegex(SkillError, r"recorded already \(job #7\): another run needs"
+                                                r" another allow"):
+            skills.record_dry_run(self.root, self.wren, "wren", "board-check", 8,
+                                  job=self.job(allowed, id=8))
+        record = json.loads(skills.dry_run_path(self.root, self.wren, "wren",
+                                                "board-check").read_text())
+        self.assertEqual((record["job"], record["pass"]), (7, False))
+        again = skills.allow_dry_run(self.root, self.wren, "wren", "board-check", user="ana",
+                                     diff_sha=sha)
+        ran = skills.record_dry_run(self.root, self.wren, "wren", "board-check", 8,
+                                    job=self.job(again, id=8))
+        self.assertEqual((ran["job"], ran["pass"]), (8, True))
 
     def test_a_dry_run_is_the_jobs_and_only_for_the_allowed_version(self):
         self.imported()

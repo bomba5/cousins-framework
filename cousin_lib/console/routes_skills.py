@@ -232,7 +232,8 @@ def register():
     def approve(req, slug, name):
         home = _cousin(req, slug)
         entry = _call(skills.approve_draft, req.server.root, home, slug, _name(name),
-                      user=_who(req), diff_sha=str(req.body.get("diff_sha256") or ""))
+                      user=_who(req), diff_sha=str(req.body.get("diff_sha256") or ""),
+                      fetch=_fetch)
         who = "every cousin" if entry.get("folder") == skills.SHARED else slug
         return 200, {"ok": True, "record": entry, "note": _restart_note(who)}
 

@@ -284,7 +284,10 @@ shows for it. Agreed with the operator (2026-10-21).
   (`context`, `side-effect`, the trigger prompts, `dry-run-task` and the
   rest). The framework fetches exactly that commit, depth 1, into a
   temporary repository: no branch or tag is followed, and no credential,
-  hook, submodule or global git setting is used. The URL MUST be `https://`.
+  hook, submodule or global git setting is used. git checks every object
+  it receives, and runs with none of the framework's git or askpass
+  variables and a home of its own, so no askpass, injected setting or
+  `~/.netrc` reaches the fetch. The URL MUST be `https://`.
 - **Byte for byte.** The draft is the folder as published. The framework
   writes only `SKILL.md`'s frontmatter: upstream's `name` (or the one asked
   for), `description` and `compatibility`, the licence as an SPDX id, the
@@ -294,8 +297,9 @@ shows for it. Agreed with the operator (2026-10-21).
   first: a skill never pre-approves tools here, the policy hook decides.
   An edit past the frontmatter is refused at approval; a skill that needs
   real changes is written here instead.
-- **Refused at import:** a symlink or a submodule in the folder, no
-  `SKILL.md`, over 2 MiB, no licence file in the folder or at the
+- **Refused at import:** a path in the folder with an empty, `.`, `..` or
+  `.git` part (in any case), a backslash or a control character, a symlink
+  or a submodule in the folder, no `SKILL.md`, over 2 MiB, no licence file in the folder or at the
   repository's root (one at the root is copied into the folder), a licence
   the repository does not take, a side effect of `outward`, and the `work`
   repository.
@@ -319,7 +323,9 @@ shows for it. Agreed with the operator (2026-10-21).
   the draft's `dry-run-task` once as a job (the `job` tool's `run`) and
   records it with the `skill` tool's `dry-run`. The framework reads the job
   row: the cousin's own, ended, started after the allow, with an exit code.
-  Approval needs that record on the very diff shown; a failed one is the
+  One allow takes one run: another needs another allow, so the operator
+  sees a failed one before there is a second. Approval needs that record
+  on the very diff shown; a failed one is the
   operator's call, like a failed trigger test. The allow and the job are
   kept in `<install>/data/skills/dry-runs/<slug>/<name>.json`
   (`data/skills/private/dry-runs/` for a cousin that loads `private`).

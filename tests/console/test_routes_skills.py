@@ -8,6 +8,7 @@ import pathlib
 import tempfile
 
 from cousin_lib import skills
+from cousin_lib.console import routes_skills
 from tests.console._harness import ConsoleCase
 
 RUNNER = '\n[agent]\nrunner = "fake"\n'
@@ -200,8 +201,12 @@ class TestFromOutside(SkillsRoutesCase):
         self.addCleanup(tmp.cleanup)
         self.upstream, self.commit = make_upstream(tmp.name)
         local, real = "file://%s" % self.upstream, skills.fetch_folder
-        patcher = mock.patch.object(skills, "fetch_folder", lambda _url, commit, folder, **_kw:
-                                    real(local, commit, folder, schemes=("file",)))
+        self.timeouts = []
+
+        def fetch(_url, commit, folder, **kw):
+            self.timeouts.append(kw.get("timeout"))
+            return real(local, commit, folder, schemes=("file",))
+        patcher = mock.patch.object(skills, "fetch_folder", fetch)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.source = "https://example.test/wren-lab/skills@%s:skills/board-check" % self.commit
@@ -245,8 +250,10 @@ class TestFromOutside(SkillsRoutesCase):
         d = self.get(base)[1]
         self.assertEqual((d["outside"]["dry_run"]["job"], d["outside"]["dry_run"]["pass"]),
                          (9, True))
+        self.timeouts.clear()
         status, body = self.post(base + "/approve", {"diff_sha256": d["diff_sha256"]})
         self.assertEqual(status, 200, body)
+        self.assertEqual(set(self.timeouts), {routes_skills.FETCH_TIMEOUT})   # the page waits
         self.assertEqual((body["record"]["source"], body["record"]["dry_run"]),
                          (self.source, "pass"))
 

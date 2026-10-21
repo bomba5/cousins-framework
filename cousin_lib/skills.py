@@ -960,6 +960,11 @@ def project_skills_dir(home):
 
 FETCH_SCHEMES = ("https",)
 FETCH_TIMEOUT = 120
+# git -c settings of every fetch: no protocol but the ones asked for, no
+# credential helper, no hooks, and every object received checked, so a
+# tree with a `..` or `.git` entry fails here, before _path_ok sees it.
+FETCH_CONFIG = ("protocol.allow=never", "credential.helper=", "core.hooksPath=%s" % os.devnull,
+                "fetch.fsckObjects=true")
 DRY_RUN_KEY = "dry-run-task"
 IMPORT_NOTE = ("written by the cousins framework at import; the rest of the folder is as"
                " published at metadata.source")
@@ -1005,10 +1010,15 @@ def _license_file(names):
     return found[0] if found else None
 
 
-def _folder_ok(folder):
-    parts = str(folder).split("/")
-    return (bool(folder) and not str(folder).startswith("/") and "\\" not in str(folder)
-            and all(p not in ("", ".", "..") for p in parts))
+def _path_ok(path):
+    """Whether `path` may name a skill's folder or a file in it: relative,
+    no part empty, `.`, `..` or `.git` (in any case), no backslash and no
+    control character. A fetched tree is checked against it before a byte
+    is written, whatever git let through."""
+    text = str(path or "")
+    return (bool(text) and "\\" not in text and not any(ord(c) < 32 or ord(c) == 127 for c in text)
+            and all(part not in ("", ".", "..") and part.lower() != ".git"
+                    for part in text.split("/")))
 
 
 def split_source(source):
@@ -1018,7 +1028,7 @@ def split_source(source):
     if not m:
         raise SkillError("metadata.source takes <url>@<full commit>[:<folder>], not %s" % source)
     folder = m.group("folder")
-    if folder is not None and not _folder_ok(folder):
+    if folder is not None and not _path_ok(folder):
         raise SkillError("metadata.source names a bad folder: %s" % folder)
     return m.group("url"), m.group("commit").lower(), folder
 
@@ -1029,22 +1039,23 @@ def fetch_folder(url, commit, folder, *, schemes=FETCH_SCHEMES, timeout=FETCH_TI
     repository at `url`, paths relative to the folder. Exactly that commit
     is fetched, depth 1, into a temporary repository: no branch or tag is
     followed, no credential, hook, submodule or global setting is used,
-    and only `schemes` may be spoken. Refused: a symlink or a submodule
-    in the folder, no SKILL.md, over DRAFT_MAX_BYTES, and no licence file
-    in the folder or at the repository's root (that one is added to the
-    folder's files under its own name)."""
+    and only `schemes` may be spoken. git checks every object it receives
+    (FETCH_CONFIG), and runs with no GIT_* or *ASKPASS variable of ours
+    and its HOME in the temporary directory, so no askpass, injected
+    setting or ~/.netrc reaches the fetch. Refused: a path _path_ok
+    refuses, a symlink or a submodule in the folder, no SKILL.md, over
+    DRAFT_MAX_BYTES, and no licence file in the folder or at the
+    repository's root (that one is added to the folder's files under its
+    own name)."""
     scheme = url.split("://", 1)[0].lower() if "://" in url else "ssh"
     if scheme not in schemes:
         raise SkillError("a skill from outside is fetched over %s only, not %s"
                          % (" or ".join(schemes), url))
-    if not _folder_ok(folder):
+    if not _path_ok(folder):
         raise SkillError("bad folder %r" % folder)
-    config = ["-c", "protocol.allow=never", "-c", "credential.helper=",
-              "-c", "core.hooksPath=%s" % os.devnull]
+    config = [arg for setting in FETCH_CONFIG for arg in ("-c", setting)]
     for allowed in schemes:
         config += ["-c", "protocol.%s.allow=always" % allowed]
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", LC_ALL="C", GIT_CONFIG_NOSYSTEM="1",
-               GIT_CONFIG_GLOBAL=os.devnull)
 
     def git(*args, text=True):
         proc = subprocess.run(["git", *config, *args], capture_output=True, text=text,
@@ -1056,6 +1067,10 @@ def fetch_folder(url, commit, folder, *, schemes=FETCH_SCHEMES, timeout=FETCH_TI
         return proc.stdout
 
     with tempfile.TemporaryDirectory(prefix="cousin-skill-fetch-") as tmp:
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith("GIT_") and not k.endswith("ASKPASS")}
+        env.update(GIT_TERMINAL_PROMPT="0", LC_ALL="C", GIT_CONFIG_NOSYSTEM="1",
+                   GIT_CONFIG_GLOBAL=os.devnull, HOME=tmp, XDG_CONFIG_HOME=tmp)
         repo = str(Path(tmp) / "repo.git")
         try:
             git("init", "-q", "--bare", repo)
@@ -1071,6 +1086,8 @@ def fetch_folder(url, commit, folder, *, schemes=FETCH_SCHEMES, timeout=FETCH_TI
                 meta, _, path = rec.partition("\t")
                 mode, kind, oid, size = meta.split()
                 rel = path[len(folder) + 1:]
+                if not _path_ok(rel):
+                    raise SkillError("%s holds a bad path: %r" % (folder, rel))
                 if mode == "120000":
                     raise SkillError("%s holds a symlink (%s); a skill from outside holds regular"
                                      " files only" % (folder, rel))
@@ -1170,6 +1187,9 @@ def import_draft(home, slug, source, *, context, side_effect, name=None, scope="
         raise SkillError("a skill from outside that acts outward is not imported")
     got = (fetch or fetch_folder)(url, commit, folder)
     files = got["files"]
+    bad = sorted(rel for rel in files if not _path_ok(rel))
+    if bad:
+        raise SkillError("%s holds a bad path: %r" % (folder, bad[0]))
     try:
         text = files[SKILL_FILE].decode("utf-8")
     except UnicodeDecodeError:
@@ -1360,7 +1380,9 @@ def record_dry_run(root, home, slug, name, job_id, *, job=None):
     """Record the job that ran an allowed dry run (the cousin's verb): the
     framework reads the job row, its owner, how it ended, its exit code
     and its log, so the result is the job's, never the cousin's word.
-    Refused: no allow for this version, a job of another cousin's, one
+    Refused: no allow for this version, a run recorded on this allow
+    already (another run needs another allow, so the operator sees a
+    failed one before there is a second), a job of another cousin's, one
     still running, one started before the allow, one with no exit code
     (the job tool's `run` records one)."""
     _text, sha = diff_draft(root, home, slug, name)
@@ -1369,6 +1391,9 @@ def record_dry_run(root, home, slug, name, job_id, *, job=None):
     if not allowed or allowed.get("diff_sha256") != sha:
         raise SkillError("no dry run of this version of %s is allowed: the operator allows one"
                          " in the console" % name)
+    if allowed.get("job") is not None:
+        raise SkillError("the dry run this allow was for is recorded already (job #%s): another"
+                         " run needs another allow from the operator" % allowed["job"])
     if job is None:
         from cousin_lib import jobs
         job = jobs.get_job(int(job_id))

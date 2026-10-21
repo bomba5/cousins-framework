@@ -138,10 +138,22 @@ server, beside `memory`, `job` and `schedule`:
 | `draft` | writes or edits a draft in `<home>/skill-drafts/<name>/` |
 | `diff` | a draft against the approved version |
 
+`list` and `show` cover only what the cousin loads (`shared/` and its own
+folder in each repository it lists) and its own drafts. They never list or
+show another cousin's skill, or a `private` folder, whose name is a private
+cousin's: Bash can read those (per cousin is not hidden), but the
+framework's own tool does not hand them out.
+
 `cousin-skill` is the same for a terminal, with the same commands, and the
 fallback where the tool is missing. Neither can approve, reject or remove
 anything. Those happen only in the console, so no cousin can approve its own
 skill.
+
+Two tools carry the word, and a `policy.toml` rule must name the right one:
+`Skill` is the agent's own loader, and denying it stops a cousin *using*
+skills; `mcp__cousin__skill` (on opencode `cousin_skill`) is this tool, and
+denying it stops *drafting*. On a lane that loads no skills (opencode), the
+tool still answers: `list` says "none: this lane loads no skills".
 
 ## Drafting and approval
 

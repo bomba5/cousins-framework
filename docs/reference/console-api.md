@@ -1040,11 +1040,11 @@ Body `{"diff_sha256"}`. Commits the removal and records it: `{"ok": true, "recor
 
 ### `GET /api/cousins/<slug>/skills/drafts/<name>`
 
-One draft: `{"name", "text", "files", "diff", "diff_sha256", "repo", "folder", "problems", "metadata", "trigger"}`. `diff` is against what is approved at the draft's target; `trigger` is the last trigger test run on this very diff, else null.
+One draft: `{"name", "text", "files", "diff", "diff_sha256", "repo", "folder", "problems", "metadata", "trigger"}`. `diff` is against what is approved at the draft's target; `problems` is everything that keeps it from approval (the format, a target the cousin may not approve into, a missing trigger prompt); `trigger` is the last trigger test run on this very diff, else null.
 
 ### `POST /api/cousins/<slug>/skills/drafts/<name>/approve`
 
-Body `{"diff_sha256"}`, the diff shown. Commits the draft on the target repository's `main` with the repository's git identity, appends the approval record (the console user, the commit, the diff's sha256) and removes the draft. Refused when the draft has a problem, targets a repository the cousin does not load, or the repository is not trusted. `{"ok": true, "record", "note"}`: it loads at the cousin's next start (a shared skill at every cousin's).
+Body `{"diff_sha256"}`, the diff shown. Commits the draft on the target repository's `main` with the repository's git identity, appends the approval record (the console user, the commit, the diff's sha256, and `trigger`: `pass` or `fail`) and removes the draft. Refused (`409`) when the draft has a problem, targets a repository the cousin does not load, is its own skill outside `private` for a cousin that loads `private`, the repository is not trusted, or no trigger test was run on this diff. A failed trigger test does not refuse: the operator decides. `{"ok": true, "record", "note"}`: it loads at the cousin's next start (a shared skill at every cousin's).
 
 ### `POST /api/cousins/<slug>/skills/drafts/<name>/reject`
 
@@ -1052,7 +1052,7 @@ Body `{"reason"}` (optional). Moves the draft to `<home>/skill-drafts/.rejected/
 
 ### `POST /api/cousins/<slug>/skills/drafts/<name>/trigger-test`
 
-Runs the draft's trigger test in a child process (up to 300 s): its `should-trigger` and `must-not-trigger` prompts, each one turn on the cousin's own account and model, whose only tool is `Skill`, with what the cousin loads plus the draft as `draft:<name>`. `{"ok": true, "trigger": {"should-trigger": {"prompt", "fired", "detail", "pass"}, "must-not-trigger": {...}, "pass", "model", "at", "diff_sha256"}}`. `409` when the draft lacks either prompt, `504` past the time limit.
+Runs the draft's trigger test in a child process (up to 300 s): its `should-trigger` and `must-not-trigger` prompts, each one turn on the cousin's own account and model, whose only tool is `Skill`, with what the cousin loads plus the draft as `draft:<name>`. `{"ok": true, "trigger": {"should-trigger": {"prompt", "fired", "detail", "pass"}, "must-not-trigger": {...}, "pass", "model", "at", "diff_sha256"}}`, also kept in `<install>/data/skills/trigger-tests/<slug>/<name>.json` (under `data/skills/private/` for a cousin that loads `private`). `409` when the draft lacks either prompt, `504` past the time limit.
 
 ## System (the System view)
 

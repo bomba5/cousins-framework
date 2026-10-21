@@ -511,15 +511,16 @@ def _sk_show(ctx, a):
 
 
 def _sk_draft(ctx, a):
+    name = _required(a, "name", "draft")
     path = skills.write_draft(
-        ctx.home, _required(a, "name", "draft"),
+        ctx.home, name,
         description=_required(a, "description", "draft"), body=_str(a, "body"),
         context=_required(a, "context", "draft"),
         side_effect=_required(a, "side_effect", "draft"),
         scope=_str(a, "scope", "own") or "own",
         metadata={"should-trigger": _str(a, "should_trigger"),
                   "must-not-trigger": _str(a, "must_not_trigger")})
-    return "draft written: %s (the operator approves it in the console)" % path
+    return skills.draft_written(ctx.home, ctx.slug, name, path)
 
 
 def _sk_diff(ctx, a):

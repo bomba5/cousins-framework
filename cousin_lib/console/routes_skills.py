@@ -180,7 +180,7 @@ def register():
         return 200, dict(draft, diff=text, diff_sha256=sha, repo=summary.get("repo"),
                          folder=summary.get("folder"), problems=summary.get("problems", []),
                          metadata=summary.get("metadata", {}),
-                         trigger=skills.last_trigger_test(home, name, sha))
+                         trigger=skills.last_trigger_test(req.server.root, home, slug, name, sha))
 
     @router.route("POST", "/api/cousins/{slug}/skills/drafts/{name}/approve")
     def approve(req, slug, name):
@@ -203,7 +203,8 @@ def register():
     def trigger_test(req, slug, name):
         """The draft's trigger test, in a child process (the check scrubs
         the auth variables of the process it runs in); its result is kept
-        beside the drafts and comes back here."""
+        under <install>/data/skills/ (skills.trigger_path) and comes back
+        here."""
         home = _cousin(req, slug)
         _call(skills.show_draft, home, _name(name))
         try:

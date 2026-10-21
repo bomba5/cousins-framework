@@ -87,6 +87,10 @@ function SkillDraftReview({ slug, name, onDone }) {
   if (err && !d) return <SysNote msg={{ ok: false, text: err }} />;
   if (!d) return <div className="muted" style={SKILL_MONO}>loading...</div>;
   const blocked = (d.problems || []).length > 0;
+  // approval needs a trigger test on this very version; a failed one is
+  // the operator's call, with its own confirm
+  const untested = !d.trigger;
+  const missed = !!d.trigger && !d.trigger.pass;
   return <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 12,
                        borderLeft: "2px solid var(--hair)" }}>
     <div style={{ display: "flex", gap: 8, alignItems: "center", ...SKILL_MONO }}>
@@ -106,8 +110,10 @@ function SkillDraftReview({ slug, name, onDone }) {
       <SkillTrigger result={d.trigger} />
     </div>
     <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-      <SysConfirmButton label="approve" confirmLabel="click again: commit it and load it at the next start"
-                        tone="primary" small={false} disabled={busy || blocked || !d.diff}
+      <SysConfirmButton label={missed ? "approve anyway" : "approve"}
+                        confirmLabel={missed ? "click again: approve despite the failed trigger test"
+                                             : "click again: commit it and load it at the next start"}
+                        tone="primary" small={false} disabled={busy || blocked || !d.diff || untested}
                         onConfirm={() => act(async () => {
                           const res = await skillPost(`${base}/approve`, { diff_sha256: d.diff_sha256 });
                           onDone({ ok: true, text: `approved ${d.name}: ${res.note}` });

@@ -15,11 +15,14 @@ another cousin's.
 A cousin writes a draft as plain files under <home>/skill-drafts/<name>/.
 Nothing here lets a cousin approve one: approve_draft, reject_draft and
 remove_skill are the console's (routes_skills), and the `skill` tool and
-`cousin-skill` only list, show, draft and diff. An approval commits on
-`main` with the repository's git identity and appends a record
-(data/skills/approvals.jsonl; `private` keeps its own file), and a
-repository loads only while `main` is at the commit its last record
-names.
+`cousin-skill` only list, show, draft and diff. An approval needs a
+trigger test run on the diff shown (pass or fail, the operator's call),
+commits on `main` with the repository's git identity and appends a
+record (data/skills/approvals.jsonl; `private` keeps its own file), and
+a repository loads only while `main` is at the commit its last record
+names. A cousin that loads `private` keeps its own skills there, so its
+folder, which is its name, never lands in another repository (law rule
+11).
 
 At every start the runner exports the approved state read-only to
 <home>/run/skills/<plugin>/ and hands each to the agent as a local plugin
@@ -52,6 +55,7 @@ REPOS = ("personal", "work", "private")
 SHARED = "shared"
 SCOPES = ("own", "shared")
 SIDE_EFFECTS = ("read-only", "writes-local", "outward")
+TRIGGER_KEYS = ("should-trigger", "must-not-trigger")
 SKILL_FILE = "SKILL.md"
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 NAME_MAX = 64
@@ -192,11 +196,13 @@ def _records_path(root, repo):
     return base / "private" / "approvals.jsonl" if repo == "private" else base / "approvals.jsonl"
 
 
-def record(root, repo, *, user, action, commit, skill=None, folder=None, diff_sha=None):
+def record(root, repo, *, user, action, commit, skill=None, folder=None, diff_sha=None,
+           trigger=None):
     """Append one approval record: who did it in the console, to which
-    repository, the commit it produced and the sha256 of the diff shown.
-    `private` keeps its own file, since a record names the folder and a
-    private cousin's folder is its name."""
+    repository, the commit it produced, the sha256 of the diff shown and,
+    for an approval, whether its trigger test passed. `private` keeps its
+    own file, since a record names the folder and a private cousin's
+    folder is its name."""
     path = _records_path(root, repo)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -206,6 +212,8 @@ def record(root, repo, *, user, action, commit, skill=None, folder=None, diff_sh
     entry = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
              "repo": repo, "action": action, "user": user, "commit": commit,
              "folder": folder, "skill": skill, "diff_sha256": diff_sha}
+    if trigger is not None:
+        entry["trigger"] = trigger
     fresh = not path.exists()
     jsonl.append_line(path, json.dumps(entry, sort_keys=True), fsync=True)
     if fresh:
@@ -334,6 +342,25 @@ def cousin_repos(home):
     return list(dict.fromkeys(repos))
 
 
+def placement_problem(home, repo, scope):
+    """Why a draft for `repo` with `scope` cannot be this cousin's, as a
+    sentence, or None. It must target a repository the cousin loads, and
+    a cousin that loads `private` keeps its own skills there: its folder
+    is its name, which then never lands in a repository other cousins
+    load (law rule 11)."""
+    try:
+        repos = cousin_repos(home)
+    except SkillError as err:
+        return str(err)
+    if repo not in repos:
+        return ("it targets %s, which this cousin does not load (cousin.toml [skills] repos)"
+                % repo)
+    if scope != SHARED and repo != "private" and "private" in repos:
+        return ("a cousin that loads private keeps its own skills there:"
+                " metadata.context must be private")
+    return None
+
+
 def sources(slug, repos):
     """What a cousin loads: [(repo, folder, plugin)], shared/ first."""
     out = []
@@ -387,12 +414,39 @@ def target(slug, front):
     repo = meta.get("context", "")
     if repo not in REPOS:
         raise SkillError("metadata.context must be one of %s" % ", ".join(REPOS))
-    return repo, (SHARED if meta.get("scope", "own") == SHARED else slug)
+    if meta.get("scope", "own") == SHARED:
+        return repo, SHARED
+    if slug == SHARED:
+        # its own folder would be the one every cousin loads
+        raise SkillError("a cousin named %s has no folder of its own" % SHARED)
+    return repo, slug
+
+
+def draft_problems(home, slug, name, front):
+    """problems(), plus what a draft also needs before approval: a target
+    this cousin may approve into (placement_problem) and both trigger
+    test prompts."""
+    found = problems(name, front)
+    meta = front.get("metadata") or {}
+    try:
+        repo, _where = target(slug, front)
+    except SkillError as err:
+        if str(err) not in found:
+            found.append(str(err))
+    else:
+        why = placement_problem(home, repo, meta.get("scope", "own"))
+        if why:
+            found.append(why)
+    missing = [k for k in TRIGGER_KEYS if not str(meta.get(k, "")).strip()]
+    if missing:
+        found.append("the trigger test needs %s in metadata" % " and ".join(missing))
+    return found
 
 
 def drafts(home, slug):
     """[{name, description, metadata, problems, repo, folder}] of a
-    cousin's drafts."""
+    cousin's drafts, `problems` being everything that keeps one from
+    approval (draft_problems)."""
     out = []
     base = drafts_dir(home)
     if not base.is_dir():
@@ -401,13 +455,30 @@ def drafts(home, slug):
         skill = folder / SKILL_FILE
         raw = skill.read_bytes() if skill.is_file() else None
         item = _summary(folder.name, raw)
-        try:
-            front, _ = parse(raw.decode("utf-8")) if raw is not None else ({}, "")
-            item["repo"], item["folder"] = target(slug, front)
-        except (SkillError, UnicodeDecodeError):
-            item["repo"], item["folder"] = None, None
+        item["repo"], item["folder"] = None, None
         out.append(item)
+        try:
+            front, _ = parse(raw.decode("utf-8")) if raw is not None else (None, "")
+        except (SkillError, UnicodeDecodeError):
+            continue  # _summary said why
+        if front is None:
+            continue
+        item["problems"] = draft_problems(home, slug, folder.name, front)
+        try:
+            item["repo"], item["folder"] = target(slug, front)
+        except SkillError:
+            pass
     return out
+
+
+def draft_written(home, slug, name, path):
+    """What the tool and the CLI say once a draft is written: that the
+    operator approves it, and what still keeps it from approval."""
+    item = next((d for d in drafts(home, slug) if d["name"] == name), {})
+    text = "draft written: %s (the operator approves it in the console)" % path
+    if item.get("problems"):
+        text += "; before approval: %s" % "; ".join(item["problems"])
+    return text
 
 
 def show_draft(home, name):
@@ -421,13 +492,19 @@ def show_draft(home, name):
 def write_draft(home, name, *, description, body, context, side_effect,
                 scope="own", metadata=None):
     """Write or replace a draft's SKILL.md; returns its path. Its other
-    files are the cousin's own to write in the same folder."""
+    files are the cousin's own to write in the same folder. Refused when
+    the format is broken or the target is not this cousin's to approve
+    into (placement_problem); missing trigger prompts are left to the
+    listing, which names them."""
     folder = _draft_path(home, name)
     meta = {"context": context, "side-effect": side_effect, "scope": scope}
     meta.update({k: v for k, v in (metadata or {}).items() if v not in (None, "")})
     front = {"name": name, "description": " ".join(str(description).split()),
              "metadata": meta}
     found = problems(name, front)
+    if not found:
+        why = placement_problem(home, context, scope)
+        found = [why] if why else []
     if found:
         raise SkillError("; ".join(found))
     folder.mkdir(parents=True, exist_ok=True)
@@ -490,20 +567,17 @@ def _stamp():
 
 def approve_draft(root, home, slug, name, *, user, diff_sha):
     """Commit a draft on main and record it: only for the diff whose sha
-    the console showed. The draft folder goes once it is committed."""
+    the console showed, and only once a trigger test has run on that
+    very diff. A failed test does not refuse: the operator saw it, and
+    the record says so. The draft folder goes once it is committed."""
     folder = _draft_path(home, name)
     if not (folder / SKILL_FILE).is_file():
         raise SkillError("no draft %s" % name)
     front, _ = parse((folder / SKILL_FILE).read_text())
-    found = problems(name, front)
+    found = draft_problems(home, slug, name, front)
     if found:
         raise SkillError("draft %s cannot be approved: %s" % (name, "; ".join(found)))
     repo, where = target(slug, front)
-    if repo not in cousin_repos(home):
-        # a private cousin's folder is its name: it never lands in a
-        # repository the cousin does not load (law rule 11)
-        raise SkillError("draft %s targets %s, which this cousin does not load"
-                         " (cousin.toml [skills] repos)" % (name, repo))
     path = ensure_repo(root, repo, user=user)
     if not state(root, repo)["trusted"]:
         raise SkillError("repository %s has moved past its last approval; nothing is"
@@ -513,6 +587,9 @@ def approve_draft(root, home, slug, name, *, user, diff_sha):
         raise SkillError("the draft changed since it was shown; look again")
     if not text:
         raise SkillError("the draft is the same as what is approved")
+    tested = last_trigger_test(root, home, slug, name, sha)
+    if tested is None:
+        raise SkillError("draft %s has no trigger test on this version; run it first" % name)
     dest = path / where / name
     if dest.exists():
         shutil.rmtree(dest)
@@ -521,7 +598,8 @@ def approve_draft(root, home, slug, name, *, user, diff_sha):
     _git(path, "commit", "-q", "-m", "feat(skills): approve %s/%s" % (where, name))
     commit = _head(path)
     entry = record(root, repo, user=user, action="approve", commit=commit,
-                   skill=name, folder=where, diff_sha=sha)
+                   skill=name, folder=where, diff_sha=sha,
+                   trigger="pass" if tested.get("pass") is True else "fail")
     shutil.rmtree(folder)
     return entry
 
@@ -670,13 +748,26 @@ def export_plugins(root, home, slug, *, base=None):
     return paths, report
 
 
-TRIGGER_KEYS = ("should-trigger", "must-not-trigger")
+def _loads_private(home):
+    """Whether the cousin loads `private`; True when its list does not
+    parse, so a doubt keeps its traces with private's."""
+    try:
+        return "private" in cousin_repos(home)
+    except SkillError:
+        return True
 
 
-def trigger_path(home, name):
-    """Where a draft's last trigger test result is kept: beside the drafts,
-    never inside one, where it would change the draft's own diff."""
-    return drafts_dir(home) / ".trigger-tests" / ("%s.json" % name)
+def trigger_path(root, home, slug, name):
+    """Where a draft's last trigger test result is kept: under
+    <install>/data/skills/, which guard_tool refuses to tools, so a session
+    cannot write the pass the approve view shows; never inside the draft,
+    where it would change the draft's own diff. A cousin that loads
+    `private` keeps its results beside private's records, since the path
+    names it."""
+    base = Path(root) / "data" / "skills"
+    if _loads_private(home):
+        base = base / "private"
+    return base / "trigger-tests" / slug / ("%s.json" % name)
 
 
 def trigger_test(root, home, slug, name, *, checker=None):
@@ -725,17 +816,21 @@ def trigger_test(root, home, slug, name, *, checker=None):
             result[key] = {"prompt": prompt, "fired": fired, "detail": detail,
                            "pass": (fired == expect) == wanted}
         result["pass"] = all(result[k]["pass"] for k in TRIGGER_KEYS)
-    path = trigger_path(home, name)
+    path = trigger_path(root, home, slug, name)
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent.parent, 0o700)
+    except OSError:
+        pass
     atomic.write_text(path, json.dumps(result, indent=1, sort_keys=True) + "\n")
     return result
 
 
-def last_trigger_test(home, name, diff_sha):
+def last_trigger_test(root, home, slug, name, diff_sha):
     """The draft's last trigger test result, when it was run on this very
     diff; None otherwise (never run, or the draft changed since)."""
     try:
-        result = json.loads(trigger_path(home, name).read_text())
+        result = json.loads(trigger_path(root, home, slug, name).read_text())
     except (OSError, ValueError):
         return None
     return result if isinstance(result, dict) and result.get("diff_sha256") == diff_sha else None
@@ -770,6 +865,44 @@ def _protected(path, root, home, cwd):
     return home is not None and _inside(p, export_dir(home))
 
 
+GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE")
+WRAPPERS = ("env", "command", "exec", "nohup", "time", "nice")
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _command_of(segment, here):
+    """(argv, where) of one shell command with its prefix peeled off:
+    leading VAR=value words (GIT_DIR and GIT_WORK_TREE move `where`) and
+    the wrappers in WRAPPERS with their options (env's -C/--chdir moves
+    `where`; env -u and nice -n take a value)."""
+    args, where = list(segment), here
+    while args:
+        word = args[0]
+        if _ASSIGNMENT.match(word):
+            key, _, value = word.partition("=")
+            if key in GIT_ENV and value:
+                where = _absolute(value, where)
+            args = args[1:]
+            continue
+        wrapper = os.path.basename(word)
+        if wrapper not in WRAPPERS:
+            break
+        args = args[1:]
+        while args and args[0].startswith("-") and args[0] != "--":
+            opt, _, value = args[0].partition("=")
+            args = args[1:]
+            if wrapper == "env" and opt in ("-C", "--chdir", "-u", "--unset") and not value \
+                    and args:
+                value, args = args[0], args[1:]
+            elif wrapper == "nice" and opt in ("-n", "--adjustment") and not value and args:
+                args = args[1:]
+            if wrapper == "env" and opt in ("-C", "--chdir") and value:
+                where = _absolute(value, where)
+        if args and args[0] == "--":
+            args = args[1:]
+    return args, where
+
+
 def guard_tool(tool_name, tool_input, *, root=None, home=None, cwd=None):
     """The refusal for a call that would write the skills repositories,
     the exports or the approval records, or None. Path tools by their
@@ -802,27 +935,34 @@ def guard_tool(tool_name, tool_input, *, root=None, home=None, cwd=None):
             return why % ("Bash", path)
     if root is None:
         return None
-    here = cwd
+    here, exported = cwd, None
     for segment in perimeter._segments(perimeter._shell_tokens(command)):
-        if not segment:
+        args, where = _command_of(segment, exported or here)
+        if not args:
             continue
-        head = os.path.basename(segment[0])
-        if head == "cd" and len(segment) > 1:
-            here = _absolute(segment[1], here)
+        head = os.path.basename(args[0])
+        if head in ("cd", "pushd") and len(args) > 1:
+            here = _absolute(args[1], here)
+            continue
+        if head == "export":
+            for word in args[1:]:
+                key, _, value = word.partition("=")
+                if key in GIT_ENV and value:
+                    exported = _absolute(value, here)
             continue
         if head != "git":
             continue
-        args, where = segment[1:], here
+        args = args[1:]
         while args and args[0].startswith("-"):
-            if args[0] == "-C" and len(args) > 1:
-                where = _absolute(args[1], where)
-                args = args[2:]
-            elif args[0] in ("-c", "--git-dir", "--work-tree") and len(args) > 1:
-                if args[0] in ("--git-dir", "--work-tree"):
-                    where = _absolute(args[1], where)
-                args = args[2:]
-            else:
+            opt, _, value = args[0].partition("=")
+            if opt in ("-C", "--git-dir", "--work-tree"):
+                if not value and len(args) > 1:
+                    value, args = args[1], args[1:]
+                if value:
+                    where = _absolute(value, where)
+            elif opt in ("-c", "--namespace", "--config-env") and not value and len(args) > 1:
                 args = args[1:]
+            args = args[1:]
         if args and _inside(where, repos_dir(root)) and args[0] not in GIT_READ:
             return ("skills: git %s under %s is refused; only %s pass there, and a"
                     " skill changes only through the console's approval"
@@ -928,7 +1068,7 @@ def main(argv=None):
                                scope=args.scope,
                                metadata={"should-trigger": args.should_trigger,
                                          "must-not-trigger": args.must_not_trigger})
-            print("draft written: %s (the operator approves it in the console)" % path)
+            print(draft_written(home, slug, args.name, path))
         elif args.command == "diff":
             text, _sha = diff_draft(root, home, slug, args.name)
             print(text or "no difference from what is approved")

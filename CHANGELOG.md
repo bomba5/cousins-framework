@@ -24,7 +24,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
     diff shown. A repository whose `main` moved past its last approval
     loads nothing.
   - The trigger test runs a draft's `should-trigger` and `must-not-trigger`
-    prompts on the cousin's own model, with only the `Skill` tool.
+    prompts on the cousin's own model, with only the `Skill` tool. Approval
+    needs a result on the diff shown, kept where tools may not write it; a
+    failed one can still be approved, after a confirm that says so, and the
+    record keeps the outcome.
   - The runner exports the approved skills afresh, read-only, at every
     start and passes them to the agent as local plugins; settings files
     stay unread. The tmux launcher passes them as `--plugin-dir` and refuses
@@ -32,11 +35,14 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
     approval. The sdk lane's tool gate refuses, for every session, writes
     to the repositories, the exports and the approval records, and any git
     command there but a read.
-  - A private cousin's skills and records stay apart: its draft cannot
-    land in `personal`, its approval records have their own file, and
-    System never lists it.
-  - Every cousin's framework contract now lists the `skill` tool, so the
-    cached prompt rebuilds once at each cousin's next start.
+  - A cousin that loads `private` keeps its own skills there: a draft of
+    its own for `personal` or `work` is refused, even when the cousin lists
+    `personal` to load `shared/`. Its approval records and trigger results
+    have their own files, and System never lists it.
+  - Once `cousin-upgrade --apply-homes` has synced each home's tool
+    registry (a copy made at spawn), every cousin's framework contract
+    lists the `skill` tool, and its cached prompt rebuilds once at its next
+    start.
 
 ## 3.57.0 - 2026-10-21
 

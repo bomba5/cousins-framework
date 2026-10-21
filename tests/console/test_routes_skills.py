@@ -12,6 +12,7 @@ from tests.console._harness import ConsoleCase
 
 RUNNER = '\n[agent]\nrunner = "fake"\n'
 BODY = "# Steps\n\n1. Read the board.\n"
+PROMPTS = {"should-trigger": "check the regenerated board", "must-not-trigger": "what is for dinner?"}
 
 
 class SkillsRoutesCase(ConsoleCase):
@@ -28,11 +29,30 @@ class SkillsRoutesCase(ConsoleCase):
         self.kit = self.cousin("kit", operator="Priya",
                                extra=RUNNER + '\n[skills]\nrepos = ["private"]\n')
 
-    def draft(self, home, name="board-check", context="personal", scope="own"):
+    def draft(self, home, name="board-check", context="personal", scope="own", prompts=True):
         skills.write_draft(home, name, description="Check a board. Use after a regen.",
-                           body=BODY, context=context, side_effect="read-only", scope=scope)
+                           body=BODY, context=context, side_effect="read-only", scope=scope,
+                           metadata=PROMPTS if prompts else None)
 
-    def approve(self, slug, name="board-check"):
+    def hand_draft(self, home, name="board-check", context="personal"):
+        """A SKILL.md the cousin wrote with its own file tools."""
+        folder = home / "skill-drafts" / name
+        folder.mkdir(parents=True, exist_ok=True)
+        front = {"name": name, "description": "Check a board.",
+                 "metadata": dict(PROMPTS, context=context, **{"side-effect": "read-only"})}
+        (folder / "SKILL.md").write_text(skills.render(front, BODY))
+
+    def run_trigger(self, slug, name="board-check"):
+        """The trigger test, the model stood in for: the route's child
+        process would call the real one."""
+        expect = "draft:%s" % name
+        return skills.trigger_test(self.root, self.root / "cousins" / slug, slug, name,
+                                   checker=lambda prompt, dirs: (
+                                       expect if "board" in prompt else None, "ok"))
+
+    def approve(self, slug, name="board-check", trigger=True):
+        if trigger:
+            self.run_trigger(slug, name)
         base = "/api/cousins/%s/skills/drafts/%s" % (slug, name)
         status, d = self.get(base)
         self.assertEqual(status, 200, d)
@@ -54,9 +74,17 @@ class TestApproveAndInspect(SkillsRoutesCase):
                                  {"diff_sha256": "0" * 64})
         self.assertEqual(status, 409, body)
         self.assertIn("changed since it was shown", body["error"])
+        status, body = self.approve("wren", trigger=False)
+        self.assertEqual(status, 409, body)
+        self.assertIn("no trigger test on this version", body["error"])
+        self.run_trigger("wren")
+        status, d = self.get("/api/cousins/wren/skills/drafts/board-check")
+        self.assertEqual((d["trigger"]["pass"], d["trigger"]["diff_sha256"]),
+                         (True, d["diff_sha256"]))
         status, body = self.approve("wren")
         self.assertEqual(status, 200, body)
-        self.assertEqual((body["record"]["user"], body["record"]["action"]), ("_open", "approve"))
+        self.assertEqual((body["record"]["user"], body["record"]["action"],
+                          body["record"]["trigger"]), ("_open", "approve", "pass"))
         self.assertIn("next start of wren", body["note"])
         status, mine = self.get("/api/cousins/wren/skills")
         self.assertEqual([(s["plugin"], s["name"]) for s in mine["loaded"]],
@@ -94,7 +122,7 @@ class TestApproveAndInspect(SkillsRoutesCase):
         self.assertEqual(self.get("/api/cousins/wren/skills/drafts/board-check")[0], 404)
 
     def test_the_trigger_test_needs_both_prompts_before_it_spends_a_turn(self):
-        self.draft(self.wren)
+        self.draft(self.wren, prompts=False)
         self.serve()
         status, body = self.post("/api/cousins/wren/skills/drafts/board-check/trigger-test")
         self.assertEqual(status, 409, body)
@@ -125,11 +153,23 @@ class TestPrivacy(SkillsRoutesCase):
         self.assertIn('"folder": "kit"', private_records.read_text())
 
     def test_a_private_cousins_draft_cannot_land_in_personal(self):
-        self.draft(self.kit, context="personal")
+        self.hand_draft(self.kit, context="personal")
         self.serve()
         status, body = self.approve("kit")
         self.assertEqual(status, 409, body)
         self.assertIn("does not load", body["error"])
+
+    def test_nor_when_it_also_loads_personal_for_shared(self):
+        self.cousin("lux", operator="Priya",
+                    extra=RUNNER + '\n[skills]\nrepos = ["personal", "private"]\n')
+        self.hand_draft(self.root / "cousins" / "lux", context="personal")
+        self.serve()
+        status, mine = self.get("/api/cousins/lux/skills")
+        self.assertIn("keeps its own skills there", " ".join(mine["drafts"][0]["problems"]))
+        status, body = self.approve("lux")
+        self.assertEqual(status, 409, body)
+        self.assertIn("keeps its own skills there", body["error"])
+        self.assertFalse(skills.repo_dir(self.root, "personal").exists())
 
 
 class TestLoggedInApprover(SkillsRoutesCase):

@@ -85,8 +85,8 @@ from string keys to string *values*, so a list is one comma-separated string:
 | `reads` | `repo@commit:path` or `path#sha256:<hex>`, comma-separated | what it reads; a change there flags the skill as stale |
 | `hosts` | host names, comma-separated | every host it may contact |
 | `rests-on` | paths, tool versions, memory topics, comma-separated | what it depends on, checked for drift |
-| `should-trigger` | a prompt | one that SHOULD make the cousin use the skill (the trigger test); needed before approval |
-| `must-not-trigger` | a prompt | one that MUST NOT |
+| `should-trigger` | a prompt | one that SHOULD make the cousin use the skill (the trigger test); a draft without it is not approved |
+| `must-not-trigger` | a prompt | one that MUST NOT; a draft without it is not approved |
 | `scope` | `own`, `shared` | the cousin's folder (the default) or `shared/`; `shared` only for a general skill in `personal` |
 | `source` | `<url>@<commit>` | a skill from outside: where it came from |
 
@@ -127,6 +127,14 @@ runs as the same OS user and can read every folder with Bash. A private
 cousin's folder lives only in `private`, so its name never appears in a
 commit of a repository other cousins work in. Real separation needs
 per-cousin OS users, which are not built.
+
+For skills, a **private cousin** is one whose `[skills] repos` lists
+`private` (the cousin's `memory_scope` says nothing here: it is `private`
+for every cousin by default). Its own skills go only to `private`: a draft
+of its own (`scope` `own`) for `personal` or `work` is refused when it is
+written and when it is approved, even when the cousin lists `personal` to
+load `shared/`. A general skill it writes for `shared/` is fine, since
+that folder is not named for it.
 
 When a cousin needs another cousin's skill, it asks that cousin to run it: a
 peer message naming the skill and the inputs. The answer carries the job id
@@ -175,11 +183,14 @@ console as him, so the house commit rule holds unchanged.
 - **Approval happens in the console only** (System > skills), never through
   the `skill` tool or the CLI, both of which a cousin can run. The approve view leads with the
   side-effect class, the diff against the approved state, the hosts, the
-  `reads` pins and the trigger test result. Approving commits the change on
+  `reads` pins and the trigger test result. Approval needs a trigger test
+  run on the very diff shown ([below](#the-trigger-test)). Approving
+  commits the change on
   `main` with the git identity configured for the repository (set it once,
   to the operator's), and appends a record:
-  the console session user, the repository, the commit, the skill and the
-  sha256 of the diff shown. Records for `personal` and `work` go to
+  the console session user, the repository, the commit, the skill, the
+  sha256 of the diff shown and the trigger test's outcome (`trigger`:
+  `pass` or `fail`). Records for `personal` and `work` go to
   `<install>/data/skills/approvals.jsonl`. Records for `private` go to their
   own file, `<install>/data/skills/private/approvals.jsonl` (mode `0600`,
   which keeps out other OS users, not other cousins): a
@@ -194,7 +205,8 @@ console as him, so the house commit rule holds unchanged.
 - **Removing** an approved skill is a change like any other: proposed,
   shown, approved.
 - **The policy hook denies** tool writes under `<install>/skills/`, under
-  `<home>/run/skills/` (the exports below) and to the approval records. For
+  `<home>/run/skills/` (the exports below), to the approval records and to
+  the trigger test results (all under `<install>/data/skills/`). For
   git it allows only `log`, `show`, `diff`, `status`, `cat-file` and
   `ls-files` with `-C` or a working directory under `<install>/skills/`;
   every other git command there is denied (an allowlist, so `reset`,
@@ -218,7 +230,7 @@ stays byte-stable.
 | [lane](../glossary.md#lane) | how |
 |---|---|
 | `sdk` | At every start the [runner](../glossary.md#runner) exports the approved commit of each listed repository (`shared/` and the cousin's folder) afresh to `<home>/run/skills/<plugin>/`, read-only, with a plugin manifest, and passes each as a local plugin. The agent reads a skill's body when it uses the skill, not at start, so the export is denied to tools as well. Settings files stay unread (`setting_sources=[]`). The agent sees `shared:<name>`, `personal:<name>`, `work:<name>`, `private:<name>`: the plugin is named for the repository, never the cousin. |
-| `tmux` | The same exports, passed as `--plugin-dir`. This lane reads project settings (`--setting-sources project,local`), which load `<home>/.claude/skills/` unapproved (probed 2026-10-21 with the host's Claude Code 2.1.282), so the launcher MUST refuse to start while that directory exists, naming it, and the policy hook denies writes there. |
+| `tmux` | The same exports, passed as `--plugin-dir`. This lane reads project settings (`--setting-sources project,local`), which load `<home>/.claude/skills/` unapproved (probed 2026-10-21 with the host's Claude Code 2.1.282), so the launcher MUST refuse to start while that directory exists, naming it. That refusal is the only guard on this lane, which has no tool gate. |
 | `opencode` | Not supported. opencode has a skill tool of its own; the framework passes it nothing. |
 
 ## The trigger test
@@ -227,6 +239,16 @@ Before approval, each new or changed skill gets one prompt that SHOULD make
 the agent use it and one that MUST NOT. Both run on the cousin's own model,
 with the cousin's whole set loaded plus the draft. The result (fired or not,
 which skill fired) shows in the approve view. The test costs cents.
+
+Approval needs a result run on the very diff the approve view shows (an
+edit after the test makes it stale), but not a passing one: the operator
+sees the result and MAY approve a known miss, after a confirm that says
+so, and the approval record keeps the outcome. The console runs the test
+in a child process and keeps the last result in
+`<install>/data/skills/trigger-tests/<slug>/<name>.json`
+(`<install>/data/skills/private/trigger-tests/` for a cousin that loads
+`private`), where the policy hook denies tool writes, so a session cannot
+write the pass the approve view shows.
 
 ## Proposals
 

@@ -15,6 +15,7 @@ from cousin_lib.skills import SkillError
 from tests._hermetic import HermeticCase
 
 BODY = "# Steps\n\n1. Read the board.\n2. Check it.\n"
+PROMPTS = {"should-trigger": "check the regenerated board", "must-not-trigger": "what is for dinner?"}
 
 
 class SkillsCase(HermeticCase):
@@ -43,12 +44,31 @@ class SkillsCase(HermeticCase):
         return home
 
     def draft(self, home, name="board-check", context="personal", scope="own",
-              side_effect="read-only", body=BODY):
+              side_effect="read-only", body=BODY, prompts=True):
         return skills.write_draft(home, name, description="Check a board. Use after a regen.",
                                   body=body, context=context, side_effect=side_effect,
-                                  scope=scope)
+                                  scope=scope, metadata=PROMPTS if prompts else None)
+
+    def hand_draft(self, home, name="board-check", context="personal", scope="own"):
+        """A SKILL.md the cousin wrote with its own file tools, which
+        write_draft's checks never saw."""
+        folder = home / "skill-drafts" / name
+        folder.mkdir(parents=True, exist_ok=True)
+        front = {"name": name, "description": "Check a board.",
+                 "metadata": dict(PROMPTS, context=context, scope=scope,
+                                  **{"side-effect": "read-only"})}
+        (folder / "SKILL.md").write_text(skills.render(front, BODY))
+
+    def run_trigger(self, home, slug, name="board-check", fires=True):
+        """The trigger test with a stand-in for the model: the draft fires
+        on a prompt about a board, when `fires`."""
+        expect = "draft:%s" % name
+        return skills.trigger_test(
+            self.root, home, slug, name,
+            checker=lambda prompt, dirs: ((expect if fires and "board" in prompt else None), "ok"))
 
     def approve(self, home, slug, name="board-check"):
+        self.run_trigger(home, slug, name)
         _text, sha = skills.diff_draft(self.root, home, slug, name)
         return skills.approve_draft(self.root, home, slug, name, user="ana", diff_sha=sha)
 
@@ -99,8 +119,9 @@ class TestDraftsAndApproval(SkillsCase):
         st = skills.state(self.root, "personal")
         self.assertTrue(st["trusted"])
         self.assertEqual(entry["commit"], st["head"])
-        self.assertEqual((entry["action"], entry["user"], entry["folder"], entry["skill"]),
-                         ("approve", "ana", "wren", "board-check"))
+        self.assertEqual((entry["action"], entry["user"], entry["folder"], entry["skill"],
+                          entry["trigger"]),
+                         ("approve", "ana", "wren", "board-check", "pass"))
         self.assertEqual([r["action"] for r in skills.records(self.root, "personal")],
                          ["init", "approve"])
         self.assertFalse((self.wren / "skill-drafts" / "board-check").exists())
@@ -147,11 +168,80 @@ class TestDraftsAndApproval(SkillsCase):
 
     def test_a_draft_never_lands_in_a_repository_the_cousin_does_not_load(self):
         home = self.home("kit", repos=["private"])
-        self.draft(home, context="personal")
+        with self.assertRaisesRegex(SkillError, "does not load"):
+            self.draft(home, context="personal")
+        self.hand_draft(home, context="personal")
+        self.assertIn("does not load", " ".join(skills.drafts(home, "kit")[0]["problems"]))
+        self.run_trigger(home, "kit")
         _t, sha = skills.diff_draft(self.root, home, "kit", "board-check")
         with self.assertRaisesRegex(SkillError, "does not load"):
             skills.approve_draft(self.root, home, "kit", "board-check", user="ana", diff_sha=sha)
         self.assertFalse(skills.repo_dir(self.root, "personal").exists())
+
+    def test_a_cousin_that_loads_private_keeps_its_own_skills_there(self):
+        # it lists personal too, for shared/: its own folder, its name,
+        # still never lands in personal (law rule 11)
+        home = self.home("kit", repos=["personal", "private"])
+        with self.assertRaisesRegex(SkillError, "keeps its own skills there"):
+            self.draft(home, context="personal")
+        self.hand_draft(home, context="personal")
+        self.assertIn("keeps its own skills there",
+                      " ".join(skills.drafts(home, "kit")[0]["problems"]))
+        self.run_trigger(home, "kit")
+        _t, sha = skills.diff_draft(self.root, home, "kit", "board-check")
+        with self.assertRaisesRegex(SkillError, "keeps its own skills there"):
+            skills.approve_draft(self.root, home, "kit", "board-check", user="ana", diff_sha=sha)
+        self.assertFalse(skills.repo_dir(self.root, "personal").exists())
+        # its own skill goes to private, a general one to shared/
+        self.draft(home, context="private")
+        self.approve(home, "kit")
+        self.draft(home, name="commit-gate", scope="shared")
+        entry = self.approve(home, "kit", "commit-gate")
+        self.assertEqual(entry["folder"], "shared")
+        log = subprocess.run(["git", "-C", str(skills.repo_dir(self.root, "personal")), "log",
+                              "--format=%s", "--name-only"], capture_output=True, text=True).stdout
+        self.assertIn("approve shared/commit-gate", log)
+        self.assertNotIn("kit", log)
+        self.assertNotIn("kit", (self.root / "data" / "skills" / "approvals.jsonl").read_text())
+        self.assertFalse((self.root / "data" / "skills" / "trigger-tests").exists())
+        self.assertEqual([(i["plugin"], i["name"]) for i in skills.loaded(self.root, home, "kit")],
+                         [("shared", "commit-gate"), ("private", "board-check")])
+
+    def test_a_cousin_named_shared_has_no_folder_of_its_own(self):
+        home = self.home("shared")
+        self.draft(home)
+        self.assertIn("no folder of its own", " ".join(skills.drafts(home, "shared")[0]["problems"]))
+        with self.assertRaisesRegex(SkillError, "no folder of its own"):
+            skills.approve_draft(self.root, home, "shared", "board-check", user="ana",
+                                 diff_sha="0" * 64)
+
+    def test_approval_needs_a_trigger_test_on_the_diff_shown_and_records_a_miss(self):
+        self.draft(self.wren)
+        _t, sha = skills.diff_draft(self.root, self.wren, "wren", "board-check")
+        with self.assertRaisesRegex(SkillError, "no trigger test on this version"):
+            skills.approve_draft(self.root, self.wren, "wren", "board-check", user="ana",
+                                 diff_sha=sha)
+        # a result on an earlier version does not count
+        self.run_trigger(self.wren, "wren")
+        self.draft(self.wren, body=BODY + "3. A step added after the test.\n")
+        _t, sha = skills.diff_draft(self.root, self.wren, "wren", "board-check")
+        with self.assertRaisesRegex(SkillError, "no trigger test on this version"):
+            skills.approve_draft(self.root, self.wren, "wren", "board-check", user="ana",
+                                 diff_sha=sha)
+        # a failed test is the operator's call: approved, and recorded as a miss
+        self.assertFalse(self.run_trigger(self.wren, "wren", fires=False)["pass"])
+        entry = skills.approve_draft(self.root, self.wren, "wren", "board-check", user="ana",
+                                     diff_sha=sha)
+        self.assertEqual(entry["trigger"], "fail")
+
+    def test_a_draft_without_its_trigger_prompts_lists_why_and_is_not_approved(self):
+        self.draft(self.wren, prompts=False)
+        found = skills.drafts(self.wren, "wren")[0]["problems"]
+        self.assertEqual(found, ["the trigger test needs should-trigger and must-not-trigger"
+                                 " in metadata"])
+        with self.assertRaisesRegex(SkillError, "cannot be approved: the trigger test needs"):
+            skills.approve_draft(self.root, self.wren, "wren", "board-check", user="ana",
+                                 diff_sha="0" * 64)
 
     def test_reject_moves_the_draft_aside_with_who_and_why(self):
         self.draft(self.wren)
@@ -180,6 +270,10 @@ class TestDraftsAndApproval(SkillsCase):
         self.assertFalse(shared_file.exists() and "kit" in shared_file.read_text())
         self.assertIn('"folder": "kit"', private_file.read_text())
         self.assertEqual(stat.S_IMODE(private_file.stat().st_mode), 0o600)
+        # and so does its trigger test result, whose path names it
+        self.assertEqual(skills.trigger_path(self.root, home, "kit", "board-check"),
+                         self.root / "data" / "skills" / "private" / "trigger-tests" / "kit"
+                         / "board-check.json")
 
 
 class TestExport(SkillsCase):
@@ -247,7 +341,17 @@ class TestGuard(SkillsCase):
                 ("Bash", {"command": "rm -rf %s/data/skills" % self.root}),
                 ("Bash", {"command": "git -C %s commit -am x" % repo}),
                 ("Bash", {"command": "cd %s && git reset --hard HEAD~1" % repo}),
-                ("Bash", {"command": "git -C %s/wren update-ref refs/heads/main HEAD" % repo})):
+                ("Bash", {"command": "git -C %s/wren update-ref refs/heads/main HEAD" % repo}),
+                ("Bash", {"command": "git --git-dir=%s/.git commit -am x" % repo}),
+                ("Bash", {"command": "git --work-tree=%s add -A" % repo}),
+                ("Bash", {"command": "GIT_DIR=%s/.git git commit -am x" % repo}),
+                ("Bash", {"command": "env GIT_DIR=%s/.git git update-ref refs/heads/main HEAD"
+                                     % repo}),
+                ("Bash", {"command": "env -C %s git reset --hard" % repo}),
+                ("Bash", {"command": "export GIT_DIR=%s/.git; git commit -am x" % repo}),
+                ("Bash", {"command": "nice -n 5 git -C %s commit -am x" % repo}),
+                ("Write", {"file_path": str(skills.trigger_path(self.root, self.wren, "wren",
+                                                                "board-check"))})):
             self.assertIsNotNone(self.refused(tool, payload), (tool, payload))
 
     def test_reads_drafts_and_unrelated_work_pass(self):
@@ -258,6 +362,9 @@ class TestGuard(SkillsCase):
                 ("Bash", {"command": "cat %s/wren/x/SKILL.md" % repo}),
                 ("Write", {"file_path": str(self.wren / "skill-drafts" / "a" / "SKILL.md")}),
                 ("Bash", {"command": "git commit -am 'own repo work'"}),
+                ("Bash", {"command": "GIT_DIR=%s/.git git log --oneline" % repo}),
+                ("Bash", {"command": "env GIT_PAGER=cat git --git-dir=%s/.git show" % repo}),
+                ("Bash", {"command": "GIT_DIR=/tmp/elsewhere/.git git commit -am x"}),
                 ("Read", {"file_path": str(repo / "wren" / "x" / "SKILL.md")})):
             self.assertIsNone(self.refused(tool, payload), (tool, payload))
 
@@ -279,6 +386,7 @@ class TestCli(SkillsCase):
                                     stdin=BODY)
         self.assertEqual(code, 0, out)
         self.assertIn("draft written", out)
+        self.assertIn("before approval: the trigger test needs must-not-trigger in metadata", out)
         _, out, _ = self.run_cli("list")
         self.assertIn("board-check -> personal:wren", out)
         _, out, _ = self.run_cli("show", "board-check")
@@ -305,8 +413,12 @@ class TestTriggerTest(SkillsCase):
         self.assertTrue(result["pass"])
         self.assertEqual([s[1] for s in seen], [["draft"], ["draft"]])
         _t, sha = skills.diff_draft(self.root, self.wren, "wren", "board-check")
-        self.assertEqual(skills.last_trigger_test(self.wren, "board-check", sha)["pass"], True)
-        # the result sits beside the drafts, so the draft's diff is unchanged
+        self.assertEqual(skills.last_trigger_test(self.root, self.wren, "wren", "board-check",
+                                                  sha)["pass"], True)
+        # the result sits under the install's data, which tools may not
+        # write, never in the draft, so the draft's diff is unchanged
+        self.assertTrue(skills.trigger_path(self.root, self.wren, "wren", "board-check")
+                        .is_relative_to(self.root / "data" / "skills" / "trigger-tests"))
         self.assertEqual(skills.diff_draft(self.root, self.wren, "wren", "board-check")[1], sha)
         self.assertEqual([d["name"] for d in skills.drafts(self.wren, "wren")], ["board-check"])
         # an edit makes the old result stale
@@ -315,7 +427,8 @@ class TestTriggerTest(SkillsCase):
                            metadata={"should-trigger": "check the regenerated board",
                                      "must-not-trigger": "what is for dinner?"})
         _t, sha2 = skills.diff_draft(self.root, self.wren, "wren", "board-check")
-        self.assertIsNone(skills.last_trigger_test(self.wren, "board-check", sha2))
+        self.assertIsNone(skills.last_trigger_test(self.root, self.wren, "wren", "board-check",
+                                                   sha2))
 
     def test_a_skill_that_fires_on_the_wrong_prompt_fails(self):
         skills.write_draft(self.wren, "board-check", description="Check a board.", body=BODY,
@@ -328,7 +441,7 @@ class TestTriggerTest(SkillsCase):
         self.assertFalse(result["must-not-trigger"]["pass"])
 
     def test_a_draft_without_its_prompts_cannot_be_tested(self):
-        self.draft(self.wren)
+        self.draft(self.wren, prompts=False)
         with self.assertRaisesRegex(SkillError, "should-trigger or must-not-trigger"):
             skills.trigger_test(self.root, self.wren, "wren", "board-check",
                                 checker=lambda p, d: (None, "ok"))

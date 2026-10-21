@@ -50,7 +50,7 @@ prompt = "Review the week in memory/raw and update STATUS.md."
 
 Exactly one of `interval_seconds`, `daily_at` and `cron`. None or two is an error, not a guess.
 
-A loop that doesn't validate (bad name, no schedule or two, empty prompt, a `cron` field that doesn't parse) is skipped and the reason is reported: on the daemon's stderr every tick, and in the `errors` list of the console's loops view. A `cousin.toml` that doesn't parse at all is reported the same way, naming the file. The other loops of that cousin and every other cousin still run.
+A loop that doesn't validate (bad name, no schedule or two, empty prompt, a `cron` field that doesn't parse) is skipped and the reason is reported: on the daemon's stderr every tick, and in the `errors` list of the console's loops tab (System). A `cousin.toml` that doesn't parse at all is reported the same way, naming the file. The other loops of that cousin and every other cousin still run.
 
 Saving loops from the console (or `loops.save_cousin_loops`) validates the whole list first, each `cron` expression included, and refuses it naming the bad entry (`loops[2]: duplicate name 'digest'`), then rewrites only the `[[loops]]` tables, keeps the rest of the file, and checks the result parses back to the same thing before it replaces the file. `days` is lowercased on the way.
 

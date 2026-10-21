@@ -2,16 +2,16 @@
  "esbuild": "esbuild@0.25.10",
  "files": {
   "accounts.jsx": {
-   "output": "5a065385cfdd",
-   "source": "89869a61b6f8"
+   "output": "a96999ca9698",
+   "source": "b0e460ba6c35"
   },
   "agent.jsx": {
    "output": "6e921580d208",
    "source": "6f9b8dcd6c80"
   },
   "app.jsx": {
-   "output": "d2b51649c382",
-   "source": "81daaa04a3e6"
+   "output": "a3589aa613d8",
+   "source": "1b1b499a87df"
   },
   "chat.jsx": {
    "output": "4127afbd74a0",
@@ -50,12 +50,12 @@
    "source": "e7d1d8496beb"
   },
   "system.jsx": {
-   "output": "c601334d1a12",
-   "source": "44fbf3bbbb35"
+   "output": "ca010c05b3c4",
+   "source": "8b12f0e4d773"
   },
   "ui.jsx": {
-   "output": "33b7996b3364",
-   "source": "b09d043d5ccb"
+   "output": "2b43b8cc73f7",
+   "source": "cfd00370e55e"
   },
   "views.jsx": {
    "output": "c6c0315082e3",

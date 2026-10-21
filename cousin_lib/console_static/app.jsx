@@ -6,12 +6,39 @@ const NAV = [
   { id: "cousins",  label: "Cousins",  icon: I.cousins, kbd: "2" },
   { id: "jobs",     label: "Jobs",     icon: I.list,    kbd: "3" },
   { id: "memory",   label: "Memory",   icon: I.memory,  kbd: "4" },
-  { id: "loops",    label: "Loops",    icon: I.loops,   kbd: "5" },
   { id: "tokens",   label: "Tokens",   icon: I.tokens,  kbd: "6" },
   { id: "tracker",  label: "Tracker",  icon: I.tracker, kbd: "7" },
   { id: "meetings", label: "Meetings", icon: I.meetings, kbd: "8" },
-  { id: "settings", label: "Settings", icon: I.host,    kbd: "0" },
 ];
+
+// Views that are System tabs since 3.57.0: an old ?view= address
+// opens the tab, and their shortcuts still work. Their ids stay reserved
+// (ui.jsx), so no package takes them.
+const SYSTEM_TAB_OF = { loops: "loops", settings: "settings", accounts: "accounts" };
+const SYSTEM_TAB_KEYS = { "5": "loops", "0": "settings" };
+
+// The view a page load opens: ?view=, else Overview. An old address for a
+// view that is a System tab now is rewritten to it in place.
+function startView() {
+  const p = new URLSearchParams(window.location.search);
+  const asked = p.get("view") || "overview";
+  const tab = SYSTEM_TAB_OF[asked];
+  if (!tab) return asked;
+  p.set("view", "system");
+  p.set("tab", tab);
+  window.history.replaceState(window.history.state, "", window.location.pathname + "?" + p + window.location.hash);
+  return "system";
+}
+
+// Open one of System's tabs: in the address for a System view that mounts
+// now, and as an event for one already open.
+function openSystemTab(tab, setView) {
+  const p = new URLSearchParams(window.location.search);
+  p.set("tab", tab);
+  window.history.replaceState(window.history.state, "", window.location.pathname + "?" + p + window.location.hash);
+  window.dispatchEvent(new CustomEvent("fw-system-tab", { detail: tab }));
+  setView("system");
+}
 
 // The NAV a package adds to: the built-in entries, then the views the
 // package files registered through ui.jsx's registerView (index.html's
@@ -401,7 +428,6 @@ function App() {
   //   ?meeting=<id>         with ?view=meetings, open that meeting's thread
   const urlParams = typeof window !== "undefined"
     ? new URLSearchParams(window.location.search) : new URLSearchParams();
-  const initialView = urlParams.get("view") || "overview";
   const initialCousin = urlParams.get("cousin") || "";
   const embedUser = urlParams.get("user") || "";
   const embedMode = urlParams.get("embed") === "1";
@@ -439,7 +465,7 @@ function App() {
 
   // A page load lands on ?view= (else Overview); the effect below keeps
   // the address in step with what you pick.
-  const [view, setView] = useStateApp(initialView);
+  const [view, setView] = useStateApp(startView);
   const [cousins, setCousins] = useStateApp([]);
   const [loops, setLoops] = useStateApp([]);
   const [activeCousin, setActiveCousin] = useStateApp(initialCousin);
@@ -456,6 +482,7 @@ function App() {
     p.set("view", view);
     if (activeCousin) p.set("cousin", activeCousin); else p.delete("cousin");
     if (view !== "meetings") p.delete("meeting");
+    if (view !== "system") p.delete("tab");
     const next = "?" + p.toString();
     if (next !== window.location.search) {
       window.history.replaceState(window.history.state, "",
@@ -629,11 +656,14 @@ function App() {
     };
   }, [needLogin]);
 
-  // Keyboard nav: Ctrl/Cmd + the digit on each NAV entry.
+  // Keyboard nav: Ctrl/Cmd + the digit on each NAV entry, and 5 and 0 for
+  // the System tabs that were Loops and Settings.
   useEffectApp(() => {
     const onKey = (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       if (e.metaKey || e.ctrlKey) {
+        const tab = SYSTEM_TAB_KEYS[e.key];
+        if (tab) { e.preventDefault(); openSystemTab(tab, setView); return; }
         const hit = navEntries().find(n => n.kbd && n.kbd === e.key);
         if (hit) { e.preventDefault(); setView(hit.id); }
       }
@@ -744,16 +774,15 @@ function App() {
           {view === "cousins"  && <CousinsView cousins={cousins} setCousins={setCousins} setActiveCousin={(s) => { setActiveCousin(s); pickView("chat"); }} />}
           {view === "jobs"     && <JobsView />}
           {view === "memory"   && <MemoryView />}
-          {view === "loops"    && <LoopsView loops={loops} />}
           {view === "tokens"   && <TokensView cousins={cousins} />}
           {view === "tracker"  && <TrackerView cousins={cousins} />}
           {view === "meetings" && window.MeetingsView && <MeetingsView cousins={cousins} sessionUser={sessionUser} initialMeeting={initialMeeting} />}
-          {view === "settings" && <SettingsView auth={auth} setAuth={setAuth} />}
           {view === "overview" && <HostView onOpen={(slug) => { setActiveCousin(slug); pickView("chat"); }} />}
           {registeredView(view) && (
             <SlotBoundary label={"view/" + view}>
               <SlotEntry entry={registeredView(view)}
-                         props={{ cousins, sessionUser, onOpen: (slug) => { setActiveCousin(slug); pickView("chat"); } }} />
+                         props={{ cousins, sessionUser, loops, auth, setAuth,
+                                  onOpen: (slug) => { setActiveCousin(slug); pickView("chat"); } }} />
             </SlotBoundary>
           )}
         </div>
@@ -793,11 +822,9 @@ function MainHeader({ view, cousins, activeCousin }) {
     cousins: "Cousins",
     jobs: "Jobs",
     memory: "Memory",
-    loops: "Loops",
     tokens: "Tokens",
     tracker: "Tracker",
     meetings: "Meetings",
-    settings: "Settings",
     overview: "Overview",
   };
   const paths = {
@@ -805,11 +832,9 @@ function MainHeader({ view, cousins, activeCousin }) {
     cousins: "/console/cousins",
     jobs: "/console/jobs",
     memory: "/console/memory",
-    loops: "/console/loops",
     tokens: "/console/tokens",
     tracker: "/console/tracker",
     meetings: "/console/meetings",
-    settings: "/console/settings",
     overview: "/console/host",
   };
   const extra = window.registeredView ? registeredView(view) : null;

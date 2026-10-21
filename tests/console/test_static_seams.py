@@ -145,9 +145,9 @@ process.stdout.write(JSON.stringify(slotEntries("z").map(e => e.id)));""")
     def test_views_register_in_order(self):
         got = self.run_node("""
 registerView({id: "system", label: "System", order: 60, render: () => 1});
-registerView({id: "accounts", label: "Accounts", order: 50, render: () => 1});
+registerView({id: "extras", label: "Extras", order: 50, render: () => 1});
 process.stdout.write(JSON.stringify(registeredViews().map(v => v.id)));""")
-        self.assertEqual(got, ["accounts", "system"])
+        self.assertEqual(got, ["extras", "system"])
 
 
 class SecretFieldPin(unittest.TestCase):

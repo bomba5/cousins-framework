@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.57.0 - 2026-10-21
+
+### Changed
+
+- **Loops, Accounts and Settings are tabs of System.** The sidebar keeps
+  the everyday pages, and System holds nine tabs: supervisor, loops,
+  schedules, accounts, users, agent defaults, install config, backup and
+  settings. An old address (`?view=loops`, `?view=accounts`,
+  `?view=settings`, as a bookmark or the phone app's last page) opens its
+  tab, Ctrl/Cmd + 5 and + 0 still open loops and settings, and the open
+  tab is in the address (`&tab=`), so a reload comes back to it. On a
+  phone the tabs wrap onto a second row. A package adds a tab through
+  the new `system.tabs` slot, as Accounts now does; a package view gets
+  `loops`, `auth` and `setAuth` in its props too.
+
 ## 3.56.1 - 2026-10-21
 
 ### Fixed

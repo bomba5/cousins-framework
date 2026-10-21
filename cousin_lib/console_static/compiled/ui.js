@@ -109,7 +109,8 @@ const RESERVED_VIEW_IDS = [
   "tokens",
   "tracker",
   "meetings",
-  "settings"
+  "settings",
+  "accounts"
 ];
 const SEAM_SLOTS = {};
 const SEAM_VIEWS = [];

@@ -45,7 +45,7 @@ itself talks to nothing outside the install.
 ## Logins and users
 
 Out of the box there are no users and the console is open to anyone the
-network guard lets in. The Settings page says so. To put a login in front
+network guard lets in. System's settings tab says so. To put a login in front
 of it:
 
 ```
@@ -84,8 +84,8 @@ are an eye toggle that shows or hides hidden cousins (with their jobs and
 artifacts) and loops, the logged-in
 user, and a clock.
 
-The sidebar lists the pages (Ctrl/Cmd + 1 to 7, 0 for Settings) and below
-them your cousins. The Overview entry carries a count when cousins are
+The sidebar lists the pages (Ctrl/Cmd + 1 to 4 and 6 to 8; 5 and 0 open
+the loops and settings tabs of [System](#system)) and below them your cousins. The Overview entry carries a count when cousins are
 waiting on a person, and the foot of the sidebar shows the next daily [flip](glossary.md#flip):
 the earliest `flip_at` among the running cousins, how far away it is, and
 who flips then. Click a cousin to open its chat. A stopped cousin is
@@ -205,7 +205,7 @@ Click a card to open the inspector drawer. From top to bottom:
   throwaway client and asks first. Both run as the cousin's long operation
   with their steps shown. While `data/login-required.json` stands, the
   panel shows its action line and "log in here", the account's login from
-  the Accounts page. See [Accounts](#accounts).
+  System's accounts tab. See [Accounts](#accounts).
 - **Tokens today.**
 - **Files.** "browse home" opens a read-only file explorer over the cousin's
   home: a tree on the left (dotfiles behind a checkbox), a viewer on the
@@ -285,7 +285,7 @@ The install-wide `[agent]` defaults are on the System page.
 
 ### MCP and policy
 
-Two inspector panels and one Settings panel edit what a cousin's model can
+Two inspector panels and one panel in System's settings tab edit what a cousin's model can
 reach. Each change is checked by the parser the runner reads the file with,
 keeps every line it does not touch, and applies at the next start: after a
 save the panel says so and, on a running cousin, offers "restart now" (a
@@ -323,7 +323,7 @@ the console.)
   generation ends through it. A change that removes a deny entry or switches the
   filter off lists what it removes and needs "save and loosen". A guardrail,
   not a sandbox: the model can rewrite the file.
-- **Settings > mcp tool registry**: the install default,
+- **System > settings > mcp tool registry**: the install default,
   `config/mcp-registry.toml`, with "copy from example" while it is absent.
 
 Replacing a registry with the default, or a broken `.mcp.json` or
@@ -762,7 +762,7 @@ with the list before and after.
 
 ## Loops
 
-One table of every loop of every cousin, plus a `context-heartbeat` row per
+A tab of [System](#system). One table of every loop of every cousin, plus a `context-heartbeat` row per
 running cousin: cousin, loop, state (healthy, idle, disabled, failed),
 schedule, last fire, a live countdown to the next one, drift (how late the
 last fire was; amber over a minute, red over five), and the start of the
@@ -827,7 +827,7 @@ See [meetings](meetings.md).
 
 ## Accounts
 
-The accounts runner cousins run on: `host` (the host's own `~/.claude`) and
+A tab of [System](#system). The accounts runner cousins run on: `host` (the host's own `~/.claude`) and
 every entry in `config/accounts.toml`, with its kind, where it lives, the
 lanes it runs on and the cousins on it. No secret is ever shown: a key or
 token file reads "set (ends WXYZ)" at most.
@@ -870,16 +870,23 @@ The page refreshes when another session changes an account.
 
 ## System
 
-The install as a whole, in six tabs. The routes are in [the API reference](reference/console-api.md#system-the-system-view).
+The install as a whole, in nine tabs: supervisor, [loops](#loops), schedules,
+[accounts](#accounts), users, agent defaults, install config, backup and
+[settings](#settings). Loops, Accounts and Settings were sidebar pages of
+their own until 3.57.0; an old address for one (`?view=loops`) opens its tab.
+The open tab is in the address (`&tab=`), so a reload comes back to it. On a
+phone the tabs wrap onto a second row. The routes are in [the API reference](reference/console-api.md#system-the-system-view).
 
 - **supervisor**: every child of `cousin-supervisor` with its state, pid, restarts and the reason it gave. Start or stop the loops daemon and each runner cousin, and rescan the registry (reload). The console itself is never stopped from its own page: its row offers the console restart. Stopping the loops daemon asks twice, because every heartbeat, loop and scheduled prompt stops with it. A Telegram bridge follows its runner.
 - **schedules**: every cousin's pending one-shot prompts (`cousin-schedule`), with history on a switch. Add one for any cousin ("in 30m", "tomorrow 06:30", an ISO time) or cancel one. A cousin's own schedules are also a panel in its inspector.
-- **users**: console users. Add one, reset another user's password (your own changes in Settings, with the current one), remove one by typing its name. The last user and the one you are logged in as cannot be removed. Passwords are never shown again.
+- **users**: console users. Add one, reset another user's password (your own changes in the settings tab, with the current one), remove one by typing its name. The last user and the one you are logged in as cannot be removed. Passwords are never shown again.
 - **backup**: back up now. Pick an absolute destination (remembered in this browser) and the cousins; each one becomes a long operation and a job, and lands in `<dest>/<slug>/<date>/`. A destination inside the install, or one other users can write without the sticky bit, is refused, and the snapshot is owner-only (`0700` directories, `0600` files). A copy that lands anywhere but its own directory fails with the path it landed at, nothing is deleted, and the event is logged in `data/system/audit.jsonl`.
 - **agent defaults**: `config/harness.toml [agent]`: `default_model`, `default_effort` and `commit_attribution`, each shown with where its value comes from. A cousin reads them when it starts, so restart one from its inspector to apply.
 - **install config**: editors for `media.toml` (with each provider's key as a write-only field), `embedding.toml`, `hive.toml`, `external-peers.toml` (with each peer's outbound and inbound token as write-only fields, and below it the outbox: messages to external peers being sent again, delivered or given up), `outbound-filter.json`, `law.md` and `net-allowlist.json`. Each save is checked by the file's own loader first, a number that does not parse is refused, and an emptied field removes its key; the JSON and Markdown files are backed up to `data/config-backups/` and refused if they changed since you opened them. The allowlist refuses a list that would lock out the address you are on, and offers the console restart it needs. `worker-cmd` is shown read-only: edit it on the host. A leftover `agent-cmd` shows there too; no runner kind reads it.
 
 ## Settings
+
+A tab of [System](#system).
 
 - **cosmetic**: accent hue and saturation, chat reveal speed (off, slow,
   normal, fast) and effect (plain, glitch, matrix, typewriter, boot), font

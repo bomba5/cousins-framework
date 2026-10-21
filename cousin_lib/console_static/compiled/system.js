@@ -654,30 +654,54 @@ function SysConfigEditors() {
   ), /* @__PURE__ */ React.createElement(SysAllowlistEditor, { file: cfg.allowlist, reload: load }), /* @__PURE__ */ React.createElement(SysCommandsView, { commands: cfg.commands }));
 }
 const SYSTEM_TABS = [
-  ["services", "supervisor"],
-  ["schedules", "schedules"],
-  ["users", "users"],
-  ["backup", "backup"],
-  ["agent", "agent defaults"],
-  ["config", "install config"]
+  { id: "services", label: "supervisor", order: 10 },
+  { id: "loops", label: "loops", order: 20 },
+  { id: "schedules", label: "schedules", order: 30 },
+  { id: "users", label: "users", order: 50 },
+  { id: "agent", label: "agent defaults", order: 60 },
+  { id: "config", label: "install config", order: 70 },
+  { id: "backup", label: "backup", order: 80 },
+  { id: "settings", label: "settings", order: 90 }
 ];
 const SYS_TAB_KEY = "console_system_tab";
-function SystemView({ cousins }) {
-  const [tab, setTab] = React.useState(() => {
-    try {
-      return localStorage.getItem(SYS_TAB_KEY) || "services";
-    } catch (_e) {
-      return "services";
-    }
-  });
+function systemTabs() {
+  const extra = window.slotEntries ? slotEntries("system.tabs") : [];
+  return SYSTEM_TABS.concat(extra.map((e) => ({ id: e.id, label: e.label || e.id, order: e.order, entry: e }))).sort((a, b) => a.order === b.order ? 0 : a.order < b.order ? -1 : 1);
+}
+function startSystemTab() {
+  const known = (t) => t && systemTabs().some((x) => x.id === t);
+  const asked = new URLSearchParams(window.location.search).get("tab");
+  if (known(asked)) return asked;
+  try {
+    const last = localStorage.getItem(SYS_TAB_KEY);
+    if (known(last)) return last;
+  } catch (_e) {
+  }
+  return "services";
+}
+function SystemView({ cousins, sessionUser, onOpen, loops, auth, setAuth }) {
+  const [tab, setTab] = React.useState(startSystemTab);
   const pick = (t) => {
     setTab(t);
     try {
       localStorage.setItem(SYS_TAB_KEY, t);
     } catch (_e) {
     }
+    const p = new URLSearchParams(window.location.search);
+    p.set("tab", t);
+    window.history.replaceState(window.history.state, "", window.location.pathname + "?" + p + window.location.hash);
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "wrap-pad system-view", style: { maxWidth: 1100 } }, /* @__PURE__ */ React.createElement("div", { className: "radio-row" }, SYSTEM_TABS.map(([id, label]) => /* @__PURE__ */ React.createElement("button", { key: id, className: tab === id ? "sel" : "", onClick: () => pick(id) }, label))), tab === "services" && /* @__PURE__ */ React.createElement(SysSupervisorPanel, null), tab === "schedules" && /* @__PURE__ */ React.createElement(SchedulesPanel, { cousins }), tab === "users" && /* @__PURE__ */ React.createElement(SysUsersPanel, null), tab === "backup" && /* @__PURE__ */ React.createElement(SysBackupPanel, { cousins }), tab === "agent" && /* @__PURE__ */ React.createElement(SysAgentDefaultsPanel, null), tab === "config" && /* @__PURE__ */ React.createElement(SysConfigEditors, null));
+  React.useEffect(() => {
+    const on = (e) => {
+      if (e.detail) pick(e.detail);
+    };
+    window.addEventListener("fw-system-tab", on);
+    return () => window.removeEventListener("fw-system-tab", on);
+  }, []);
+  const tabs = systemTabs();
+  const slotTab = tabs.find((t) => t.id === tab && t.entry);
+  const own = tab === "loops" || tab === "settings" || !!slotTab;
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "wrap-pad system-view", style: { maxWidth: 1100, paddingBottom: own ? 0 : void 0 } }, /* @__PURE__ */ React.createElement("div", { className: "radio-row" }, tabs.map((t) => /* @__PURE__ */ React.createElement("button", { key: t.id, className: tab === t.id ? "sel" : "", onClick: () => pick(t.id) }, t.label))), tab === "services" && /* @__PURE__ */ React.createElement(SysSupervisorPanel, null), tab === "schedules" && /* @__PURE__ */ React.createElement(SchedulesPanel, { cousins }), tab === "users" && /* @__PURE__ */ React.createElement(SysUsersPanel, null), tab === "backup" && /* @__PURE__ */ React.createElement(SysBackupPanel, { cousins }), tab === "agent" && /* @__PURE__ */ React.createElement(SysAgentDefaultsPanel, null), tab === "config" && /* @__PURE__ */ React.createElement(SysConfigEditors, null)), tab === "loops" && /* @__PURE__ */ React.createElement(LoopsView, { loops: loops || [] }), tab === "settings" && /* @__PURE__ */ React.createElement(SettingsView, { auth, setAuth }), slotTab && /* @__PURE__ */ React.createElement(SlotBoundary, { label: "system/" + slotTab.id }, /* @__PURE__ */ React.createElement(SlotEntry, { entry: slotTab.entry, props: { cousins, sessionUser, onOpen } })));
 }
 registerView({ id: "system", label: "System", icon: I.host, order: 60, render: (props) => /* @__PURE__ */ React.createElement(SystemView, { ...props }) });
 registerSlot("inspector.panels", {

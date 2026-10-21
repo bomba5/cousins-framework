@@ -771,7 +771,7 @@ account = "metered"
 | `days` | every day | with `daily_at`: three-letter weekdays, e.g. `["mon", "thu"]` |
 | `prompt` | required | the text typed into the cousin when it fires |
 | `enabled` | `true` | |
-| `hidden` | `false` | hides it in the console's loops view |
+| `hidden` | `false` | hides it in the console's loops tab |
 
 Exactly one of `interval_seconds`, `daily_at` and `cron`. See
 [jobs and loops](jobs-and-loops.md).

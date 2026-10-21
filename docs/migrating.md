@@ -299,7 +299,7 @@ cousin-spawn wren --start
    Old pictures show.
 4. A message from the console gets an answer, and the reasoning pane shows
    the [turn](glossary.md#turn).
-5. Its loops show in the console's loops view with sensible next-fire times.
+5. Its loops show in the console's loops tab (System) with sensible next-fire times.
 
 Only then retire the old one. I keep the old home and the archives for a week
 or two before deleting anything.

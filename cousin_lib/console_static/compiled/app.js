@@ -4,12 +4,29 @@ const NAV = [
   { id: "cousins", label: "Cousins", icon: I.cousins, kbd: "2" },
   { id: "jobs", label: "Jobs", icon: I.list, kbd: "3" },
   { id: "memory", label: "Memory", icon: I.memory, kbd: "4" },
-  { id: "loops", label: "Loops", icon: I.loops, kbd: "5" },
   { id: "tokens", label: "Tokens", icon: I.tokens, kbd: "6" },
   { id: "tracker", label: "Tracker", icon: I.tracker, kbd: "7" },
-  { id: "meetings", label: "Meetings", icon: I.meetings, kbd: "8" },
-  { id: "settings", label: "Settings", icon: I.host, kbd: "0" }
+  { id: "meetings", label: "Meetings", icon: I.meetings, kbd: "8" }
 ];
+const SYSTEM_TAB_OF = { loops: "loops", settings: "settings", accounts: "accounts" };
+const SYSTEM_TAB_KEYS = { "5": "loops", "0": "settings" };
+function startView() {
+  const p = new URLSearchParams(window.location.search);
+  const asked = p.get("view") || "overview";
+  const tab = SYSTEM_TAB_OF[asked];
+  if (!tab) return asked;
+  p.set("view", "system");
+  p.set("tab", tab);
+  window.history.replaceState(window.history.state, "", window.location.pathname + "?" + p + window.location.hash);
+  return "system";
+}
+function openSystemTab(tab, setView) {
+  const p = new URLSearchParams(window.location.search);
+  p.set("tab", tab);
+  window.history.replaceState(window.history.state, "", window.location.pathname + "?" + p + window.location.hash);
+  window.dispatchEvent(new CustomEvent("fw-system-tab", { detail: tab }));
+  setView("system");
+}
 function navEntries() {
   const extra = (window.registeredViews ? registeredViews() : []).map((v) => ({ id: v.id, label: v.label, icon: v.icon || I.list, kbd: v.kbd || "" }));
   return NAV.concat(extra);
@@ -373,7 +390,6 @@ function HealthBadge() {
 }
 function App() {
   const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
-  const initialView = urlParams.get("view") || "overview";
   const initialCousin = urlParams.get("cousin") || "";
   const embedUser = urlParams.get("user") || "";
   const embedMode = urlParams.get("embed") === "1";
@@ -404,7 +420,7 @@ function App() {
     document.body.classList.add("chat-embed");
     return () => document.body.classList.remove("chat-embed");
   }, [embedMode]);
-  const [view, setView] = useStateApp(initialView);
+  const [view, setView] = useStateApp(startView);
   const [cousins, setCousins] = useStateApp([]);
   const [loops, setLoops] = useStateApp([]);
   const [activeCousin, setActiveCousin] = useStateApp(initialCousin);
@@ -415,6 +431,7 @@ function App() {
     if (activeCousin) p.set("cousin", activeCousin);
     else p.delete("cousin");
     if (view !== "meetings") p.delete("meeting");
+    if (view !== "system") p.delete("tab");
     const next = "?" + p.toString();
     if (next !== window.location.search) {
       window.history.replaceState(
@@ -573,6 +590,12 @@ function App() {
     const onKey = (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       if (e.metaKey || e.ctrlKey) {
+        const tab = SYSTEM_TAB_KEYS[e.key];
+        if (tab) {
+          e.preventDefault();
+          openSystemTab(tab, setView);
+          return;
+        }
         const hit = navEntries().find((n) => n.kbd && n.kbd === e.key);
         if (hit) {
           e.preventDefault();
@@ -673,17 +696,24 @@ function App() {
   ), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } })), /* @__PURE__ */ React.createElement("main", { className: "main" }, /* @__PURE__ */ React.createElement(MainHeader, { view, cousins, activeCousin }), /* @__PURE__ */ React.createElement("div", { className: "main-body" }, view === "chat" && window.ChatView && /* @__PURE__ */ React.createElement(ChatView, { activeCousin, cousins, embedUser, sessionUser, embed: embedMode }), view === "cousins" && /* @__PURE__ */ React.createElement(CousinsView, { cousins, setCousins, setActiveCousin: (s) => {
     setActiveCousin(s);
     pickView("chat");
-  } }), view === "jobs" && /* @__PURE__ */ React.createElement(JobsView, null), view === "memory" && /* @__PURE__ */ React.createElement(MemoryView, null), view === "loops" && /* @__PURE__ */ React.createElement(LoopsView, { loops }), view === "tokens" && /* @__PURE__ */ React.createElement(TokensView, { cousins }), view === "tracker" && /* @__PURE__ */ React.createElement(TrackerView, { cousins }), view === "meetings" && window.MeetingsView && /* @__PURE__ */ React.createElement(MeetingsView, { cousins, sessionUser, initialMeeting }), view === "settings" && /* @__PURE__ */ React.createElement(SettingsView, { auth, setAuth }), view === "overview" && /* @__PURE__ */ React.createElement(HostView, { onOpen: (slug) => {
+  } }), view === "jobs" && /* @__PURE__ */ React.createElement(JobsView, null), view === "memory" && /* @__PURE__ */ React.createElement(MemoryView, null), view === "tokens" && /* @__PURE__ */ React.createElement(TokensView, { cousins }), view === "tracker" && /* @__PURE__ */ React.createElement(TrackerView, { cousins }), view === "meetings" && window.MeetingsView && /* @__PURE__ */ React.createElement(MeetingsView, { cousins, sessionUser, initialMeeting }), view === "overview" && /* @__PURE__ */ React.createElement(HostView, { onOpen: (slug) => {
     setActiveCousin(slug);
     pickView("chat");
   } }), registeredView(view) && /* @__PURE__ */ React.createElement(SlotBoundary, { label: "view/" + view }, /* @__PURE__ */ React.createElement(
     SlotEntry,
     {
       entry: registeredView(view),
-      props: { cousins, sessionUser, onOpen: (slug) => {
-        setActiveCousin(slug);
-        pickView("chat");
-      } }
+      props: {
+        cousins,
+        sessionUser,
+        loops,
+        auth,
+        setAuth,
+        onOpen: (slug) => {
+          setActiveCousin(slug);
+          pickView("chat");
+        }
+      }
     }
   )))), restartState && /* @__PURE__ */ React.createElement("div", { style: {
     position: "fixed",
@@ -711,11 +741,9 @@ function MainHeader({ view, cousins, activeCousin }) {
     cousins: "Cousins",
     jobs: "Jobs",
     memory: "Memory",
-    loops: "Loops",
     tokens: "Tokens",
     tracker: "Tracker",
     meetings: "Meetings",
-    settings: "Settings",
     overview: "Overview"
   };
   const paths = {
@@ -723,11 +751,9 @@ function MainHeader({ view, cousins, activeCousin }) {
     cousins: "/console/cousins",
     jobs: "/console/jobs",
     memory: "/console/memory",
-    loops: "/console/loops",
     tokens: "/console/tokens",
     tracker: "/console/tracker",
     meetings: "/console/meetings",
-    settings: "/console/settings",
     overview: "/console/host"
   };
   const extra = window.registeredView ? registeredView(view) : null;

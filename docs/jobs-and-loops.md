@@ -286,7 +286,8 @@ starting with a letter, up to 32 characters, unique in the file), a
 `enabled = false` turns a loop off without deleting it. A loop with a
 problem (two schedules, no prompt, a bad name) is skipped and the
 daemon logs why, naming the cousin. You can also edit loops in the
-console's Loops view, which writes the same `[[loops]]` tables back.
+console's loops tab (under System), which writes the same `[[loops]]`
+tables back.
 
 ### The loops daemon
 

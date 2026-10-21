@@ -773,28 +773,81 @@ function SysConfigEditors() {
 
 // ---- the view -------------------------------------------------------------------------
 
+// The tabs, in order. Loops and Settings were sidebar views and Accounts a
+// package view of its own until 3.57.0; a package adds a tab through
+// the system.tabs slot (ui.jsx), as accounts.jsx does at order 40.
 const SYSTEM_TABS = [
-  ["services", "supervisor"], ["schedules", "schedules"], ["users", "users"],
-  ["backup", "backup"], ["agent", "agent defaults"], ["config", "install config"],
+  { id: "services", label: "supervisor", order: 10 },
+  { id: "loops", label: "loops", order: 20 },
+  { id: "schedules", label: "schedules", order: 30 },
+  { id: "users", label: "users", order: 50 },
+  { id: "agent", label: "agent defaults", order: 60 },
+  { id: "config", label: "install config", order: 70 },
+  { id: "backup", label: "backup", order: 80 },
+  { id: "settings", label: "settings", order: 90 },
 ];
 const SYS_TAB_KEY = "console_system_tab";
 
-function SystemView({ cousins }) {
-  const [tab, setTab] = React.useState(() => {
-    try { return localStorage.getItem(SYS_TAB_KEY) || "services"; } catch (_e) { return "services"; }
-  });
-  const pick = (t) => { setTab(t); try { localStorage.setItem(SYS_TAB_KEY, t); } catch (_e) { /* ignore */ } };
-  return <div className="wrap-pad system-view" style={{ maxWidth: 1100 }}>
-    <div className="radio-row">
-      {SYSTEM_TABS.map(([id, label]) => <button key={id} className={tab === id ? "sel" : ""} onClick={() => pick(id)}>{label}</button>)}
+function systemTabs() {
+  const extra = window.slotEntries ? slotEntries("system.tabs") : [];
+  return SYSTEM_TABS.concat(extra.map(e => ({ id: e.id, label: e.label || e.id, order: e.order, entry: e })))
+    .sort((a, b) => (a.order === b.order ? 0 : (a.order < b.order ? -1 : 1)));
+}
+
+// The tab a page opens on: ?tab= (an old ?view=loops lands here as
+// ?view=system&tab=loops), else the last one picked, else the supervisor.
+function startSystemTab() {
+  const known = (t) => t && systemTabs().some(x => x.id === t);
+  const asked = new URLSearchParams(window.location.search).get("tab");
+  if (known(asked)) return asked;
+  try {
+    const last = localStorage.getItem(SYS_TAB_KEY);
+    if (known(last)) return last;
+  } catch (_e) { /* storage unavailable */ }
+  return "services";
+}
+
+function SystemView({ cousins, sessionUser, onOpen, loops, auth, setAuth }) {
+  const [tab, setTab] = React.useState(startSystemTab);
+  // The tab is in the address too, so a reload (or the phone app reopening
+  // its last page) comes back to it.
+  const pick = (t) => {
+    setTab(t);
+    try { localStorage.setItem(SYS_TAB_KEY, t); } catch (_e) { /* ignore */ }
+    const p = new URLSearchParams(window.location.search);
+    p.set("tab", t);
+    window.history.replaceState(window.history.state, "", window.location.pathname + "?" + p + window.location.hash);
+  };
+  // A shortcut (Ctrl/Cmd + 5 for loops, + 0 for settings) while System is open.
+  React.useEffect(() => {
+    const on = (e) => { if (e.detail) pick(e.detail); };
+    window.addEventListener("fw-system-tab", on);
+    return () => window.removeEventListener("fw-system-tab", on);
+  }, []);
+  const tabs = systemTabs();
+  const slotTab = tabs.find(t => t.id === tab && t.entry);
+  // a view with its own padding renders below the tab bar, not inside it
+  const own = tab === "loops" || tab === "settings" || !!slotTab;
+  return <>
+    <div className="wrap-pad system-view" style={{ maxWidth: 1100, paddingBottom: own ? 0 : undefined }}>
+      <div className="radio-row">
+        {tabs.map(t => <button key={t.id} className={tab === t.id ? "sel" : ""} onClick={() => pick(t.id)}>{t.label}</button>)}
+      </div>
+      {tab === "services" && <SysSupervisorPanel />}
+      {tab === "schedules" && <SchedulesPanel cousins={cousins} />}
+      {tab === "users" && <SysUsersPanel />}
+      {tab === "backup" && <SysBackupPanel cousins={cousins} />}
+      {tab === "agent" && <SysAgentDefaultsPanel />}
+      {tab === "config" && <SysConfigEditors />}
     </div>
-    {tab === "services" && <SysSupervisorPanel />}
-    {tab === "schedules" && <SchedulesPanel cousins={cousins} />}
-    {tab === "users" && <SysUsersPanel />}
-    {tab === "backup" && <SysBackupPanel cousins={cousins} />}
-    {tab === "agent" && <SysAgentDefaultsPanel />}
-    {tab === "config" && <SysConfigEditors />}
-  </div>;
+    {tab === "loops" && <LoopsView loops={loops || []} />}
+    {tab === "settings" && <SettingsView auth={auth} setAuth={setAuth} />}
+    {slotTab && (
+      <SlotBoundary label={"system/" + slotTab.id}>
+        <SlotEntry entry={slotTab.entry} props={{ cousins, sessionUser, onOpen }} />
+      </SlotBoundary>
+    )}
+  </>;
 }
 
 registerView({ id: "system", label: "System", icon: I.host, order: 60, render: (props) => <SystemView {...props} /> });

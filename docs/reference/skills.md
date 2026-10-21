@@ -87,7 +87,8 @@ from string keys to string *values*, so a list is one comma-separated string:
 Public interface, under the same rule (adding is MINOR, renaming or
 removing is MAJOR): these metadata keys, the `[skills] repos` key in
 `cousin.toml`, the layout under `<install>/skills/<repo>/`, the shape of the
-approval records, the `cousin-skill` command and its arguments, and the
+approval records, the `skill` tool's commands, the `cousin-skill` command
+and its arguments, and the
 console's skills routes.
 
 ## Where skills live
@@ -125,6 +126,23 @@ When a cousin needs another cousin's skill, it asks that cousin to run it: a
 peer message naming the skill and the inputs. The answer carries the job id
 and exit code of the run. The requester's files are read-only inputs.
 
+## The skill tool and the command
+
+A cousin works with skills through the `skill` tool on its framework tool
+server, beside `memory`, `job` and `schedule`:
+
+| command | does |
+|---|---|
+| `list` | the skills it loads (from which repository) and its drafts |
+| `show` | one skill's `SKILL.md` and file list, approved or draft |
+| `draft` | writes or edits a draft in `<home>/skill-drafts/<name>/` |
+| `diff` | a draft against the approved version |
+
+`cousin-skill` is the same for a terminal, with the same commands, and the
+fallback where the tool is missing. Neither can approve, reject or remove
+anything. Those happen only in the console, so no cousin can approve its own
+skill.
+
 ## Drafting and approval
 
 A cousin drafts a skill as plain files in `<home>/skill-drafts/<name>/`,
@@ -137,7 +155,7 @@ console as him, so the house commit rule holds unchanged.
   repository, and `metadata.scope` is `own` (the default, the cousin's
   folder) or `shared` (`shared/` in `personal`, for a general skill only).
 - **Approval happens in the console only** (System > skills), never through
-  the CLI, which a cousin can run. The approve view leads with the
+  the `skill` tool or the CLI, both of which a cousin can run. The approve view leads with the
   side-effect class, the diff against the approved state, the hosts, the
   `reads` pins and the trigger test result. Approving commits the change on
   `main` as the operator (the house commit rule) and appends a record:
@@ -236,8 +254,8 @@ check:
 ## Phases
 
 1. Repositories and the approval record; the loader for `sdk` and `tmux`
-   (closing the `.claude/skills` path); the policy deny; `cousin-skill`
-   (list, show, drafts, diff, new draft); the console's inspect, approve,
+   (closing the `.claude/skills` path); the policy deny; the `skill` tool
+   and `cousin-skill` (list, show, draft, diff); the console's inspect, approve,
    reject and remove, per cousin (inspector) and for `shared/` (System);
    the trigger test.
 2. Installing a skill from outside: a pinned commit, a licence, its text and

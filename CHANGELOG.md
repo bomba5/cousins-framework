@@ -30,7 +30,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 - **SKILL.md values round-trip.** The draft tool wrote a metadata value
   with a colon as an ASCII-escaped JSON string and read it back with the
   escapes left in, so a prompt with a quote or a non-ASCII letter (`æ`,
-  `è`) reached the trigger test as `\"` or `æ`; and it wrote the
+  `è`) reached the trigger test as `\"` or `\u00e6`; and it wrote the
   description unquoted, which a YAML reader refuses when it holds `: `.
   Every value but the name is now written double-quoted (UTF-8 kept) and
   read back with its escapes decoded.

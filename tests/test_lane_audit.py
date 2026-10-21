@@ -51,6 +51,7 @@ SITES = (
     ('cousin_lib/console/routes_fleet.py', '# The lane: `runner` (one of RUNNER_KINDS) and the `account` it runs', 'kinds'),
     ('cousin_lib/console/routes_fleet.py', 'if spawn.runner_lane(config.home):', 'transport'),
     ('cousin_lib/console/routes_fleet.py', 'if spawn.runner_lane(home):', 'transport'),
+    ('cousin_lib/console/routes_skills.py', 'wait = not isinstance(delivery.backend_for(home), delivery.InboxBackend)', 'transport'),
     ('cousin_lib/console/routes_mcp.py', 'def _is_runner(lane):', 'kinds'),
     ('cousin_lib/console/routes_mcp.py', 'if _is_runner(lane):', 'kinds'),
     ('cousin_lib/console/routes_mcp.py', '_write_registry(req, own, runner_lane=_is_runner(_lane(home)))', 'kinds'),

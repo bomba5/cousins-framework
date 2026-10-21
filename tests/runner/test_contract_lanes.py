@@ -25,11 +25,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # the job tool's `run` line in "Tools, not the terminal CLIs", plus 3.8.0's
 # `why` in the memory tool's command list, plus 3.27.1's handoff shapes in
 # "Generations", plus 3.36.0's derived_from line in "Memory", plus
-# 3.58.0's `skill` tool in the shipped registry: the bytes the
+# 3.58.0's `skill` tool in the shipped registry, plus 3.60.0's `import`
+# and `dry-run` in that tool's description and command list: the bytes the
 # SDK lane's renderer produces. A registry or static-text edit changes it on
 # purpose: update the hash in the same commit, knowing every SDK and
 # opencode cousin's prompt cache resets (the edit moves both lanes' bytes).
-SDK_CONTRACT_SHA256 = "ecbdae638a65f916d0ad451d710d2fe2a1330589016d1390edd152847b3e5859"
+SDK_CONTRACT_SHA256 = "4a4bd3aad1b3eb3760edc998a24401f5b5401d7492d5038a0e852af0ca475681"
 
 
 def as_opencode(sdk_text):

@@ -53,7 +53,7 @@ function SkillMeta({ metadata }) {
       <span className="muted">{k}</span>
       {!has(k) ? <span className="muted">not declared</span>
                : m[k] === "" ? <span className="muted">none</span>
-               : <span style={{ color: "var(--fg-1)" }}>{m[k]}</span>}
+               : <span style={{ color: "var(--fg-1)", overflowWrap: "anywhere" }}>{m[k]}</span>}
     </React.Fragment>)}
   </div>;
 }
@@ -93,7 +93,7 @@ function SkillOutside({ d, base, onAllowed }) {
   const run = o.dry_run;
   const scripts = o.scripts || [];
   const row = (label, value) => <div style={{ display: "contents" }}>
-    <span className="muted">{label}</span><span style={{ color: "var(--fg-1)" }}>{value}</span>
+    <span className="muted">{label}</span><span style={{ color: "var(--fg-1)", overflowWrap: "anywhere" }}>{value}</span>
   </div>;
   return <div data-skill-outside style={{ display: "flex", flexDirection: "column", gap: 6, ...SKILL_MONO }}>
     <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px" }}>
@@ -164,10 +164,10 @@ function SkillDraftReview({ slug, name, onDone }) {
   const missed = (!!d.trigger && !d.trigger.pass) || (!!run && run.job != null && !run.pass);
   return <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 12,
                        borderLeft: "2px solid var(--hair)" }}>
-    <div style={{ display: "flex", gap: 8, alignItems: "center", ...SKILL_MONO }}>
+    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", ...SKILL_MONO }}>
       <SkillSideEffect value={(d.metadata || {})["side-effect"]} />
       <span>goes to {d.repo || "?"}:{d.folder || "?"}/{d.name}</span>
-      <span className="muted">files: {(d.files || []).join(", ")}</span>
+      <span className="muted" style={{ overflowWrap: "anywhere" }}>files: {(d.files || []).join(", ")}</span>
     </div>
     {blocked && <SysNote msg={{ ok: false, text: d.problems.join("; ") }} />}
     <SkillMeta metadata={d.metadata} />

@@ -37,7 +37,7 @@ function SkillMeta({ metadata }) {
   const always = ["hosts", "reads"];
   const has = (k) => Object.prototype.hasOwnProperty.call(m, k);
   const rows = keys.filter((k) => always.includes(k) || has(k) && m[k] !== "");
-  return /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px", ...SKILL_MONO } }, rows.map((k) => /* @__PURE__ */ React.createElement(React.Fragment, { key: k }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, k), !has(k) ? /* @__PURE__ */ React.createElement("span", { className: "muted" }, "not declared") : m[k] === "" ? /* @__PURE__ */ React.createElement("span", { className: "muted" }, "none") : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-1)" } }, m[k]))));
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px", ...SKILL_MONO } }, rows.map((k) => /* @__PURE__ */ React.createElement(React.Fragment, { key: k }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, k), !has(k) ? /* @__PURE__ */ React.createElement("span", { className: "muted" }, "not declared") : m[k] === "" ? /* @__PURE__ */ React.createElement("span", { className: "muted" }, "none") : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-1)", overflowWrap: "anywhere" } }, m[k]))));
 }
 function SkillTrigger({ result }) {
   if (!result) return /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "not run on this version");
@@ -59,7 +59,7 @@ function SkillOutside({ d, base, onAllowed }) {
   }, [base, d.diff_sha256]);
   const run = o.dry_run;
   const scripts = o.scripts || [];
-  const row = (label, value) => /* @__PURE__ */ React.createElement("div", { style: { display: "contents" } }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, label), /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-1)" } }, value));
+  const row = (label, value) => /* @__PURE__ */ React.createElement("div", { style: { display: "contents" } }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, label), /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-1)", overflowWrap: "anywhere" } }, value));
   return /* @__PURE__ */ React.createElement("div", { "data-skill-outside": true, style: { display: "flex", flexDirection: "column", gap: 6, ...SKILL_MONO } }, /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px" } }, row("from outside", `${o.url || "?"} @ ${(o.commit || "?").slice(0, 12)} : ${o.folder || "?"}`), row("licence", /* @__PURE__ */ React.createElement("span", null, o.license || "none", " (", o.license_file || "no licence file", ")", " ", o.license_text && /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -137,7 +137,7 @@ function SkillDraftReview({ slug, name, onDone }) {
     gap: 10,
     paddingLeft: 12,
     borderLeft: "2px solid var(--hair)"
-  } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", ...SKILL_MONO } }, /* @__PURE__ */ React.createElement(SkillSideEffect, { value: (d.metadata || {})["side-effect"] }), /* @__PURE__ */ React.createElement("span", null, "goes to ", d.repo || "?", ":", d.folder || "?", "/", d.name), /* @__PURE__ */ React.createElement("span", { className: "muted" }, "files: ", (d.files || []).join(", "))), blocked && /* @__PURE__ */ React.createElement(SysNote, { msg: { ok: false, text: d.problems.join("; ") } }), /* @__PURE__ */ React.createElement(SkillMeta, { metadata: d.metadata }), d.outside && /* @__PURE__ */ React.createElement(SkillOutside, { d, base, onAllowed: (entry, ok) => {
+  } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", ...SKILL_MONO } }, /* @__PURE__ */ React.createElement(SkillSideEffect, { value: (d.metadata || {})["side-effect"] }), /* @__PURE__ */ React.createElement("span", null, "goes to ", d.repo || "?", ":", d.folder || "?", "/", d.name), /* @__PURE__ */ React.createElement("span", { className: "muted", style: { overflowWrap: "anywhere" } }, "files: ", (d.files || []).join(", "))), blocked && /* @__PURE__ */ React.createElement(SysNote, { msg: { ok: false, text: d.problems.join("; ") } }), /* @__PURE__ */ React.createElement(SkillMeta, { metadata: d.metadata }), d.outside && /* @__PURE__ */ React.createElement(SkillOutside, { d, base, onAllowed: (entry, ok) => {
     setD((x) => ({ ...x, outside: { ...x.outside, dry_run: entry } }));
     setTold(ok ? `${slug} was told to run it` : `${slug} could not be told: ask it in the chat`);
   } }), told && /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, told), /* @__PURE__ */ React.createElement(SkillDiff, { text: d.diff }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "flex-start" } }, /* @__PURE__ */ React.createElement(

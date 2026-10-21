@@ -166,7 +166,7 @@ the contract items it declares it does not support, if any.
 Card buttons: start or stop, dismiss, and "open chat". Dismiss asks for a
 second click, then stops the cousin, archives its whole home to
 `data/dismissed/<slug>-<timestamp>.tar.gz` (without `.secrets/`), removes
-it, and has the supervisor rescan, so its runner row leaves System. If the
+it, and has the [supervisor](glossary.md#supervisor) rescan, so its runner row leaves System. If the
 archive fails, nothing is deleted. The harness's own transcript
 and memory directories are left alone and the toast names them.
 

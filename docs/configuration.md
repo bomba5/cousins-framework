@@ -1354,6 +1354,19 @@ event. Read by the runner at start: a change needs a restart. The console's
 inspector writes it (`POST /api/cousins/<slug>/plugins`). A plugin's own
 per-cousin settings live in its own file; the framework never reads them.
 
+### [skills] (a cousin's skill repositories)
+
+```toml
+[skills]
+repos = ["personal", "work"]
+```
+
+The skill repositories this cousin loads from, of `personal`, `work` and
+`private`; the default is `["personal"]`. It loads `shared/` from `personal`
+and its own folder from each, never another cousin's, and a draft can only
+be approved into one of them. A name outside the three loads nothing and the
+runner says so. Read at start. See [skills](reference/skills.md).
+
 ### policy.toml
 
 `<home>/policy.toml`, read once when the runner starts and enforced by a

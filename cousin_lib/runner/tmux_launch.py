@@ -160,6 +160,22 @@ def main(argv=None):
             return _refuse(home, "fresh start without its context block %s: %s"
                            % (context, err))
         cli += ["--append-system-prompt-file", str(context)]
+    # Skills (docs/reference/skills.md): this lane reads project settings,
+    # which would load <home>/.claude/skills/ with no approval, so a home
+    # that has one is refused; the approved ones come as plugin dirs.
+    from cousin_lib import skills
+    unapproved = skills.project_skills_dir(home)
+    if unapproved.exists():
+        return _refuse(home, "%s exists: this lane would load those skills without the"
+                       " console's approval; move them to %s as drafts" % (
+                           unapproved, home / skills.DRAFTS))
+    try:
+        plugin_dirs, _report = skills.export_plugins(root, home, home.name)
+    except Exception as err:  # noqa: BLE001 - a bad export costs the skills, never the start
+        _say("skills not loaded: %s: %s" % (type(err).__name__, err))
+        plugin_dirs = []
+    for path in plugin_dirs:
+        cli += ["--plugin-dir", str(path)]
     try:
         home.joinpath(*EXIT_NOTE).unlink()     # an older refusal is not this start's
     except OSError:

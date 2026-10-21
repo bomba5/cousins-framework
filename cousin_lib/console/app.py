@@ -89,6 +89,7 @@ PACKAGE_ROUTE_MODULES = [
     "cousin_lib.console.routes_accounts",   # accounts and login flows
     "cousin_lib.console.routes_mcp",        # MCP registry and policy
     "cousin_lib.console.routes_system",     # system and install config
+    "cousin_lib.console.routes_skills",     # skills: inspect, approve, remove
 ]
 
 # /api/version is public: the login page may show it, and it says only

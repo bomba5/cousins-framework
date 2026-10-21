@@ -1,8 +1,10 @@
 # Skills
 
-**Status: specification, not built yet.** Agreed in a team meeting
-(2026-10-21); it is built in the phases at the end, each only after the operator approves
-this page. Requirement words follow RFC 2119.
+**Status:** phase 1 is built (3.58.0): the repositories and approval
+records, loading on the `sdk` and `tmux` [lanes](../glossary.md#lane), the guard, the `skill` tool
+and `cousin-skill`, the console's inspect, approve, reject and remove, and
+the trigger test. Phases 2 to 4 (installing from outside, proposals,
+staleness checks) are not built yet. Agreed in a team meeting (2026-10-21). Requirement words follow RFC 2119.
 
 A skill is a procedure a [cousin](../glossary.md#cousin) loads when it needs it: a folder with a
 `SKILL.md` (a name, a one-line "what it does and when to use it", then the
@@ -83,6 +85,8 @@ from string keys to string *values*, so a list is one comma-separated string:
 | `reads` | `repo@commit:path` or `path#sha256:<hex>`, comma-separated | what it reads; a change there flags the skill as stale |
 | `hosts` | host names, comma-separated | every host it may contact |
 | `rests-on` | paths, tool versions, memory topics, comma-separated | what it depends on, checked for drift |
+| `should-trigger` | a prompt | one that SHOULD make the cousin use the skill (the trigger test); needed before approval |
+| `must-not-trigger` | a prompt | one that MUST NOT |
 | `scope` | `own`, `shared` | the cousin's folder (the default) or `shared/`; `shared` only for a general skill in `personal` |
 | `source` | `<url>@<commit>` | a skill from outside: where it came from |
 
@@ -172,7 +176,8 @@ console as him, so the house commit rule holds unchanged.
   the `skill` tool or the CLI, both of which a cousin can run. The approve view leads with the
   side-effect class, the diff against the approved state, the hosts, the
   `reads` pins and the trigger test result. Approving commits the change on
-  `main` as the operator (the house commit rule) and appends a record:
+  `main` with the git identity configured for the repository (set it once,
+  to the operator's), and appends a record:
   the console session user, the repository, the commit, the skill and the
   sha256 of the diff shown. Records for `personal` and `work` go to
   `<install>/data/skills/approvals.jsonl`. Records for `private` go to their
@@ -193,9 +198,11 @@ console as him, so the house commit rule holds unchanged.
   git it allows only `log`, `show`, `diff`, `status`, `cat-file` and
   `ls-files` with `-C` or a working directory under `<install>/skills/`;
   every other git command there is denied (an allowlist, so `reset`,
-  `checkout`, `rebase` and the rest are covered). This slows a confused
-  session; it is not a wall against a hostile one until per-cousin OS users
-  exist.
+  `checkout`, `rebase` and the rest are covered). The guard runs in the
+  `sdk` lane's tool gate, for every session; the `tmux` and `opencode`
+  lanes have no gate, as for the memory perimeter. Bash is checked on its
+  command text, best-effort. This slows a confused session; it is not a
+  wall against a hostile one until per-cousin OS users exist.
 
 A new skill, an edit and a skill from outside all go through the same path.
 

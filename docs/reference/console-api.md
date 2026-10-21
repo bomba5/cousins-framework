@@ -1002,6 +1002,58 @@ Read-only, behind the login like every other route. What `cousin-health` prints 
 
 Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", "supervised": bool, "eta_seconds": 4}`, then exits 75 (`EX_TEMPFAIL`) about 0.6 s later: non-zero on purpose, because the shipped unit restarts on failure only. `supervised` is true when it runs under systemd (it checks `INVOCATION_ID`), whose `Restart=on-failure` brings it back, or under `cousin-supervisor` (`COUSIN_SUPERVISED`), which starts it again at once and does not count the exit against it. If it's false, nothing will start it again: restart means stop.
 
+## Skills
+
+A cousin's skills ([the skills reference](skills.md)): what it loads, its drafts, and the three verbs only the console has. Approving, rejecting and removing a skill happen here and nowhere else; the `skill` tool and `cousin-skill` only list, show, draft and diff. Approve and remove take the `diff_sha256` of the diff the page showed, and refuse with `409` when the draft or the skill changed since. Each records the console user who acted. The System routes (`/api/skills...`) never show a cousin that loads the `private` repository, nor its drafts: its folder is its name. Its skills show only on its own routes. `400` bad slug or skill name, `404` unknown cousin, draft or skill, `409` a refusal from the skills store (its message says why).
+
+### `GET /api/skills`
+
+`{"repos": [{"repo", "exists", "head", "approved", "trusted", "folders": [{"folder", "skills": [...]}]}], "drafts": [...]}` for `personal` and `work`. A skill is `{"name", "description", "metadata", "problems", "repo", "folder"}`; `shared` is the folder every cousin loads. `trusted` is false when `main` has moved past the commit of the repository's last approval record, and then nothing loads from it. `drafts` are the waiting drafts of every cousin that does not load `private`, each with `cousin`, `repo` and `folder` (where approving would put it).
+
+### `GET /api/skills/shared/<name>`
+
+One shared skill as approved: `{"repo", "folder", "name", "text", "files"}`.
+
+### `GET /api/skills/shared/<name>/removal`
+
+`{"diff", "diff_sha256"}` of removing a shared skill.
+
+### `POST /api/skills/shared/<name>/remove`
+
+Body `{"diff_sha256"}`, the removal diff shown. Commits the removal and records it. `{"ok": true, "record", "note"}`; every cousin stops loading it at its next start.
+
+### `GET /api/cousins/<slug>/skills`
+
+`{"repos", "states", "lane", "loaded", "drafts"}`: the repositories the cousin loads (`cousin.toml [skills] repos`), each one's state, its runner kind, the approved skills it loads at its next start (each with `plugin`: `shared`, `personal`, `work` or `private`), and its drafts. A `cousin.toml` list that does not parse is `{"error"}` with empty lists.
+
+### `GET /api/cousins/<slug>/skills/approved/<plugin>/<name>`
+
+One skill the cousin loads, as approved: `{"plugin", "repo", "folder", "name", "text", "files"}`.
+
+### `GET /api/cousins/<slug>/skills/approved/<plugin>/<name>/removal`
+
+`{"diff", "diff_sha256"}` of removing it.
+
+### `POST /api/cousins/<slug>/skills/approved/<plugin>/<name>/remove`
+
+Body `{"diff_sha256"}`. Commits the removal and records it: `{"ok": true, "record", "note"}`.
+
+### `GET /api/cousins/<slug>/skills/drafts/<name>`
+
+One draft: `{"name", "text", "files", "diff", "diff_sha256", "repo", "folder", "problems", "metadata", "trigger"}`. `diff` is against what is approved at the draft's target; `trigger` is the last trigger test run on this very diff, else null.
+
+### `POST /api/cousins/<slug>/skills/drafts/<name>/approve`
+
+Body `{"diff_sha256"}`, the diff shown. Commits the draft on the target repository's `main` with the repository's git identity, appends the approval record (the console user, the commit, the diff's sha256) and removes the draft. Refused when the draft has a problem, targets a repository the cousin does not load, or the repository is not trusted. `{"ok": true, "record", "note"}`: it loads at the cousin's next start (a shared skill at every cousin's).
+
+### `POST /api/cousins/<slug>/skills/drafts/<name>/reject`
+
+Body `{"reason"}` (optional). Moves the draft to `<home>/skill-drafts/.rejected/` with a note naming the console user and the reason. `{"ok": true}`.
+
+### `POST /api/cousins/<slug>/skills/drafts/<name>/trigger-test`
+
+Runs the draft's trigger test in a child process (up to 300 s): its `should-trigger` and `must-not-trigger` prompts, each one turn on the cousin's own account and model, whose only tool is `Skill`, with what the cousin loads plus the draft as `draft:<name>`. `{"ok": true, "trigger": {"should-trigger": {"prompt", "fired", "detail", "pass"}, "must-not-trigger": {...}, "pass", "model", "at", "diff_sha256"}}`. `409` when the draft lacks either prompt, `504` past the time limit.
+
 ## System (the System view)
 
 The supervisor, the outbox, one-shot schedules, console users, backup and the install-wide config (`console/routes_system.py`, the view in `system.jsx`). Every change is a `POST`; a refusal is `{"ok": false, "error"}` with the status named below, and nothing is written.

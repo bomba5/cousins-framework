@@ -8,7 +8,7 @@ file that defines it, and how to add your own tools.
 
 ## What a cousin gets
 
-Every cousin spawned by the framework comes with five tools:
+Every cousin spawned by the framework comes with six tools:
 
 | Tool | Runs | Commands |
 |---|---|---|
@@ -17,6 +17,7 @@ Every cousin spawned by the framework comes with five tools:
 | `job` | `cousin-job` | `start`, `run`, `done`, `fail`, `list`, `show` |
 | `schedule` | `cousin-schedule` | `add`, `list`, `cancel` |
 | `meeting` | `cousin-meeting` | `say`, `pass`, `minutes`, `show` ([meetings](meetings.md)) |
+| `skill` | `cousin-skill` | `list`, `show`, `draft`, `diff` ([skills](reference/skills.md)) |
 
 A cousin's tools come from its own `mcp-registry.toml`, copied from the
 install's at spawn. `why`, and `derived_from` on `remember` and `decide`,

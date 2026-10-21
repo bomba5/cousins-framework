@@ -3,6 +3,41 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.58.0 - 2026-10-21
+
+### Added
+
+- **Skills, phase 1** ([reference](docs/reference/skills.md)). A cousin
+  can load skills: procedures with a trigger, each a folder with a
+  `SKILL.md`, kept in git repositories under `<install>/skills/`
+  (`personal` with `shared/` and a folder per cousin, `work`, `private`).
+  A cousin's `cousin.toml` `[skills] repos` names the ones it loads (default
+  `personal`); it loads `shared/` and its own folder, never another
+  cousin's, as `shared:<name>`, `personal:<name>`, `work:<name>` or
+  `private:<name>`.
+  - Cousins draft skills as plain files in `<home>/skill-drafts/`, through
+    a new `skill` tool (list, show, draft, diff) or `cousin-skill`. Only the
+    console approves, rejects or removes: System > skills and a skills
+    panel in each inspector show the draft's side-effect class, its
+    problems, its diff and its trigger test, and an approval commits on
+    `main` and records the console user, the commit and the sha256 of the
+    diff shown. A repository whose `main` moved past its last approval
+    loads nothing.
+  - The trigger test runs a draft's `should-trigger` and `must-not-trigger`
+    prompts on the cousin's own model, with only the `Skill` tool.
+  - The runner exports the approved skills afresh, read-only, at every
+    start and passes them to the agent as local plugins; settings files
+    stay unread. The tmux launcher passes them as `--plugin-dir` and refuses
+    a home with a `.claude/skills/` folder, which would load skills without
+    approval. The sdk lane's tool gate refuses, for every session, writes
+    to the repositories, the exports and the approval records, and any git
+    command there but a read.
+  - A private cousin's skills and records stay apart: its draft cannot
+    land in `personal`, its approval records have their own file, and
+    System never lists it.
+  - Every cousin's framework contract now lists the `skill` tool, so the
+    cached prompt rebuilds once at each cousin's next start.
+
 ## 3.57.0 - 2026-10-21
 
 ### Changed

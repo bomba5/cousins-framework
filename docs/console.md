@@ -206,6 +206,11 @@ Click a card to open the inspector drawer. From top to bottom:
   with their steps shown. While `data/login-required.json` stands, the
   panel shows its action line and "log in here", the account's login from
   System's accounts tab. See [Accounts](#accounts).
+- **Skills.** What the cousin loads at its next start (`shared:`, `personal:`,
+  `work:` or `private:` and the name, with what it can change), and its
+  drafts. Open one to read it; a draft shows its diff and its trigger test,
+  with approve and reject; an approved one can be removed, shown as a diff
+  first. A private cousin's skills show only here. See [skills](reference/skills.md).
 - **Tokens today.**
 - **Files.** "browse home" opens a read-only file explorer over the cousin's
   home: a tree on the left (dotfiles behind a checkbox), a viewer on the
@@ -870,15 +875,16 @@ The page refreshes when another session changes an account.
 
 ## System
 
-The install as a whole, in nine tabs: supervisor, [loops](#loops), schedules,
-[accounts](#accounts), users, agent defaults, install config, backup and
-[settings](#settings). Loops, Accounts and Settings were sidebar pages of
+The install as a whole, in ten tabs: supervisor, [loops](#loops), schedules,
+[accounts](#accounts), skills, users, agent defaults, install config, backup
+and [settings](#settings). Loops, Accounts and Settings were sidebar pages of
 their own until 3.57.0; an old address for one (`?view=loops`) opens its tab.
 The open tab is in the address (`&tab=`), so a reload comes back to it. On a
 phone the tabs wrap onto a second row. The routes are in [the API reference](reference/console-api.md#system-the-system-view).
 
 - **supervisor**: every child of `cousin-supervisor` with its state, pid, restarts and the reason it gave. Start or stop the loops daemon and each runner cousin, and rescan the registry (reload). The console itself is never stopped from its own page: its row offers the console restart. Stopping the loops daemon asks twice, because every heartbeat, loop and scheduled prompt stops with it. A Telegram bridge follows its runner.
 - **schedules**: every cousin's pending one-shot prompts (`cousin-schedule`), with history on a switch. Add one for any cousin ("in 30m", "tomorrow 06:30", an ISO time) or cancel one. A cousin's own schedules are also a panel in its inspector.
+- **skills**: the drafts waiting from the cousins, the shared set and each cousin's folders in the `personal` and `work` repositories, each repository's state. A draft opens with what it can change first, its problems, its metadata, its diff against what is approved and its trigger test (one prompt that should make the cousin use it, one that must not, on the cousin's own model); approve commits it, asking twice, and reject sets it aside with a reason. An approved skill can be removed the same way. A private cousin's skills are only in its inspector. See [skills](reference/skills.md).
 - **users**: console users. Add one, reset another user's password (your own changes in the settings tab, with the current one), remove one by typing its name. The last user and the one you are logged in as cannot be removed. Passwords are never shown again.
 - **backup**: back up now. Pick an absolute destination (remembered in this browser) and the cousins; each one becomes a long operation and a job, and lands in `<dest>/<slug>/<date>/`. A destination inside the install, or one other users can write without the sticky bit, is refused, and the snapshot is owner-only (`0700` directories, `0600` files). A copy that lands anywhere but its own directory fails with the path it landed at, nothing is deleted, and the event is logged in `data/system/audit.jsonl`.
 - **agent defaults**: `config/harness.toml [agent]`: `default_model`, `default_effort` and `commit_attribution`, each shown with where its value comes from. A cousin reads them when it starts, so restart one from its inspector to apply.

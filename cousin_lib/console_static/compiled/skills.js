@@ -32,10 +32,12 @@ function SkillDiff({ text }) {
   } }, text.split("\n").map((line, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { color: line.startsWith("+") && !line.startsWith("+++") ? "var(--green)" : line.startsWith("-") && !line.startsWith("---") ? "var(--red)" : "var(--fg-2)" } }, line || " ")));
 }
 function SkillMeta({ metadata }) {
+  const m = metadata || {};
   const keys = ["scope", "context", "hosts", "reads", "rests-on", "should-trigger", "must-not-trigger", "source"];
-  const rows = keys.filter((k) => metadata && metadata[k]);
-  if (!rows.length) return null;
-  return /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px", ...SKILL_MONO } }, rows.map((k) => /* @__PURE__ */ React.createElement(React.Fragment, { key: k }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, k), /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-1)" } }, metadata[k]))));
+  const always = ["hosts", "reads"];
+  const has = (k) => Object.prototype.hasOwnProperty.call(m, k);
+  const rows = keys.filter((k) => always.includes(k) || has(k) && m[k] !== "");
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px", ...SKILL_MONO } }, rows.map((k) => /* @__PURE__ */ React.createElement(React.Fragment, { key: k }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, k), !has(k) ? /* @__PURE__ */ React.createElement("span", { className: "muted" }, "not declared") : m[k] === "" ? /* @__PURE__ */ React.createElement("span", { className: "muted" }, "none") : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-1)" } }, m[k]))));
 }
 function SkillTrigger({ result }) {
   if (!result) return /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "not run on this version");
@@ -251,7 +253,7 @@ function CousinSkillsPanel({ cousin }) {
     load();
   };
   const toggle = (key) => setOpen((o) => o === key ? null : key);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SectionLabel, { style: { marginTop: 20 } }, "skills"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, note && /* @__PURE__ */ React.createElement(SysNote, { msg: note }), data.error && /* @__PURE__ */ React.createElement(SysNote, { msg: { ok: false, text: data.error } }), data.lane === "opencode" && /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "this lane loads no skills"), /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "repositories: ", (data.repos || []).join(", ") || "none", "; loads at the next start"), (data.loaded || []).map((sk) => {
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SectionLabel, { style: { marginTop: 20 } }, "skills"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, note && /* @__PURE__ */ React.createElement(SysNote, { msg: note }), data.error && /* @__PURE__ */ React.createElement(SysNote, { msg: { ok: false, text: data.error } }), data.lane === "opencode" && /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "this lane loads no skills"), /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "repositories: ", (data.repos || []).join(", ") || "none", " (cousin settings: skill repos); loads at the next start"), (data.loaded || []).map((sk) => {
     const key = `loaded/${sk.plugin}/${sk.name}`;
     const url = `${base}/approved/${skillPath(sk.plugin, sk.name)}`;
     return /* @__PURE__ */ React.createElement(

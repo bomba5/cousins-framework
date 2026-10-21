@@ -3,6 +3,38 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.59.0 - 2026-10-21
+
+### Added
+
+- **A cousin's skills repositories in the console.** The inspector's
+  cousin settings gain "skill repos": `personal`, `work` and `private` as
+  checkboxes, and a reset to the default (`personal`). It writes
+  `cousin.toml` `[skills] repos` through the settings route
+  (`skills.repos`, a list of known names, each at most once, `[]` for
+  none) and takes effect at the cousin's next start. Until now it was
+  read-only in the inspector and had to be edited by hand.
+- **The rest of the skill metadata in the draft tool.** The `skill` tool's
+  `draft` and `cousin-skill draft` take `hosts`, `reads`, `rests-on`,
+  `source` and `license` (`--hosts`, `--reads`, `--rests-on`, `--source`,
+  `--license`). A key left out is not declared, and an empty one declares
+  none (`hosts: ""` contacts no host). The draft tool and approval refuse
+  a malformed host, `reads` pin, source (pinned to a full commit) or
+  licence, and a `source` with no `license`; loading does not check them. The approve view always shows
+  the hosts and the `reads` pins, as "not declared" or "none" when so.
+  Existing homes get the new tool properties with
+  `cousin-upgrade --apply-homes`.
+
+### Fixed
+
+- **SKILL.md values round-trip.** The draft tool wrote a metadata value
+  with a colon as an ASCII-escaped JSON string and read it back with the
+  escapes left in, so a prompt with a quote or a non-ASCII letter (`æ`,
+  `è`) reached the trigger test as `\"` or `æ`; and it wrote the
+  description unquoted, which a YAML reader refuses when it holds `: `.
+  Every value but the name is now written double-quoted (UTF-8 kept) and
+  read back with its escapes decoded.
+
 ## 3.58.0 - 2026-10-21
 
 ### Added

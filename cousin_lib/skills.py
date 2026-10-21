@@ -56,8 +56,21 @@ SHARED = "shared"
 SCOPES = ("own", "shared")
 SIDE_EFFECTS = ("read-only", "writes-local", "outward")
 TRIGGER_KEYS = ("should-trigger", "must-not-trigger")
+# What a skill reaches and where it came from. Absent is not declared;
+# "" declares none (`hosts: ""` contacts no host). The list keys are
+# comma-separated strings, since the format's metadata values are strings.
+DECLARED_KEYS = ("hosts", "reads", "rests-on", "source")
+LIST_KEYS = ("hosts", "reads", "rests-on")
 SKILL_FILE = "SKILL.md"
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+HOST_RE = re.compile(r"^(?=.{1,253}$)%s(?:\.%s)*$" % (_LABEL, _LABEL))
+COMMIT = r"[0-9a-fA-F]{7,64}"
+READS_RE = re.compile(r"^(?:[^\s@#,]+@%s:\S+|[^\s#,]+#sha256:[0-9a-fA-F]{64})$" % COMMIT)
+# a full commit: a prefix can turn ambiguous upstream, and a fetch by
+# commit needs it whole
+SOURCE_RE = re.compile(r"^\S*:\S*@(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+LICENSE_RE = re.compile(r"^[A-Za-z0-9.+()-]+(?: (?:AND|OR|WITH) [A-Za-z0-9.+()-]+)*$")
 NAME_MAX = 64
 DESCRIPTION_MAX = 1024
 DRAFTS = "skill-drafts"
@@ -78,9 +91,18 @@ class SkillError(ValueError):
 # ---------------------------------------------------------------- SKILL.md
 
 def _unquote(value):
+    """A YAML scalar's text: a double-quoted one read as the JSON string
+    render() writes (its escapes decoded), a single-quoted one with ''
+    as a quote, a plain one as it stands."""
     value = value.strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-        return value[1:-1]
+        if value[0] == "'":
+            return value[1:-1].replace("''", "'")
+        try:
+            out = json.loads(value)
+        except ValueError:
+            return value[1:-1]          # an escape JSON lacks: kept as written
+        return out if isinstance(out, str) else value[1:-1]
     return value
 
 
@@ -120,23 +142,31 @@ def parse(text):
 
 
 def render(front, body):
-    """A SKILL.md from a frontmatter dict (metadata nested) and a body."""
+    """A SKILL.md from a frontmatter dict (metadata nested) and a body.
+    Every value but the name is double-quoted, so a colon, a quote or a
+    leading `[` reads back as the same text in parse() and in a YAML
+    reader."""
     out = ["---"]
     for key, value in front.items():
         if key == "metadata":
             continue
-        out.append("%s: %s" % (key, value))
+        out.append("%s: %s" % (key, value if key == "name" else _quoted(value)))
     meta = front.get("metadata") or {}
     if meta:
         out.append("metadata:")
-        out.extend("  %s: %s" % (k, json.dumps(str(v)) if _needs_quotes(str(v)) else v)
-                   for k, v in meta.items())
+        out.extend("  %s: %s" % (k, _quoted(v)) for k, v in meta.items())
     out.append("---")
     return "\n".join(out) + "\n\n" + body.strip() + "\n"
 
 
-def _needs_quotes(value):
-    return value == "" or value != value.strip() or ":" in value or value[:1] in "\"'#"
+_UNPRINTABLE = re.compile(r"[\x7f-\x84\x86-\x9f]")
+
+
+def _quoted(value):
+    """A YAML double-quoted scalar: a JSON string, whose escapes YAML
+    shares, with the controls JSON leaves raw escaped too."""
+    return _UNPRINTABLE.sub(lambda m: "\\u%04x" % ord(m.group()),
+                            json.dumps(str(value), ensure_ascii=False))
 
 
 def problems(folder_name, front):
@@ -166,6 +196,42 @@ def problems(folder_name, front):
     elif scope == SHARED and context != "personal":
         out.append("a shared skill lives in personal: metadata.context must be personal")
     return out
+
+
+def _items(value):
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def declared_problems(front):
+    """What is wrong with the keys that say what a skill reaches and where
+    it came from (DECLARED_KEYS, and the licence a skill from outside
+    needs), as sentences: the formats docs/reference/skills.md gives them.
+    The draft tool and approval check these; loading does not, so a rule
+    here never unloads an approved skill."""
+    out = []
+    meta = front.get("metadata") or {}
+    bad = [h for h in _items(meta.get("hosts", "")) if not HOST_RE.match(h)]
+    if bad:
+        out.append("metadata.hosts takes host names, comma-separated, not %s" % ", ".join(bad))
+    bad = [r for r in _items(meta.get("reads", "")) if not READS_RE.match(r)]
+    if bad:
+        out.append("metadata.reads takes repo@commit:path or path#sha256:<64 hex>,"
+                   " comma-separated, not %s" % ", ".join(bad))
+    source = str(meta.get("source", "")).strip()
+    if source and not SOURCE_RE.match(source):
+        out.append("metadata.source takes <url>@<full commit>, not %s" % source)
+    licence = str(front.get("license", "")).strip()
+    if licence and not LICENSE_RE.match(licence):
+        out.append("license takes an SPDX identifier, not %s" % licence)
+    elif source and not licence:
+        out.append("a skill from outside (metadata.source) needs a license")
+    return out
+
+
+def _normal(key, value):
+    """A metadata value as written: a list key's items joined by ", "."""
+    value = str(value)
+    return ", ".join(_items(value)) if key in LIST_KEYS else value.strip()
 
 
 # ---------------------------------------------------------------- repositories
@@ -423,10 +489,10 @@ def target(slug, front):
 
 
 def draft_problems(home, slug, name, front):
-    """problems(), plus what a draft also needs before approval: a target
-    this cousin may approve into (placement_problem) and both trigger
-    test prompts."""
-    found = problems(name, front)
+    """problems(), plus what a draft also needs before approval: sound
+    declared keys (declared_problems), a target this cousin may approve
+    into (placement_problem) and both trigger test prompts."""
+    found = problems(name, front) + declared_problems(front)
     meta = front.get("metadata") or {}
     try:
         repo, _where = target(slug, front)
@@ -490,18 +556,25 @@ def show_draft(home, name):
 
 
 def write_draft(home, name, *, description, body, context, side_effect,
-                scope="own", metadata=None):
+                scope="own", metadata=None, license=None):
     """Write or replace a draft's SKILL.md; returns its path. Its other
-    files are the cousin's own to write in the same folder. Refused when
-    the format is broken or the target is not this cousin's to approve
-    into (placement_problem); missing trigger prompts are left to the
+    files are the cousin's own to write in the same folder. A metadata
+    value of None is left out, and so is "" but for DECLARED_KEYS, where
+    "" declares none. Refused when the format or a declared key is
+    broken, or the target is not this cousin's to approve into
+    (placement_problem); missing trigger prompts are left to the
     listing, which names them."""
     folder = _draft_path(home, name)
     meta = {"context": context, "side-effect": side_effect, "scope": scope}
-    meta.update({k: v for k, v in (metadata or {}).items() if v not in (None, "")})
-    front = {"name": name, "description": " ".join(str(description).split()),
-             "metadata": meta}
-    found = problems(name, front)
+    for key, value in (metadata or {}).items():
+        if value is None or (str(value).strip() == "" and key not in DECLARED_KEYS):
+            continue
+        meta[key] = _normal(key, value)
+    front = {"name": name, "description": " ".join(str(description).split())}
+    if license is not None and str(license).strip():
+        front["license"] = str(license).strip()
+    front["metadata"] = meta
+    found = problems(name, front) + declared_problems(front)
     if not found:
         why = placement_problem(home, context, scope)
         found = [why] if why else []
@@ -1050,6 +1123,13 @@ def main(argv=None):
     p.add_argument("--scope", default="own", choices=SCOPES)
     p.add_argument("--should-trigger", default="")
     p.add_argument("--must-not-trigger", default="")
+    p.add_argument("--hosts", help="every host it may contact, comma-separated; \"\" for none")
+    p.add_argument("--reads", help="what it reads, pinned: repo@commit:path or"
+                                   " path#sha256:<hex>, comma-separated")
+    p.add_argument("--rests-on", help="paths, tool versions, memory topics it depends on,"
+                                      " comma-separated")
+    p.add_argument("--source", help="a skill from outside: <url>@<full commit>")
+    p.add_argument("--license", help="an SPDX identifier; required with --source")
     p.add_argument("--body-file", help="the steps (default: stdin)")
     p = sub.add_parser("diff", help="a draft against what is approved")
     p.add_argument("name")
@@ -1066,9 +1146,11 @@ def main(argv=None):
             body = Path(args.body_file).read_text() if args.body_file else sys.stdin.read()
             path = write_draft(home, args.name, description=args.description, body=body,
                                context=args.context, side_effect=args.side_effect,
-                               scope=args.scope,
+                               scope=args.scope, license=args.license,
                                metadata={"should-trigger": args.should_trigger,
-                                         "must-not-trigger": args.must_not_trigger})
+                                         "must-not-trigger": args.must_not_trigger,
+                                         "hosts": args.hosts, "reads": args.reads,
+                                         "rests-on": args.rests_on, "source": args.source})
             print(draft_written(home, slug, args.name, path))
         elif args.command == "diff":
             text, _sha = diff_draft(root, home, slug, args.name)

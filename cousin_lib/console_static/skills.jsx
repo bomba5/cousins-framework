@@ -40,13 +40,20 @@ function SkillDiff({ text }) {
   </pre>;
 }
 
+// The hosts and the reads pins show even when absent ("not declared") or
+// declared empty ("none"): the approve view leads with them.
 function SkillMeta({ metadata }) {
+  const m = metadata || {};
   const keys = ["scope", "context", "hosts", "reads", "rests-on", "should-trigger", "must-not-trigger", "source"];
-  const rows = keys.filter(k => metadata && metadata[k]);
-  if (!rows.length) return null;
+  const always = ["hosts", "reads"];
+  const has = (k) => Object.prototype.hasOwnProperty.call(m, k);
+  const rows = keys.filter(k => always.includes(k) || (has(k) && m[k] !== ""));
   return <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px", ...SKILL_MONO }}>
     {rows.map(k => <React.Fragment key={k}>
-      <span className="muted">{k}</span><span style={{ color: "var(--fg-1)" }}>{metadata[k]}</span>
+      <span className="muted">{k}</span>
+      {!has(k) ? <span className="muted">not declared</span>
+               : m[k] === "" ? <span className="muted">none</span>
+               : <span style={{ color: "var(--fg-1)" }}>{m[k]}</span>}
     </React.Fragment>)}
   </div>;
 }
@@ -241,7 +248,7 @@ function CousinSkillsPanel({ cousin }) {
       {data.error && <SysNote msg={{ ok: false, text: data.error }} />}
       {data.lane === "opencode" && <span className="muted" style={SKILL_MONO}>this lane loads no skills</span>}
       <span className="muted" style={SKILL_MONO}>
-        repositories: {(data.repos || []).join(", ") || "none"}; loads at the next start
+        repositories: {(data.repos || []).join(", ") || "none"} (cousin settings: skill repos); loads at the next start
       </span>
       {(data.loaded || []).map(sk => {
         const key = `loaded/${sk.plugin}/${sk.name}`;

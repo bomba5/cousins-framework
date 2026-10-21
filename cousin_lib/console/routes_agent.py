@@ -10,8 +10,9 @@ the console edits. Each kind of key has one write path:
   process (run here as a long operation), then agent_settings.apply (one
   atomic write whose hook re-checks the parsed table).
 - the other keys (COUSIN_FIELDS: the name, peer_visible, the [memory]
-  recall and review keys, [lifecycle] flip_at and [agent]
-  commit_attribution, which every lane reads, the tmux one included):
+  recall and review keys, [lifecycle] flip_at, [agent]
+  commit_attribution, which every lane reads, the tmux one included,
+  and [skills] repos):
   toml_edit.write_keys, with a validate hook that runs the same check on
   the parsed result before the rename.
 
@@ -32,6 +33,7 @@ import tomllib
 
 from cousin_lib.console import router
 from cousin_lib.console.app import HttpError
+from cousin_lib.skills import REPOS
 
 OP_KIND = "agent-settings"
 NAME_MAX_CHARS = 64
@@ -61,6 +63,10 @@ COUSIN_FIELDS = {
                                  "hint": "the harness's own Co-Authored-By / \"Generated with\""
                                          " lines on commits and PRs; unset is the install"
                                          " default"},
+    "skills.repos": {"type": "repos", "default": ["personal"], "choices": list(REPOS),
+                     "restart": True,
+                     "hint": "the skills repositories it loads (shared/ and its own folder in"
+                             " each); listing private keeps its own skills there only"},
 }
 READONLY_FIELDS = {
     "chat.tmux_session": "the session peers and the console type into",
@@ -106,6 +112,17 @@ def check_field(name, value, root=None):
     if kind == "count":
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError("must be a whole number, 0 or more")
+        return value
+    if kind == "repos":
+        # [] is a cousin that loads no skills; null (above) the default
+        if not isinstance(value, list) or not all(isinstance(r, str) for r in value):
+            raise ValueError("must be a list of repository names")
+        bad = [r for r in value if r not in spec["choices"]]
+        if bad:
+            raise ValueError("unknown %s (one of %s)" % (", ".join(map(repr, bad)),
+                                                         ", ".join(spec["choices"])))
+        if len(set(value)) != len(value):
+            raise ValueError("a repository is listed twice")
         return value
     if kind == "name":
         if not isinstance(value, str) or not value.strip():
@@ -170,6 +187,8 @@ def describe_settings(home, root):
         row = {"value": value if present else default, "set": present,
                "default": default, "type": spec["type"], "restart": spec["restart"],
                "hint": spec["hint"]}
+        if "choices" in spec:
+            row["choices"] = list(spec["choices"])
         if present:
             try:
                 check_field(name, value)

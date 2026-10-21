@@ -60,6 +60,9 @@ function cousinSettingChanges(fields, draft) {
   }
   return out;
 }
+function cousinRepoToggle(choices, chosen, repo, on) {
+  return (choices || []).filter((r) => r === repo ? on : (chosen || []).includes(r));
+}
 function flipAtProblem(value) {
   if (value === "" || value === "never") return null;
   const m = /^(\d{1,2}):(\d{2})$/.exec(value);
@@ -417,7 +420,8 @@ const COUSIN_SETTING_LABELS = {
   "memory.review_batch": "review batch",
   "memory.review_model": "review model",
   "lifecycle.flip_at": "flip at",
-  "agent.commit_attribution": "commit attribution"
+  "agent.commit_attribution": "commit attribution",
+  "skills.repos": "skill repos"
 };
 function CousinSettingsPanel({ cousin }) {
   const c = cousin;
@@ -517,6 +521,19 @@ function CousinSettingsPanel({ cousin }) {
         }
       );
     }
+    if (row.type === "repos") {
+      const reset = n in draft ? draft[n] === null : !row.set;
+      const chosen = Array.isArray(v) ? v : row.default || [];
+      return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" } }, (row.choices || []).map((r) => /* @__PURE__ */ React.createElement("label", { key: r, style: { display: "inline-flex", gap: 4, alignItems: "center" } }, /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "checkbox",
+          checked: chosen.includes(r),
+          disabled: busy,
+          onChange: (e) => set(n, cousinRepoToggle(row.choices, chosen, r, e.target.checked))
+        }
+      ), /* @__PURE__ */ React.createElement("span", { style: agentMono }, r))), reset ? /* @__PURE__ */ React.createElement("span", { style: agentHint }, "default") : /* @__PURE__ */ React.createElement("button", { className: "btn ghost", style: agentSmall, disabled: busy, onClick: () => set(n, null) }, "use the default"));
+    }
     return /* @__PURE__ */ React.createElement(
       "input",
       {
@@ -563,6 +580,7 @@ Object.assign(window, {
   agentLaneReads,
   agentChanges,
   cousinSettingChanges,
+  cousinRepoToggle,
   agentOpSettled,
   openKindSwitch
 });

@@ -9,8 +9,8 @@
 //                        migrate.jsx's dialog), model, effort, account, auto_start and the
 //                        hold, rollover, side sessions, the opencode keys, env_allow.
 //   CousinSettingsPanel  name, peer_visible, the [memory] recall and review keys,
-//                        [lifecycle] flip_at, [agent] commit_attribution; [chat]
-//                        and [session] read-only.
+//                        [lifecycle] flip_at, [agent] commit_attribution, [skills]
+//                        repos; [chat] and [session] read-only.
 // Every value, choice and default comes from the server; nothing here lists the
 // kinds, the accounts or the models. Every write answers restart_required, and
 // AgentRestartOffer offers the fleet's restart route. An sdk model change is a
@@ -94,6 +94,11 @@ function cousinSettingChanges(fields, draft) {
     if (!agentSame(want, row.value)) out[name] = want;
   }
   return out;
+}
+
+// A repository list with `repo` turned on or off, in the order of `choices`.
+function cousinRepoToggle(choices, chosen, repo, on) {
+  return (choices || []).filter(r => (r === repo ? on : (chosen || []).includes(r)));
 }
 
 function flipAtProblem(value) {
@@ -448,6 +453,7 @@ const COUSIN_SETTING_LABELS = {
   "memory.proactive_recall": "recall lines", "memory.recall_keyword_only": "keyword recall",
   "memory.review_batch": "review batch", "memory.review_model": "review model",
   "lifecycle.flip_at": "flip at", "agent.commit_attribution": "commit attribution",
+  "skills.repos": "skill repos",
 };
 
 function CousinSettingsPanel({ cousin }) {
@@ -527,6 +533,24 @@ function CousinSettingsPanel({ cousin }) {
       return <input className="txt" type="number" min="0" step="1" value={v ?? ""} disabled={busy} style={{ width: 90 }}
                     onChange={e => set(n, e.target.value === "" ? null : Number(e.target.value))} />;
     }
+    if (row.type === "repos") {
+      // a list in the server's order; null (the reset) shows the default
+      const reset = n in draft ? draft[n] === null : !row.set;
+      const chosen = Array.isArray(v) ? v : (row.default || []);
+      return (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          {(row.choices || []).map(r => (
+            <label key={r} style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+              <input type="checkbox" checked={chosen.includes(r)} disabled={busy}
+                     onChange={e => set(n, cousinRepoToggle(row.choices, chosen, r, e.target.checked))} />
+              <span style={agentMono}>{r}</span>
+            </label>
+          ))}
+          {reset ? <span style={agentHint}>default</span>
+                 : <button className="btn ghost" style={agentSmall} disabled={busy} onClick={() => set(n, null)}>use the default</button>}
+        </div>
+      );
+    }
     return <input className="txt" value={v ?? ""} disabled={busy} style={{ width: "100%", fontFamily: "var(--mono)" }}
                   placeholder={n === "lifecycle.flip_at" ? `install default (${row.install || "never"})`
                                : n === "memory.review_model" ? "the cousin's own model" : ""}
@@ -591,5 +615,5 @@ registerSlot("inspector.lane", { id: "cousin-settings", order: 11,
 
 Object.assign(window, {
   AgentSettingsPanel, CousinSettingsPanel, AgentRestartOffer, AgentField, agentLaneReads,
-  agentChanges, cousinSettingChanges, agentOpSettled, openKindSwitch,
+  agentChanges, cousinSettingChanges, cousinRepoToggle, agentOpSettled, openKindSwitch,
 });

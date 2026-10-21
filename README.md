@@ -230,6 +230,8 @@ Nothing in this group is needed to run a cousin. Each page says so at the top.
 - [Glossary](docs/glossary.md) - the words these docs use in a sense of their own
 - [What is authoritative](docs/reference/state.md) - every store the framework
   writes, its level, its writer, and which one wins when two disagree
+- [Skills](docs/reference/skills.md) - the specification for a cousin's skills:
+  shared and per-cousin procedures, approved in the console (not built yet)
 - [docs/reference](docs/reference/) - the dense stuff: every API route, the
   loop model, the boot sequence
 - [Development](docs/development.md) - hacking on the framework

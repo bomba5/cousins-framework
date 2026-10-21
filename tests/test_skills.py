@@ -90,13 +90,14 @@ class TestFormat(SkillsCase):
         prompt = 'hvad skal vi have: æbler "nu" \\ ok'
         front = {"name": "a-b", "description": "[wip] Plan: dinner #1",
                  "metadata": {"context": "personal", "should-trigger": prompt, "hosts": "",
-                              "odd": "del\x7fc1\x85"}}
+                              "odd": "del\x7fc1\x85\ufffe"}}
         text = skills.render(front, BODY)
         self.assertIn('description: "[wip] Plan: dinner #1"\n', text)
         self.assertIn("æbler", text)
         self.assertNotIn("\\u00e6", text)
         self.assertIn('  hosts: ""\n', text)
         self.assertNotIn("\x7f", text)
+        self.assertNotIn("\ufffe", text)              # escaped: YAML refuses it raw
         for line in text.split("---")[1].strip().split("\n"):   # not splitlines: NEL
             key, _, value = line.strip().partition(": ")
             if key not in ("name", "metadata:"):
@@ -105,13 +106,24 @@ class TestFormat(SkillsCase):
         self.assertEqual(parsed, front)
 
     def test_hand_written_values_read_as_yaml_would(self):
-        text = ("---\nname: a\ndescription: 'it''s plain'\nmetadata:\n  context: personal\n"
-                '  reads: "x@abc1234:p"\n  odd: "C:\\path"\n---\nsteps\n')
+        text = ("---\nname: a\ndescription: 'it''s plain'\nlicense:\nmetadata:\n"
+                '  context: personal\n  reads: "x@abc1234:p"\n  hosts:\n  source: ""\n'
+                "---\nsteps\n")
         front, _ = skills.parse(text)
         self.assertEqual(front["description"], "it's plain")
-        self.assertEqual(front["metadata"]["context"], "personal")
-        self.assertEqual(front["metadata"]["reads"], "x@abc1234:p")
-        self.assertEqual(front["metadata"]["odd"], "C:\\path")    # no JSON escape: as written
+        self.assertNotIn("license", front)                  # an empty plain value is null
+        meta = front["metadata"]
+        self.assertEqual((meta["context"], meta["reads"]), ("personal", "x@abc1234:p"))
+        self.assertNotIn("hosts", meta)                     # blank: not declared
+        self.assertEqual(meta["source"], "")                # "": declared none
+
+    def test_an_escape_only_yaml_reads_is_refused_not_kept(self):
+        """Kept as written, the approve view and the trigger test would see
+        other text than the agent's YAML reader loads."""
+        for value in ('"C:\\path"', '"a\\x41b"', '"a" and "b"'):
+            text = "---\nname: a\ndescription: %s\n---\nsteps\n" % value
+            with self.assertRaisesRegex(SkillError, "takes JSON's escapes only", msg=value):
+                skills.parse(text)
 
     def test_a_missing_or_broken_frontmatter_is_an_error(self):
         for text in ("no frontmatter", "---\nname: x\n", "---\njust words\n---\n",
@@ -155,12 +167,12 @@ class TestDeclaredKeys(SkillsCase):
 
     def test_written_normalized_and_an_empty_value_declares_none(self):
         front = self.write(hosts=" a.example ,b.example,, ",
-                           reads="wren-lab/widget@abc1234:tools/x.py, notes/a.md#sha256:" + SHA,
+                           reads="wren-lab/widget@%s:tools/x.py, notes/a.md#sha256:%s" % (COMMIT, SHA),
                            **{"rests-on": "kicad-cli --version,  board-notes"})
         meta = front["metadata"]
         self.assertEqual(meta["hosts"], "a.example, b.example")
         self.assertEqual(meta["reads"],
-                         "wren-lab/widget@abc1234:tools/x.py, notes/a.md#sha256:" + SHA)
+                         "wren-lab/widget@%s:tools/x.py, notes/a.md#sha256:%s" % (COMMIT, SHA))
         self.assertEqual(meta["rests-on"], "kicad-cli --version, board-notes")
         self.assertNotIn("source", meta)
         self.assertNotIn("license", front)
@@ -186,6 +198,10 @@ class TestDeclaredKeys(SkillsCase):
                                ({"source": "https://g.example/o/r@v1.0", "license": "MIT"},
                                 "metadata.source"),
                                ({"license": "MIT; rm -rf"}, "license takes"),
+                               ({"reads": "w@abc1234:tools/x.py"}, "metadata.reads"),
+                               ({"source": ":@" + COMMIT, "license": "MIT"}, "metadata.source"),
+                               ({"source": "https://@" + COMMIT, "license": "MIT"},
+                                "metadata.source"),
                                ({"source": "https://g.example/o/r@abc1234", "license": "MIT"},
                                 "metadata.source"),
                                ({"source": "https://g.example/o/r.git@" + COMMIT},
@@ -535,13 +551,13 @@ class TestCli(SkillsCase):
     def test_the_declared_keys_from_a_terminal(self):
         base = ("draft", "board-check", "--description", "Check a board.", "--context",
                 "personal", "--side-effect", "read-only")
-        code, out, _ = self.run_cli(*base, "--hosts", "", "--reads", "w@abc1234:tools/x.py",
+        code, out, _ = self.run_cli(*base, "--hosts", "", "--reads", "w@%s:tools/x.py" % COMMIT,
                                     "--rests-on", "kicad-cli --version", "--source",
                                     "https://g.example/o/r@" + COMMIT, "--license", "MIT",
                                     stdin=BODY)
         self.assertEqual(code, 0, out)
         _, out, _ = self.run_cli("show", "board-check")
-        for line in ('license: "MIT"', 'hosts: ""', 'reads: "w@abc1234:tools/x.py"',
+        for line in ('license: "MIT"', 'hosts: ""', 'reads: "w@%s:tools/x.py"' % COMMIT,
                      'rests-on: "kicad-cli --version"',
                      'source: "https://g.example/o/r@%s"' % COMMIT):
             self.assertIn(line, out)
@@ -562,7 +578,7 @@ class TestCli(SkillsCase):
                 "side_effect": "read-only", "body": BODY, "scope": "own",
                 "should_trigger": PROMPTS["should-trigger"],
                 "must_not_trigger": PROMPTS["must-not-trigger"], "hosts": "",
-                "reads": "w@abc1234:tools/x.py", "rests_on": "kicad-cli --version",
+                "reads": "w@%s:tools/x.py" % COMMIT, "rests_on": "kicad-cli --version",
                 "source": "https://g.example/o/r@" + COMMIT, "license": "MIT"}
         self.assertEqual(set(args), set(tool["properties"]) - {"command"})
         argv, stdin = mcp_server.build_call(tool, "draft", args, resolve=lambda c: c)

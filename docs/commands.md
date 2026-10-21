@@ -715,7 +715,7 @@ It acts for the cousin named by `--home` or `COUSIN_HOME`:
 
 - `list`: what loads at its next start, and its drafts.
 - `show NAME`: a draft, or a loaded skill as `plugin:name`.
-- `draft NAME --description ... --context personal|work|private --side-effect read-only|writes-local|outward [--scope own|shared] [--should-trigger ...] [--must-not-trigger ...] [--hosts ...] [--reads ...] [--rests-on ...] [--source URL@COMMIT --license SPDX]`: writes the draft's `SKILL.md`, the steps from `--body-file` or stdin. `--hosts`, `--reads` and `--rests-on` are comma-separated; a flag left out is not declared, and `--hosts ""` declares that the skill contacts no host. A malformed host, `reads` pin, source (it takes the full commit) or licence is refused.
+- `draft NAME --description ... --context personal|work|private --side-effect read-only|writes-local|outward [--scope own|shared] [--should-trigger ...] [--must-not-trigger ...] [--hosts ...] [--reads ...] [--rests-on ...] [--source URL@COMMIT --license SPDX]`: writes the draft's `SKILL.md`, the steps from `--body-file` or stdin. `--hosts`, `--reads` and `--rests-on` are comma-separated; a flag left out is not declared, and `--hosts ""` declares that the skill contacts no host. A malformed host, `reads` pin or source (both take the full commit) or licence is refused.
 - `diff NAME`: the draft against what is approved.
 - `trigger-test NAME`: the draft's trigger test, which the console runs.
 

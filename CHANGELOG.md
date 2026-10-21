@@ -19,8 +19,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `source` and `license` (`--hosts`, `--reads`, `--rests-on`, `--source`,
   `--license`). A key left out is not declared, and an empty one declares
   none (`hosts: ""` contacts no host). The draft tool and approval refuse
-  a malformed host, `reads` pin, source (pinned to a full commit) or
-  licence, and a `source` with no `license`; loading does not check them. The approve view always shows
+  a malformed host, `reads` pin or source (each pinned to a full commit)
+  or licence, and a `source` with no `license`; loading does not check
+  them. A key with nothing after the colon is not declared, as YAML reads
+  it. The approve view always shows
   the hosts and the `reads` pins, as "not declared" or "none" when so.
   Existing homes get the new tool properties with
   `cousin-upgrade --apply-homes`.
@@ -33,7 +35,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `è`) reached the trigger test as `\"` or `\u00e6`; and it wrote the
   description unquoted, which a YAML reader refuses when it holds `: `.
   Every value but the name is now written double-quoted (UTF-8 kept) and
-  read back with its escapes decoded.
+  read back with its escapes decoded; a double-quoted value with an escape
+  JSON lacks is refused rather than kept as written.
 
 ## 3.58.0 - 2026-10-21
 

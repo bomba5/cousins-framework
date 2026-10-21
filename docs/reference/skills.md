@@ -78,13 +78,15 @@ identifier; it is REQUIRED for a skill from outside. The framework's own keys
 sit under `metadata`, as the format asks. The format makes `metadata` a map
 from string keys to string *values*, so a list is one comma-separated string.
 The draft tool writes every value but the name double-quoted, as a JSON
-string, which a YAML reader takes as the same text:
+string, which a YAML reader takes as the same text; a double-quoted value
+with an escape JSON lacks (`\x41`) is refused, since it would read
+differently here and in the agent:
 
 | key | values | meaning |
 |---|---|---|
 | `context` | `personal`, `work`, `private` | which repository it may live in; the approval checks it against the content |
 | `side-effect` | `read-only`, `writes-local`, `outward` | what it can change. An `outward` step (a push, an upload, a message, an order) MUST stop at the operator's go and never carries the go as a step |
-| `reads` | `repo@commit:path` or `path#sha256:<hex>`, comma-separated | what it reads; a change there flags the skill as stale |
+| `reads` | `repo@commit:path` (the full commit) or `path#sha256:<hex>`, comma-separated | what it reads; a change there flags the skill as stale |
 | `hosts` | host names, comma-separated | every host it may contact |
 | `rests-on` | paths, tool versions, memory topics, comma-separated | what it depends on, checked for drift |
 | `should-trigger` | a prompt | one that SHOULD make the cousin use the skill (the trigger test); a draft without it is not approved |
@@ -92,10 +94,12 @@ string, which a YAML reader takes as the same text:
 | `scope` | `own`, `shared` | the cousin's folder (the default) or `shared/`; `shared` only for a general skill in `personal` |
 | `source` | `<url>@<commit>`, the full commit | a skill from outside: where it came from |
 
-`hosts`, `reads`, `rests-on` and `source` left out are not declared; an
-empty value declares none (`hosts: ""` contacts no host). The draft tool and
+`hosts`, `reads`, `rests-on` and `source` left out, or with nothing after
+the colon (YAML's null), are not declared; `""` declares none (`hosts: ""`
+contacts no host). The draft tool and
 approval refuse a host that is not a host name, a `reads` pin in neither
-form, a `source` that is not pinned to a full commit, a `license` that is not an
+form or not pinned to a full commit, a `source` that is not a URL pinned to a
+full commit, a `license` that is not an
 SPDX expression, and a `source` without a `license`. Loading does not check
 them, so a format rule never unloads an approved skill.
 

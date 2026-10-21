@@ -65,11 +65,13 @@ SKILL_FILE = "SKILL.md"
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 HOST_RE = re.compile(r"^(?=.{1,253}$)%s(?:\.%s)*$" % (_LABEL, _LABEL))
-COMMIT = r"[0-9a-fA-F]{7,64}"
+# a full commit: a prefix can turn ambiguous as a repository grows, and a
+# fetch by commit needs it whole
+COMMIT = r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})"
 READS_RE = re.compile(r"^(?:[^\s@#,]+@%s:\S+|[^\s#,]+#sha256:[0-9a-fA-F]{64})$" % COMMIT)
-# a full commit: a prefix can turn ambiguous upstream, and a fetch by
-# commit needs it whole
-SOURCE_RE = re.compile(r"^\S*:\S*@(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+# a URL with a scheme and a host, or git's user@host:path
+SOURCE_RE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.-]*://[^\s/@]+(?:/\S*)?"
+                       r"|[^\s@:/]+@[^\s@:/]+:\S+)@%s$" % COMMIT)
 LICENSE_RE = re.compile(r"^[A-Za-z0-9.+()-]+(?: (?:AND|OR|WITH) [A-Za-z0-9.+()-]+)*$")
 NAME_MAX = 64
 DESCRIPTION_MAX = 1024
@@ -93,7 +95,9 @@ class SkillError(ValueError):
 def _unquote(value):
     """A YAML scalar's text: a double-quoted one read as the JSON string
     render() writes (its escapes decoded), a single-quoted one with ''
-    as a quote, a plain one as it stands."""
+    as a quote, a plain one as it stands. SkillError for a double-quoted
+    one JSON does not read (an escape only YAML has, such as \\x41): kept
+    as written, it would differ from what the agent's YAML reader loads."""
     value = value.strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
         if value[0] == "'":
@@ -101,8 +105,11 @@ def _unquote(value):
         try:
             out = json.loads(value)
         except ValueError:
-            return value[1:-1]          # an escape JSON lacks: kept as written
-        return out if isinstance(out, str) else value[1:-1]
+            out = None
+        if not isinstance(out, str):
+            raise SkillError("frontmatter value %s: a double-quoted value takes JSON's"
+                             " escapes only" % value)
+        return out
     return value
 
 
@@ -110,8 +117,9 @@ def parse(text):
     """(frontmatter, body) of a SKILL.md. The frontmatter is the YAML
     subset the format uses: `key: value` lines between the leading `---`
     lines, and `metadata:` followed by indented `key: value` lines, every
-    value a string. SkillError when there is none or a line does not
-    parse."""
+    value a string. A key with an empty plain value is absent (YAML's
+    null); only `""` is the empty string. SkillError when there is none
+    or a line does not parse."""
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
         raise SkillError("SKILL.md must start with a --- frontmatter line")
@@ -131,12 +139,13 @@ def parse(text):
         if indented:
             if not in_meta:
                 raise SkillError("indented frontmatter line outside metadata: %r" % raw.strip())
-            metadata[key] = _unquote(value)
+            if value.strip():               # an empty plain value is null: absent
+                metadata[key] = _unquote(value)
             continue
         in_meta = key == "metadata" and not value.strip()
         if in_meta:
             metadata = front["metadata"] = {}
-        else:
+        elif value.strip():
             front[key] = _unquote(value)
     return front, "\n".join(lines[end + 1:]).lstrip("\n")
 
@@ -159,7 +168,7 @@ def render(front, body):
     return "\n".join(out) + "\n\n" + body.strip() + "\n"
 
 
-_UNPRINTABLE = re.compile(r"[\x7f-\x84\x86-\x9f]")
+_UNPRINTABLE = re.compile(r"[\x7f-\x84\x86-\x9f\ud800-\udfff\ufffe\uffff]")
 
 
 def _quoted(value):
@@ -215,7 +224,7 @@ def declared_problems(front):
         out.append("metadata.hosts takes host names, comma-separated, not %s" % ", ".join(bad))
     bad = [r for r in _items(meta.get("reads", "")) if not READS_RE.match(r)]
     if bad:
-        out.append("metadata.reads takes repo@commit:path or path#sha256:<64 hex>,"
+        out.append("metadata.reads takes repo@<full commit>:path or path#sha256:<64 hex>,"
                    " comma-separated, not %s" % ", ".join(bad))
     source = str(meta.get("source", "")).strip()
     if source and not SOURCE_RE.match(source):
@@ -1124,7 +1133,7 @@ def main(argv=None):
     p.add_argument("--should-trigger", default="")
     p.add_argument("--must-not-trigger", default="")
     p.add_argument("--hosts", help="every host it may contact, comma-separated; \"\" for none")
-    p.add_argument("--reads", help="what it reads, pinned: repo@commit:path or"
+    p.add_argument("--reads", help="what it reads, pinned: repo@<full commit>:path or"
                                    " path#sha256:<hex>, comma-separated")
     p.add_argument("--rests-on", help="paths, tool versions, memory topics it depends on,"
                                       " comma-separated")

@@ -138,7 +138,7 @@ A cousin loads `shared/` (from `personal`) and its own `<slug>/` folder from
 each repository it lists. It never loads another cousin's folder. Nothing
 cousin-specific is shared: `shared/` holds only general procedures,
 written fresh for it (never stripped down from a work skill) and passed by
-the operator, who asks other cousins to review one when he wants to.
+the operator, who asks other cousins to review one when it fits.
 
 "Per cousin" means *loaded* only by that cousin, not hidden: every cousin
 runs as the same OS user and can read every folder with Bash. A private
@@ -191,8 +191,8 @@ tool still answers: `list` says "none: this lane loads no skills".
 
 A cousin drafts a skill as plain files in `<home>/skill-drafts/<name>/`,
 after the operator said yes to it. Cousins never commit to a skills
-repository: every commit there is the operator's approval, made by the
-console as him, so the house commit rule holds unchanged.
+repository: every commit there is an approval, made by the console as
+the operator, so the house commit rule holds unchanged.
 
 - **A draft never loads.** Only the approved state does.
 - **Where it goes** follows its frontmatter: `metadata.context` names the
@@ -314,7 +314,7 @@ shows for it. Agreed with the operator (2026-10-21).
   with a script's suffix), and the source fetched again now: as published
   past the frontmatter, or the paths that are not, and upstream's keys not
   kept with their values.
-- **The dry run.** Once the operator has read the scripts, he allows a dry
+- **The dry run.** After reading the scripts, the operator allows a dry
   run of the version shown. The cousin is told on its system [thread](../glossary.md#thread), does
   the draft's `dry-run-task` once as a job (the `job` tool's `run`) and
   records it with the `skill` tool's `dry-run`. The framework reads the job

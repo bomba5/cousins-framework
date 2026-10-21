@@ -23,7 +23,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   - The approve view shows where it came from, the licence file to read,
     the files an agent could run, and the source fetched again, as
     published past the frontmatter or not.
-  - A dry run before approval. The operator allows it once he has read the
+  - A dry run before approval. The operator allows it after reading the
     scripts. The cousin is told on its system thread, does the draft's
     `dry-run-task` once as a job, and records it with `skill dry-run NAME
     --job ID`. The framework reads the job row (its owner, its end, its

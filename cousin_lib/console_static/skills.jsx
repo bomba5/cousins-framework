@@ -78,7 +78,7 @@ function SkillTrigger({ result }) {
 // A draft from outside: where it came from, its licence (the file, to
 // read), the files an agent could run, the source fetched again (as
 // published past the frontmatter, or not), and the dry run the operator
-// allows once he has read the scripts, then the job that ran it.
+// allows after reading the scripts, then the job that ran it.
 function SkillOutside({ d, base, onAllowed }) {
   const o = d.outside;
   const [up, setUp] = React.useState(null);

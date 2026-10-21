@@ -192,14 +192,28 @@ class StaticChatFiles(unittest.TestCase):
 
 
 
-class SeenWatermarkLinkage(unittest.TestCase):
-    def test_chat_stamps_the_same_seen_key_the_sidebar_reads(self):
-        # app.jsx computes the unread dot from chatSeenKey(slug, user) in
-        # data.jsx; a chat view stamping a differently spelled key means
-        # the dot never clears.
+class ReadMarkLinkage(unittest.TestCase):
+    """The read mark is the server's (#380): the chat pane moves it, the
+    sidebar shows the counts it answers, and no browser keeps one of its
+    own any more, or a chat read on one device stays unread on another."""
+
+    def test_the_chat_moves_the_mark_and_hands_the_counts_to_the_sidebar(self):
         chat = (_STATIC / "chat.jsx").read_text()
-        self.assertIn("chatSeenKey(", chat)
+        app = (_STATIC / "app.jsx").read_text()
+        self.assertIn('"/api/chat/read"', chat)
+        self.assertIn('"fw-chat-unread"', chat)
+        self.assertIn('"fw-chat-unread"', app)
+        self.assertIn('"/api/chat/unread"', app)
+        self.assertIn('kind === "chat-read"', app)
+
+    def test_no_browser_keeps_a_seen_time_of_its_own(self):
+        chat = (_STATIC / "chat.jsx").read_text()
+        self.assertNotIn("chatSeenKey(", chat)
         self.assertNotIn("fw_chat_seen_", chat)
+        app = (_STATIC / "app.jsx").read_text()
+        # app.jsx only reads the old key, once, to move it to the server
+        body = app.split("const renderCousin", 1)[1].split("return (", 1)[0]
+        self.assertNotIn("localStorage", body)
 
 
 def _function_body(text, name):

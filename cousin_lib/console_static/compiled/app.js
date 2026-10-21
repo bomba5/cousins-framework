@@ -15,6 +15,7 @@ function navEntries() {
   return NAV.concat(extra);
 }
 const SIDEBAR_KEY = "console_sidebar_v1";
+const READ_MOVED_KEY = "console_chat_read_moved";
 const DEFAULT_GROUPS = [{ id: "sessions", name: "Sessions", collapsed: false }];
 function loadSidebar() {
   try {
@@ -24,7 +25,7 @@ function loadSidebar() {
   }
   return { groups: DEFAULT_GROUPS.slice(), assignments: {} };
 }
-function SidebarGroups({ cousins, activeCousin, view, showHidden, chatUserFor, onPick }) {
+function SidebarGroups({ cousins, activeCousin, view, showHidden, unread, onPick }) {
   const [config, setConfig] = React.useState(loadSidebar);
   const [contextMenu, setContextMenu] = React.useState(null);
   const [groupMenu, setGroupMenu] = React.useState(null);
@@ -143,13 +144,8 @@ function SidebarGroups({ cousins, activeCousin, view, showHidden, chatUserFor, o
   }, [contextMenu, groupMenu]);
   const renderCousin = (c) => {
     const stopped = c.status !== "running";
-    let unread = false;
-    try {
-      const seen = parseInt(localStorage.getItem(chatSeenKey(c.slug, chatUserFor(c))) || "0", 10);
-      const lastMsg = c.lastMsgTs || 0;
-      unread = lastMsg > 0 && lastMsg > seen && !(activeCousin === c.slug && view === "chat");
-    } catch (e) {
-    }
+    const viewing = activeCousin === c.slug && view === "chat";
+    const n = viewing ? 0 : (unread || {})[c.slug] || 0;
     return /* @__PURE__ */ React.createElement(
       "div",
       {
@@ -166,25 +162,12 @@ function SidebarGroups({ cousins, activeCousin, view, showHidden, chatUserFor, o
           setContextMenu({ slug: c.slug, x: e.clientX, y: e.clientY });
         },
         onClick: stopped ? void 0 : () => onPick(c.slug),
-        title: stopped ? `@${c.slug} is stopped - start it from the Cousins view first` : `open chat with @${c.slug}` + (unread ? " (unread)" : "") + " (right-click to move)",
+        title: stopped ? `@${c.slug} is stopped - start it from the Cousins view first` : `open chat with @${c.slug}` + (n ? ` (${n} unread)` : "") + " (right-click to move)",
         style: stopped || c.hidden ? { opacity: stopped ? 0.5 : 0.7, cursor: stopped ? "not-allowed" : "grab" } : { cursor: "grab" }
       },
       /* @__PURE__ */ React.createElement(Led, { state: c.status === "running" ? "running" : "stopped", pulse: c.status === "running" }),
-      /* @__PURE__ */ React.createElement("span", { style: { fontWeight: unread ? 600 : 400 } }, (c.name || c.slug).toLowerCase()),
-      unread && /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          title: "unread messages",
-          style: {
-            display: "inline-block",
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background: "var(--accent)",
-            marginLeft: 4
-          }
-        }
-      ),
+      /* @__PURE__ */ React.createElement("span", { style: { fontWeight: n ? 600 : 400 } }, (c.name || c.slug).toLowerCase()),
+      n > 0 && /* @__PURE__ */ React.createElement("span", { className: "unread-count", title: `${n} unread repl${n === 1 ? "y" : "ies"}` }, n > 9 ? "9+" : n),
       c.hidden && /* @__PURE__ */ React.createElement("span", { className: "badge", title: "hidden (revealed by Settings: show hidden)", style: { background: "oklch(from var(--fg-3) l c h / 0.25)" } }, "hidden")
     );
   };
@@ -425,6 +408,7 @@ function App() {
   const [cousins, setCousins] = useStateApp([]);
   const [loops, setLoops] = useStateApp([]);
   const [activeCousin, setActiveCousin] = useStateApp(initialCousin);
+  const [unread, setUnread] = useStateApp(null);
   useEffectApp(() => {
     const p = new URLSearchParams(window.location.search);
     p.set("view", view);
@@ -476,6 +460,48 @@ function App() {
     const id = setInterval(() => setClock(/* @__PURE__ */ new Date()), 3e3);
     return () => clearInterval(id);
   }, []);
+  const refreshUnread = () => {
+    apiGet("/api/chat/unread").then((d) => {
+      if (d && d.unread) setUnread(d.unread);
+    });
+  };
+  useEffectApp(() => {
+    const onCounts = (e) => {
+      if (e.detail) setUnread(e.detail);
+    };
+    window.addEventListener("fw-chat-unread", onCounts);
+    return () => window.removeEventListener("fw-chat-unread", onCounts);
+  }, []);
+  useEffectApp(() => {
+    if (!unread || !cousins.length || embedMode) return;
+    let moved = false;
+    try {
+      moved = localStorage.getItem(READ_MOVED_KEY) === "1";
+    } catch (_e) {
+      return;
+    }
+    if (moved) return;
+    for (const c of cousins) {
+      if (!unread[c.slug] || !c.lastMsgId) continue;
+      const user = chatUserFor(c);
+      let seen = 0;
+      try {
+        seen = parseInt(localStorage.getItem(chatSeenKey(c.slug, user)) || "0", 10);
+      } catch (_e) {
+      }
+      if (seen && seen >= (c.lastMsgTs || 0)) {
+        apiSend("POST", "/api/chat/read", { cousin: c.slug, user, id: c.lastMsgId }).then(({ r, d }) => {
+          if (r.ok && d && d.unread) setUnread(d.unread);
+        }).catch(() => {
+        });
+      }
+    }
+    try {
+      Object.keys(localStorage).filter((k) => k.startsWith("console_chat_seen_")).forEach((k) => localStorage.removeItem(k));
+      localStorage.setItem(READ_MOVED_KEY, "1");
+    } catch (_e) {
+    }
+  }, [unread, cousins]);
   useEffectApp(() => {
     if (needLogin) return;
     let es = null;
@@ -487,8 +513,12 @@ function App() {
       if (kind === "snapshot") {
         if (data.cousins) setCousins(data.cousins);
         if (data.loops) setLoops(data.loops);
+        refreshUnread();
       } else if (kind === "cousins-refresh") {
         if (Array.isArray(data)) setCousins(data);
+        refreshUnread();
+      } else if (kind === "chat-read") {
+        refreshUnread();
       } else if (kind === "loops-refresh") {
         if (Array.isArray(data)) setLoops(data);
       } else if (kind === "cousin-status") {
@@ -634,7 +664,7 @@ function App() {
       activeCousin,
       view,
       showHidden,
-      chatUserFor,
+      unread,
       onPick: (slug) => {
         setActiveCousin(slug);
         pickView("chat");

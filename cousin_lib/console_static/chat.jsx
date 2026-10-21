@@ -89,23 +89,6 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   // A plugin page placed "chat" is not a tab: it is a strip over the messages.
   const [paneTab, setPaneTab] = React.useState("pane");
 
-  // Per-tab last-viewed marker: stamp localStorage whenever the operator
-  // is on this cousin's chat tab + the document is visible. This is what
-  // the sidebar's unread-dot logic compares against c.lastMsgTs.
-  React.useEffect(() => {
-    if (!activeCousin || !chatUser) return;
-    const key = chatSeenKey(activeCousin, chatUser);
-    const stamp = () => {
-      if (document.visibilityState === "visible") {
-        try { localStorage.setItem(key, String(Math.floor(Date.now()/1000))); }
-        catch (e) { /* ignore */ }
-      }
-    };
-    stamp();
-    document.addEventListener("visibilitychange", stamp);
-    return () => document.removeEventListener("visibilitychange", stamp);
-  }, [activeCousin, chatUser]);
-
   React.useEffect(() => {
     try { localStorage.setItem("fw_pane_side", paneOpen ? "1" : "0"); }
     catch (e) { /* ignore */ }
@@ -676,6 +659,35 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
     const id = !searchActive ? setInterval(pull, 3500) : null;
     return () => { cancelled = true; if (id) clearInterval(id); };
   }, [c.slug, chatUser, search, searchActive, showArchived]);
+
+  // The read mark (#380): the newest message the pane shows goes to the
+  // server whenever it grows while the page is visible, so the cousin's
+  // unread count clears in every browser this user is logged in from.
+  // Only for a chat the console serves itself, and never from search
+  // results or the archive, which are not the thread's tail.
+  const readMarkRef = React.useRef({ key: "", id: 0 });
+  React.useEffect(() => {
+    if (!c || c.chat !== "console" || !chatUser || searchActive || showArchived) return;
+    const newest = messages.reduce((n, m) => (typeof m.id === "number" && m.id > n ? m.id : n), 0);
+    if (!newest) return;
+    const key = `${c.slug}/${chatUser}`;
+    const post = () => {
+      if (document.visibilityState !== "visible") return;
+      const sent = readMarkRef.current;
+      if (sent.key === key && sent.id >= newest) return;
+      readMarkRef.current = { key, id: newest };
+      const retry = () => { if (readMarkRef.current.key === key) readMarkRef.current = { key, id: 0 }; };
+      apiSend("POST", "/api/chat/read", { cousin: c.slug, user: chatUser, id: newest })
+        .then(({ r, d }) => {
+          if (r.ok && d && d.unread) window.dispatchEvent(new CustomEvent("fw-chat-unread", { detail: d.unread }));
+          else retry();
+        })
+        .catch(retry);
+    };
+    post();
+    document.addEventListener("visibilitychange", post);
+    return () => document.removeEventListener("visibilitychange", post);
+  }, [c?.slug, c?.chat, chatUser, messages, searchActive, showArchived]);
 
   // Follow the tail when a NEW message arrives, unless the user is clearly
   // reading history. Keying on the tail message id means we don't re-snap on

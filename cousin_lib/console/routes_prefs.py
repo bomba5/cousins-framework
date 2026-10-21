@@ -1,9 +1,10 @@
 """Per-user console preferences (docs/reference/console-api.md,
-"Preferences"). Today one: the sidebar groups, {groups, assignments}.
-They were a browser preference in local storage, so another browser or
-the phone's home-screen app never saw them; here they live on the
-server, one file per console user under data/console-prefs/, and every
-browser that user logs in from reads the same layout.
+"Preferences"). Two today: the sidebar groups, {groups, assignments},
+and the chat read marks routes_unread keeps under `chat_read`. They
+were browser state in local storage, so another browser or the phone's
+home-screen app never saw them; here they live on the server, one file
+per console user under data/console-prefs/, and every browser that
+user logs in from reads the same.
 
 Open mode (no users file) stores under one shared name."""
 from __future__ import annotations
@@ -12,6 +13,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 
 from cousin_lib.console import router
 from cousin_lib.console.app import HttpError
@@ -19,6 +21,9 @@ from cousin_lib.console.app import HttpError
 OPEN_USER = "_open"
 MAX_BYTES = 64 * 1024
 _SAFE_USER = re.compile(r"^[A-Za-z0-9_.@-]{1,64}$")
+# One console process writes these files; the lock keeps two writers of
+# one user's file (a sidebar save, a read mark) from dropping a change.
+_LOCK = threading.Lock()
 
 
 def _path(server, user):
@@ -52,6 +57,24 @@ def _write(path, data):
         raise
 
 
+def read(server, user):
+    """This user's preferences, {} before the first save."""
+    return _read(_path(server, user))
+
+
+def update(server, user, fn):
+    """fn(prefs) on this user's preferences, under the lock; the file is
+    written only when fn changed them. Returns what fn returns."""
+    path = _path(server, user)
+    with _LOCK:
+        prefs = _read(path)
+        before = json.dumps(prefs, sort_keys=True)
+        result = fn(prefs)
+        if json.dumps(prefs, sort_keys=True) != before:
+            _write(path, prefs)
+    return result
+
+
 def validate_sidebar(value):
     """{groups: [{id, name, collapsed}], assignments: {slug: group id}};
     at least one group, unique ids. Returns the normalised value."""
@@ -80,8 +103,7 @@ def validate_sidebar(value):
 def register():
     @router.route("GET", "/api/prefs/sidebar")
     def get_sidebar(req):
-        prefs = _read(_path(req.server, req.user))
-        return 200, {"sidebar": prefs.get("sidebar")}
+        return 200, {"sidebar": read(req.server, req.user).get("sidebar")}
 
     @router.route("POST", "/api/prefs/sidebar")
     def set_sidebar(req):
@@ -89,10 +111,9 @@ def register():
             raise HttpError(413, "sidebar preferences over %d bytes"
                             % MAX_BYTES)
         sidebar = validate_sidebar(req.json().get("sidebar"))
-        path = _path(req.server, req.user)
-        prefs = _read(path)
-        prefs["sidebar"] = sidebar
-        _write(path, prefs)
+        def put(prefs):
+            prefs["sidebar"] = sidebar
+        update(req.server, req.user, put)
         return 200, {"ok": True, "sidebar": sidebar}
 
 

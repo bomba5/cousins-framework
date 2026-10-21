@@ -29,6 +29,8 @@ function navEntries() {
 // made before the server kept it (docs/reference/console-api.md,
 // "Preferences").
 const SIDEBAR_KEY = "console_sidebar_v1";
+// Set once this browser's old read marks went to the server (#380).
+const READ_MOVED_KEY = "console_chat_read_moved";
 const DEFAULT_GROUPS = [{ id: "sessions", name: "Sessions", collapsed: false }];
 
 function loadSidebar() {
@@ -39,7 +41,7 @@ function loadSidebar() {
   return { groups: DEFAULT_GROUPS.slice(), assignments: {} };
 }
 
-function SidebarGroups({ cousins, activeCousin, view, showHidden, chatUserFor, onPick }) {
+function SidebarGroups({ cousins, activeCousin, view, showHidden, unread, onPick }) {
   const [config, setConfig] = React.useState(loadSidebar);
   const [contextMenu, setContextMenu] = React.useState(null);
   const [groupMenu, setGroupMenu] = React.useState(null); // {gid, x, y}
@@ -162,12 +164,10 @@ function SidebarGroups({ cousins, activeCousin, view, showHidden, chatUserFor, o
 
   const renderCousin = (c) => {
     const stopped = c.status !== "running";
-    let unread = false;
-    try {
-      const seen = parseInt(localStorage.getItem(chatSeenKey(c.slug, chatUserFor(c))) || "0", 10);
-      const lastMsg = c.lastMsgTs || 0;
-      unread = lastMsg > 0 && lastMsg > seen && !(activeCousin === c.slug && view === "chat");
-    } catch (e) {}
+    // The replies since this user last had the chat on screen, counted
+    // on the server (GET /api/chat/unread); none while it is open here.
+    const viewing = activeCousin === c.slug && view === "chat";
+    const n = viewing ? 0 : ((unread || {})[c.slug] || 0);
     return (
       <div
         key={c.slug}
@@ -177,15 +177,15 @@ function SidebarGroups({ cousins, activeCousin, view, showHidden, chatUserFor, o
         onDragEnd={() => setDraggingSlug(null)}
         onContextMenu={(e) => { e.preventDefault(); setContextMenu({ slug: c.slug, x: e.clientX, y: e.clientY }); }}
         onClick={stopped ? undefined : () => onPick(c.slug)}
-        title={stopped ? `@${c.slug} is stopped - start it from the Cousins view first` : `open chat with @${c.slug}` + (unread ? " (unread)" : "") + " (right-click to move)"}
+        title={stopped ? `@${c.slug} is stopped - start it from the Cousins view first` : `open chat with @${c.slug}` + (n ? ` (${n} unread)` : "") + " (right-click to move)"}
         style={(stopped || c.hidden) ? { opacity: stopped ? 0.5 : 0.7, cursor: stopped ? "not-allowed" : "grab" } : { cursor: "grab" }}
       >
         <Led state={c.status === "running" ? "running" : "stopped"} pulse={c.status === "running"} />
-        <span style={{ fontWeight: unread ? 600 : 400 }}>{(c.name || c.slug).toLowerCase()}</span>
-        {unread && (
-          <span title="unread messages"
-                style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%",
-                          background: "var(--accent)", marginLeft: 4 }} />
+        <span style={{ fontWeight: n ? 600 : 400 }}>{(c.name || c.slug).toLowerCase()}</span>
+        {n > 0 && (
+          <span className="unread-count" title={`${n} unread repl${n === 1 ? "y" : "ies"}`}>
+            {n > 9 ? "9+" : n}
+          </span>
         )}
         {c.hidden && <span className="badge" title="hidden (revealed by Settings: show hidden)" style={{ background: "oklch(from var(--fg-3) l c h / 0.25)" }}>hidden</span>}
       </div>
@@ -443,6 +443,9 @@ function App() {
   const [cousins, setCousins] = useStateApp([]);
   const [loops, setLoops] = useStateApp([]);
   const [activeCousin, setActiveCousin] = useStateApp(initialCousin);
+  // {slug: replies since this user last had the chat on screen}, from
+  // GET /api/chat/unread: null until the first answer.
+  const [unread, setUnread] = useStateApp(null);
 
   // The view and the cousin live in the address, replaced in place (no
   // history entries), so a reload, or a phone app restoring its WebView,
@@ -508,6 +511,45 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
+  // The unread counts: asked again on every snapshot, fleet refresh and
+  // chat-read event; the chat pane hands over the counts its own read
+  // mark answered with (fw-chat-unread), so this tab never waits for them.
+  const refreshUnread = () => {
+    apiGet("/api/chat/unread").then(d => { if (d && d.unread) setUnread(d.unread); });
+  };
+  useEffectApp(() => {
+    const onCounts = (e) => { if (e.detail) setUnread(e.detail); };
+    window.addEventListener("fw-chat-unread", onCounts);
+    return () => window.removeEventListener("fw-chat-unread", onCounts);
+  }, []);
+  // Once per browser: an older console kept the read mark here, as the
+  // time this browser last had each chat open. Where that time says it
+  // saw the cousin's newest reply, that reply's id goes to the server,
+  // so a dot this browser had cleared does not come back as a count;
+  // then the old marks go.
+  useEffectApp(() => {
+    if (!unread || !cousins.length || embedMode) return;
+    let moved = false;
+    try { moved = localStorage.getItem(READ_MOVED_KEY) === "1"; } catch (_e) { return; }
+    if (moved) return;
+    for (const c of cousins) {
+      if (!unread[c.slug] || !c.lastMsgId) continue;
+      const user = chatUserFor(c);
+      let seen = 0;
+      try { seen = parseInt(localStorage.getItem(chatSeenKey(c.slug, user)) || "0", 10); } catch (_e) {}
+      if (seen && seen >= (c.lastMsgTs || 0)) {
+        apiSend("POST", "/api/chat/read", { cousin: c.slug, user, id: c.lastMsgId })
+          .then(({ r, d }) => { if (r.ok && d && d.unread) setUnread(d.unread); })
+          .catch(() => {});
+      }
+    }
+    try {
+      Object.keys(localStorage).filter(k => k.startsWith("console_chat_seen_"))
+        .forEach(k => localStorage.removeItem(k));
+      localStorage.setItem(READ_MOVED_KEY, "1");
+    } catch (_e) {}
+  }, [unread, cousins]);
+
   // SSE event stream: the server sends a full snapshot on connect, then
   // deltas (docs/reference/console-api.md, "/api/events"). Reconnect backs off from
   // 1 s to 15 s; a reconnect costs a fresh snapshot, never data.
@@ -522,10 +564,16 @@ function App() {
       if (kind === "snapshot") {
         if (data.cousins) setCousins(data.cousins);
         if (data.loops) setLoops(data.loops);
+        refreshUnread();
       } else if (kind === "cousins-refresh") {
-        // Periodic full refresh so derived state like lastMsgTs (drives
-        // the unread dot) stays current.
+        // Periodic full refresh: the rows, and with them the unread
+        // counts a new reply has moved.
         if (Array.isArray(data)) setCousins(data);
+        refreshUnread();
+      } else if (kind === "chat-read") {
+        // Some page moved a read mark: ask for this user's counts again
+        // (the event names no user and no cousin).
+        refreshUnread();
       } else if (kind === "loops-refresh") {
         if (Array.isArray(data)) setLoops(data);
       } else if (kind === "cousin-status") {
@@ -682,7 +730,7 @@ function App() {
           activeCousin={activeCousin}
           view={view}
           showHidden={showHidden}
-          chatUserFor={chatUserFor}
+          unread={unread}
           onPick={(slug) => { setActiveCousin(slug); pickView("chat"); }}
         />
 

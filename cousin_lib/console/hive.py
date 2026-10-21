@@ -306,7 +306,7 @@ def remote_row(node, checkin_seconds, *, now=None):
         "memoryScope": None, "heartbeat": None, "flipAt": None,
         "model": None, "effort": None, "hidden": False, "auth": None,
         "attention": None, "active": False, "pid": None,
-        "uptime_seconds": None, "activity": "", "lastMsgTs": 0,
+        "uptime_seconds": None, "activity": "", "lastMsgTs": 0, "lastMsgId": 0,
         "tokensSpent": 0,
     }
 

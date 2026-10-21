@@ -14,7 +14,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   reloaded the supervisor. The dismiss now ends with the supervisor's
   rescan (its `reload`), and the result says how that went under
   `supervisor`. It works with a supervisor already running an older
-  release; nothing restarts.
+  release. The rescan is the same reload System's button and the
+  plugins route run, so it also retries any failing runner, bridge or
+  plugin.
 
 ## 3.56.0 - 2026-10-21
 

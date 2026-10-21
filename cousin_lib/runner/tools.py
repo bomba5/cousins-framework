@@ -29,6 +29,7 @@ from pathlib import Path
 
 from cousin_lib import atomic
 from cousin_lib import mcp_server
+from cousin_lib import skills
 from cousin_lib.delivery import parse_thread, thread_for_chat
 from cousin_lib.runner.base import SURFACE_KINDS, RunnerError
 from cousin_lib.status_sections import (NEXT_SECTION, OPEN_LOOPS, OPEN_LOOPS_LINE,
@@ -499,6 +500,34 @@ def _t_delete(ctx, a):
     return "deleted #%d" % item_id
 
 
+# ------------------------------------------------------------------ skill
+
+def _sk_list(ctx, a):
+    return skills.text_list(ctx.root, ctx.home, ctx.slug)
+
+
+def _sk_show(ctx, a):
+    return skills.text_show(ctx.root, ctx.home, ctx.slug, _required(a, "name", "show"))
+
+
+def _sk_draft(ctx, a):
+    name = _required(a, "name", "draft")
+    path = skills.write_draft(
+        ctx.home, name,
+        description=_required(a, "description", "draft"), body=_str(a, "body"),
+        context=_required(a, "context", "draft"),
+        side_effect=_required(a, "side_effect", "draft"),
+        scope=_str(a, "scope", "own") or "own",
+        metadata={"should-trigger": _str(a, "should_trigger"),
+                  "must-not-trigger": _str(a, "must_not_trigger")})
+    return skills.draft_written(ctx.home, ctx.slug, name, path)
+
+
+def _sk_diff(ctx, a):
+    text, _sha = skills.diff_draft(ctx.root, ctx.home, ctx.slug, _required(a, "name", "diff"))
+    return text or "no difference from what is approved"
+
+
 HANDLERS = {
     "memory": {"search": _m_search, "decide": _m_decide, "remember": _m_remember,
                "obsolete": _m_obsolete, "recall": _m_recall, "activity": _m_activity,
@@ -509,6 +538,7 @@ HANDLERS = {
     "meeting": {"say": _mt_say, "pass": _mt_pass, "minutes": _mt_minutes, "show": _mt_show},
     "tracker": {"add": _t_add, "update": _t_update, "state": _t_state, "list": _t_list,
                 "show": _t_show, "delete": _t_delete},
+    "skill": {"list": _sk_list, "show": _sk_show, "draft": _sk_draft, "diff": _sk_diff},
 }
 
 

@@ -1905,7 +1905,7 @@ function rpCompact(prev, add) {
   return out;
 }
 
-const RP_BOOT_KINDS = { runner: 1, policy: 1, mcp_config: 1, session: 1 };
+const RP_BOOT_KINDS = { runner: 1, policy: 1, mcp_config: 1, session: 1, skills: 1 };
 const RP_SKIP_SYSTEM = { vcs_state_changed: 1, background_tasks_changed: 1 };
 
 const RP_GATE_KEEPS = { gate: 1, text: 1, thinking: 1, usage: 1 };
@@ -2118,6 +2118,14 @@ function rpModel(events) {
     if (k === "harness" && !p.ok) {
       rows.push({ t: "line", boot: true, key, ev, cls: p.level === "error" ? "rp-err" : "rp-warn",
                   text: "harness · " + String(p.message || (p.problems || []).join("; ") || "version check failed") });
+      return;
+    }
+    // the skills a start loaded (runner/sdk.py, skills.export_plugins):
+    // part of the boot, a line of its own when one was left out
+    if (k === "skills" && (p.skipped || []).length) {
+      rows.push({ t: "line", boot: true, key, ev, cls: "rp-warn",
+                  text: "skills · " + (p.loaded || []).length + " loaded, not loaded: "
+                        + rpCut(p.skipped.map(s => (s.what || "?") + " (" + (s.why || "?") + ")").join("; "), 200) });
       return;
     }
     // a policy decision on one call (hooks.on_policy) is turn content;

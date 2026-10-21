@@ -14,8 +14,8 @@
    "source": "1b1b499a87df"
   },
   "chat.jsx": {
-   "output": "4127afbd74a0",
-   "source": "8bd6b7a75aa0"
+   "output": "f7eb941ed5d0",
+   "source": "5f398a811ab0"
   },
   "cousins.jsx": {
    "output": "28a36493867d",
@@ -48,6 +48,10 @@
   "plugins.jsx": {
    "output": "e045d8beee2e",
    "source": "e7d1d8496beb"
+  },
+  "skills.jsx": {
+   "output": "2d1301b6a0ee",
+   "source": "88274ed5e50b"
   },
   "system.jsx": {
    "output": "ca010c05b3c4",

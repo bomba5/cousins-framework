@@ -73,6 +73,7 @@ Each command has one class, so you know which ones to learn first:
 | `cousin-reason` | cousin | deprecated since 3.50.0: write and list reasoning capsules; record reasoning with `decide` instead; removed in 4.0.0 |
 | `cousin-reply` | cousin | a cousin's answer to a person, in its chat history |
 | `cousin-schedule` | cousin | a one-shot prompt at a future time |
+| `cousin-skill` | cousin | its skills: list, show, draft, diff; the operator approves in the console |
 | `cousin-self-portrait` | cousin | draft the cousin's self-portrait; a person commits it |
 | `cousin-tracker` | cousin | the install's list of work in flight; the console's Tracker page shows it |
 | `cousin-cycle` | internal | per-cousin session counters the boot packet reads |
@@ -705,6 +706,25 @@ so a replaced text can be read back. See
 cousin-tracker add "move the photo archive" --domain infra --tag q4
 cousin-tracker update 1 --add-note "half copied, rest tonight"
 cousin-tracker show 1 --history
+```
+
+## Skills
+
+`cousin-skill` is the terminal twin of a cousin's `skill` tool ([skills](reference/skills.md)).
+It acts for the cousin named by `--home` or `COUSIN_HOME`:
+
+- `list`: what loads at its next start, and its drafts.
+- `show NAME`: a draft, or a loaded skill as `plugin:name`.
+- `draft NAME --description ... --context personal|work|private --side-effect read-only|writes-local|outward [--scope own|shared] [--should-trigger ...] [--must-not-trigger ...]`: writes the draft's `SKILL.md`, the steps from `--body-file` or stdin.
+- `diff NAME`: the draft against what is approved.
+- `trigger-test NAME`: the draft's trigger test, which the console runs.
+
+Nothing here approves, rejects or removes a skill: the console does.
+
+```
+cousin-skill --home cousins/wren list
+cousin-skill --home cousins/wren draft board-check --description "Check a board. Use after a regen." \
+    --context personal --side-effect read-only --body-file steps.md
 ```
 
 ## Remote cousins

@@ -36,7 +36,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import accounts, boot, handover, review_gate, session, usage
+from cousin_lib import accounts, boot, handover, review_gate, session, skills, usage
 from cousin_lib.crashpoint import crashpoint
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
 from cousin_lib.runner import (auth, config_watch, cost_cap, envelope, extract, hooks,
@@ -649,8 +649,26 @@ class SdkRunner:
                                       system_prompt=system_prompt, session_store=self.session_store,
                                       mcp_servers=mcp_servers,
                                       hooks=hook_table,
+                                      plugins=self._skill_plugins(),
                                       max_buffer_size=STREAM_BUFFER_BYTES,
                                       extra_args=extra)
+
+    def _skill_plugins(self):
+        """This start's fresh export of the approved skills the cousin
+        loads, as local plugins (skills.export_plugins; settings files stay
+        unread). The stream says what loaded and what did not. A failure
+        loads none and says so: skills never stop a start."""
+        try:
+            paths, report = skills.export_plugins(self.root, self.home, self.tool_context.slug)
+        except Exception as err:  # noqa: BLE001 - a bad export costs the skills, never the start
+            paths, report = [], {"loaded": [], "skipped": [
+                {"what": "export", "why": "%s: %s" % (type(err).__name__, err)}]}
+        if self.stream is not None:
+            try:
+                self.stream.append("skills", report)
+            except Exception:  # noqa: BLE001 - the stream never fails a start
+                pass
+        return [{"type": "local", "path": str(path)} for path in paths]
 
     def _mcp_options(self, server, extra):
         """The `mcp_servers` option, and the file flag added to `extra`.
@@ -3177,6 +3195,52 @@ class _ScrubbedAuthEnv:
 # given. Without strict-mcp-config the CLI attaches the account's claude.ai
 # connectors whatever mcp_servers says, ~42k tokens read on every call.
 BARE_SESSION_ARGS = {"no-session-persistence": None, "strict-mcp-config": None}
+
+
+def skill_trigger_check(account, root, *, prompt, model=None, effort=None, plugin_dirs=(),
+                        timeout=120.0, client_factory=None):
+    """The skill trigger test's one turn (docs/reference/skills.md, "The
+    trigger test"): a bare, throwaway client like validate_account's, whose
+    only tool is Skill, with `plugin_dirs` loaded as local plugins. (skill,
+    detail): the `plugin:name` the model reaches for first on `prompt`, or
+    None when it answers without one."""
+    import shutil
+    import tempfile
+    sdk = _sdk()
+    env = accounts.account_env(account, root)
+    cwd = tempfile.mkdtemp(prefix="cousin-trigger-")
+    options = sdk.ClaudeAgentOptions(cwd=cwd, model=model, effort=effort, env=env,
+                                     setting_sources=[], tools=["Skill"], mcp_servers={},
+                                     max_turns=2, permission_mode="bypassPermissions",
+                                     plugins=[{"type": "local", "path": str(p)} for p in plugin_dirs],
+                                     extra_args=dict(BARE_SESSION_ARGS))
+    factory = client_factory or (lambda o: sdk.ClaudeSDKClient(options=o))
+
+    async def one_turn():
+        client = factory(options)
+        await client.connect()
+        try:
+            await client.query(prompt)
+            async for msg in client.receive_response():
+                if isinstance(msg, sdk.AssistantMessage):
+                    for block in msg.content or ():
+                        if isinstance(block, sdk.ToolUseBlock) and block.name == "Skill":
+                            return str((block.input or {}).get("skill") or ""), "ok"
+                elif isinstance(msg, sdk.ResultMessage):
+                    if msg.is_error or msg.subtype != "success":
+                        return None, "error: %s" % (msg.result or msg.subtype)
+                    return None, "ok"
+            return None, "the stream ended with no result"
+        finally:
+            await client.disconnect()
+
+    try:
+        with _ScrubbedAuthEnv():
+            return asyncio.run(asyncio.wait_for(one_turn(), timeout))
+    except asyncio.TimeoutError:
+        return None, "no answer within %.0fs" % timeout
+    finally:
+        shutil.rmtree(cwd, ignore_errors=True)
 
 
 def validate_account(account, root, *, model=None, effort=None, timeout=90.0,

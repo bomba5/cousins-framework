@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cousins-framework"
-version = "3.57.0"
+version = "3.58.0"
 description = "Persistent, co-located AI agents: identity, memory, lifecycle, inter-agent chat"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,6 +13,7 @@ authors = [{ name = "Jhonata Poma-Hansen" }]
 
 [project.scripts]
 cousin-gate = "cousin_lib.gate.cli:main"
+cousin-skill = "cousin_lib.skills:main"
 cousin-reply = "cousin_lib.reply:reply_main"
 cousin-chat = "cousin_lib.chat:chat_main"
 cousin-chat-import = "cousin_lib.chat_import:main"

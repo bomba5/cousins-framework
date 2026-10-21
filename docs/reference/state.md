@@ -99,6 +99,8 @@ built from it.
 | `data/opencode.runner.json` | config | `runner/opencode` | the opencode kind's own settings |
 | `data/harness-attribution-owned.json`, `.claude/cousin-tmux-owned.json` | transactional | `harness_settings` | what the framework wrote into the agent CLI's settings, so it removes only its own |
 | `data/.flip-in-progress.json` | runtime | none today (an older flip wrote it) | read by the console only |
+| `skill-drafts/<name>/` | transactional | the `skill` tool, `cousin-skill` | a cousin's drafts, never loaded |
+| `run/skills/<plugin>/` (with `.claude-plugin/plugin.json`) | projection | `skills.export_plugins`, at every runner start | rebuilt from the approved commits; read-only, refused to tools |
 
 ## The install
 
@@ -108,6 +110,8 @@ built from it.
 | `data/artifacts.db` | transactional | `artifacts` | path, sha256, size, job, commit |
 | `data/tracker.db` | transactional + raw event (`history`) | `tracker` | the backlog; a delete keeps a `deleted` row, with who and when, in its history |
 | `data/meetings.db` | transactional | `meetings` | meetings and their transcripts |
+| `skills/<repo>/` (git), `data/skills/approvals.jsonl`, `data/skills/private/approvals.jsonl` | transactional + raw event | `skills` (the console's approve and remove only) | the approved skills; a repository loads only while its `main` is at the commit its last approval record names, so the records win over git ([skills](skills.md)) |
+| `data/skills/trigger-tests/<slug>/<name>.json`, `data/skills/private/trigger-tests/<slug>/<name>.json` | transactional | `skills`, the console's trigger test | a draft's last trigger test; it counts only for the diff it was run on, and approval needs one |
 | `data/scheduled.db` | transactional | `schedule` | one-shot prompts |
 | `data/loop-requests.db`, `data/loops-state.json`, `data/loops-fires.jsonl` | transactional + raw event | `loops` | timed flips and fires; the daemon's state |
 | `data/outbox.db`, `data/inbound-seen.db` | transactional | `outbox`, `peer_inbound` | messages to and from other installs, deduplicated by id |

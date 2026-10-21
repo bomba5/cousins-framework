@@ -41,7 +41,7 @@ import inspect
 import os
 import threading
 
-from cousin_lib import perimeter, recording
+from cousin_lib import perimeter, recording, skills
 from cousin_lib.runner.envelope import CONTEXT_MARK
 
 RECORD_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStop")
@@ -195,7 +195,9 @@ class ReplyLedger:
 def gate(policy, payload, *, root=None, home=None, slug=None):
     """The PreToolUse decision for one hook payload, `(decision,
     reason)`: the memory perimeter for a background pass, then a
-    subagent's reply that names no thread, then policy.toml decides. The
+    subagent's reply that names no thread, then policy.toml decides; before
+    all three, for every session, a write to the skills repositories, the
+    exports or their approval records (skills.guard_tool). The
     policy callback enforces it and the recorder consults it, so the two
     never disagree.
 
@@ -216,6 +218,12 @@ def gate(policy, payload, *, root=None, home=None, slug=None):
     of course. The deny is per call and names the path, so it reads as a
     boundary rather than a failure."""
     tool_name, tool_input = payload.get("tool_name"), payload.get("tool_input")
+    # Skills change only through the console's approval, for every session
+    # and not only a background pass (docs/reference/skills.md).
+    refusal = skills.guard_tool(tool_name, tool_input, root=root, home=home,
+                                cwd=payload.get("cwd") or home)
+    if refusal:
+        return "deny", refusal
     if payload.get("agent_id"):
         refusal = perimeter.check_tool(tool_name, tool_input, root=root,
                                        cwd=payload.get("cwd"), home=home, slug=slug)

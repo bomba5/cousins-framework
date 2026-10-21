@@ -288,6 +288,7 @@ COMMANDS = {
                            SHARED_MESSAGE),
     "cousin-spawn": (["--sync-template", "wren"], SHARED_MESSAGE),
     "cousin-schedule": (["tick"], SHARED_MESSAGE),
+    "cousin-skill": (["list"], _HOME),
     "cousin-job": (["list"], SHARED_MESSAGE),
     "cousin-tracker": (["list"], SHARED_MESSAGE),
     "cousin-meeting": (["list"], SHARED_MESSAGE),

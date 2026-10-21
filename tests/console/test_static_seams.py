@@ -33,9 +33,9 @@ def _component(text, name):
     return text[start:start + 1 + (m.start() if m else len(rest))]
 
 
-PACKAGES = ("agent", "migrate", "accounts", "mcp", "system")
+PACKAGES = ("agent", "migrate", "accounts", "mcp", "system", "skills")
 PACKAGE_ROUTES = ("routes_agent", "routes_migrate", "routes_lifecycle",
-                  "routes_accounts", "routes_mcp", "routes_system")
+                  "routes_accounts", "routes_mcp", "routes_system", "routes_skills")
 
 
 class RouteSeam(unittest.TestCase):

@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.56.1 - 2026-10-21
+
+### Fixed
+
+- **A removed cousin leaves the supervisor too.** Dismissing a cousin
+  (the console's delete) stopped its runner, archived the home and
+  deleted it, but never told the supervisor, so the System view kept
+  listing its runner, stopped and with a start button, until something
+  reloaded the supervisor. The dismiss now ends with the supervisor's
+  rescan (its `reload`), and the result says how that went under
+  `supervisor`. It works with a supervisor already running an older
+  release; nothing restarts.
+
 ## 3.56.0 - 2026-10-21
 
 ### Added

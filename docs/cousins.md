@@ -221,8 +221,9 @@ exits 2 with the reason, and the console answers 409
 ([migrating](migrating.md#a-cousin-with-no-runner)).
 
 To get rid of a cousin, use "dismiss" in the console: it stops it, archives
-the home (without `.secrets/`) to `data/dismissed/<slug>-<timestamp>.tar.gz`
-and removes it.
+the home (without `.secrets/`) to `data/dismissed/<slug>-<timestamp>.tar.gz`,
+removes it, and has the supervisor rescan, so its runner leaves the System
+view too.
 
 ## Models and effort
 

@@ -37,7 +37,7 @@ function SkillMeta({ metadata }) {
   const always = ["hosts", "reads"];
   const has = (k) => Object.prototype.hasOwnProperty.call(m, k);
   const rows = keys.filter((k) => always.includes(k) || has(k) && m[k] !== "");
-  return /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px", ...SKILL_MONO } }, rows.map((k) => /* @__PURE__ */ React.createElement(React.Fragment, { key: k }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, k), !has(k) ? /* @__PURE__ */ React.createElement("span", { className: "muted" }, "not declared") : m[k] === "" ? /* @__PURE__ */ React.createElement("span", { className: "muted" }, "none") : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-1)" } }, m[k]))));
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px", ...SKILL_MONO } }, rows.map((k) => /* @__PURE__ */ React.createElement(React.Fragment, { key: k }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, k), !has(k) ? /* @__PURE__ */ React.createElement("span", { className: "muted" }, "not declared") : m[k] === "" ? /* @__PURE__ */ React.createElement("span", { className: "muted" }, "none") : /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-1)", overflowWrap: "anywhere" } }, m[k]))));
 }
 function SkillTrigger({ result }) {
   if (!result) return /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "not run on this version");
@@ -47,11 +47,66 @@ function SkillTrigger({ result }) {
   };
   return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } }, line("should-trigger", "should fire"), line("must-not-trigger", "must not fire"), /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "on ", result.model, ", ", result.at));
 }
+function SkillOutside({ d, base, onAllowed }) {
+  const o = d.outside;
+  const [up, setUp] = React.useState(null);
+  const [showLicence, setShowLicence] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  React.useEffect(() => {
+    setUp(null);
+    apiSend("GET", `${base}/upstream`).then(({ r, d: x }) => setUp(r.ok ? x : { error: x && x.error || `HTTP ${r.status}` }));
+  }, [base, d.diff_sha256]);
+  const run = o.dry_run;
+  const scripts = o.scripts || [];
+  const row = (label, value) => /* @__PURE__ */ React.createElement("div", { style: { display: "contents" } }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, label), /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-1)", overflowWrap: "anywhere" } }, value));
+  return /* @__PURE__ */ React.createElement("div", { "data-skill-outside": true, style: { display: "flex", flexDirection: "column", gap: 6, ...SKILL_MONO } }, /* @__PURE__ */ React.createElement("div", { style: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px" } }, row("from outside", `${o.url || "?"} @ ${(o.commit || "?").slice(0, 12)} : ${o.folder || "?"}`), row("licence", /* @__PURE__ */ React.createElement("span", null, o.license || "none", " (", o.license_file || "no licence file", ")", " ", o.license_text && /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn ghost",
+      style: { fontSize: 10, padding: "0 6px" },
+      onClick: () => setShowLicence((s) => !s)
+    },
+    showLicence ? "hide" : "read it"
+  ))), row("can run", scripts.length ? scripts.map((s) => `${s.path} (${s.why})`).join("; ") : "nothing"), row("source now", !up ? /* @__PURE__ */ React.createElement("span", { className: "muted" }, "fetching it again...") : up.error ? /* @__PURE__ */ React.createElement("span", { style: { color: "var(--red)" } }, up.error) : up.differ.length ? /* @__PURE__ */ React.createElement("span", { style: { color: "var(--red)" } }, "not as published: ", up.differ.join(", ")) : /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "pill green" }, "as published"), " past the frontmatter the import writes")), up && !up.error && up.not_kept.length > 0 && row("not kept", up.not_kept.map(
+    (k) => (up.upstream || {})[k] ? `${k} (${up.upstream[k]})` : k
+  ).join(", ")), row("dry run", /* @__PURE__ */ React.createElement("span", null, 'task: "', o.task || "none", '"', " ", !run && /* @__PURE__ */ React.createElement(
+    SysConfirmButton,
+    {
+      label: "allow a dry run",
+      tone: "primary",
+      disabled: busy || !o.task,
+      confirmLabel: "click again: I read its scripts; the cousin may run the task once",
+      onConfirm: async () => {
+        setBusy(true);
+        setErr(null);
+        try {
+          const res = await skillPost(`${base}/dry-run/allow`, { diff_sha256: d.diff_sha256 });
+          onAllowed(res.dry_run, res.told);
+        } catch (e) {
+          setErr(String(e.message || e));
+        } finally {
+          setBusy(false);
+        }
+      }
+    }
+  ), run && run.job == null && /* @__PURE__ */ React.createElement("span", { className: "muted" }, "allowed by ", run.allowed_by, " at ", run.allowed_at, "; waiting for the cousin's job"), run && run.job != null && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: `pill ${run.pass ? "green" : "red"}` }, run.pass ? "pass" : "fail"), " ", "job #", run.job, " ", run.status, ", exit ", String(run.exit_code), run.log ? ` · log ${run.log}` : "")))), showLicence && /* @__PURE__ */ React.createElement("pre", { style: {
+    ...SKILL_MONO,
+    whiteSpace: "pre-wrap",
+    maxHeight: 300,
+    overflow: "auto",
+    background: "var(--bg-0)",
+    padding: 10,
+    borderRadius: 6,
+    margin: 0
+  } }, o.license_text), err && /* @__PURE__ */ React.createElement(SysNote, { msg: { ok: false, text: err } }));
+}
 function SkillDraftReview({ slug, name, onDone }) {
   const [d, setD] = React.useState(null);
   const [err, setErr] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [reason, setReason] = React.useState("");
+  const [told, setTold] = React.useState(null);
   const base = `/api/cousins/${skillPath(slug)}/skills/drafts/${skillPath(name)}`;
   React.useEffect(() => {
     setD(null);
@@ -73,14 +128,19 @@ function SkillDraftReview({ slug, name, onDone }) {
   if (!d) return /* @__PURE__ */ React.createElement("div", { className: "muted", style: SKILL_MONO }, "loading...");
   const blocked = (d.problems || []).length > 0;
   const untested = !d.trigger;
-  const missed = !!d.trigger && !d.trigger.pass;
+  const run = d.outside ? d.outside.dry_run : null;
+  const unrun = !!d.outside && !(run && run.job != null);
+  const missed = !!d.trigger && !d.trigger.pass || !!run && run.job != null && !run.pass;
   return /* @__PURE__ */ React.createElement("div", { style: {
     display: "flex",
     flexDirection: "column",
     gap: 10,
     paddingLeft: 12,
     borderLeft: "2px solid var(--hair)"
-  } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", ...SKILL_MONO } }, /* @__PURE__ */ React.createElement(SkillSideEffect, { value: (d.metadata || {})["side-effect"] }), /* @__PURE__ */ React.createElement("span", null, "goes to ", d.repo || "?", ":", d.folder || "?", "/", d.name), /* @__PURE__ */ React.createElement("span", { className: "muted" }, "files: ", (d.files || []).join(", "))), blocked && /* @__PURE__ */ React.createElement(SysNote, { msg: { ok: false, text: d.problems.join("; ") } }), /* @__PURE__ */ React.createElement(SkillMeta, { metadata: d.metadata }), /* @__PURE__ */ React.createElement(SkillDiff, { text: d.diff }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "flex-start" } }, /* @__PURE__ */ React.createElement(
+  } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", ...SKILL_MONO } }, /* @__PURE__ */ React.createElement(SkillSideEffect, { value: (d.metadata || {})["side-effect"] }), /* @__PURE__ */ React.createElement("span", null, "goes to ", d.repo || "?", ":", d.folder || "?", "/", d.name), /* @__PURE__ */ React.createElement("span", { className: "muted", style: { overflowWrap: "anywhere" } }, "files: ", (d.files || []).join(", "))), blocked && /* @__PURE__ */ React.createElement(SysNote, { msg: { ok: false, text: d.problems.join("; ") } }), /* @__PURE__ */ React.createElement(SkillMeta, { metadata: d.metadata }), d.outside && /* @__PURE__ */ React.createElement(SkillOutside, { d, base, onAllowed: (entry, ok) => {
+    setD((x) => ({ ...x, outside: { ...x.outside, dry_run: entry } }));
+    setTold(ok ? `${slug} was told to run it` : `${slug} could not be told: ask it in the chat`);
+  } }), told && /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, told), /* @__PURE__ */ React.createElement(SkillDiff, { text: d.diff }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "flex-start" } }, /* @__PURE__ */ React.createElement(
     "button",
     {
       className: "btn",
@@ -95,10 +155,10 @@ function SkillDraftReview({ slug, name, onDone }) {
     SysConfirmButton,
     {
       label: missed ? "approve anyway" : "approve",
-      confirmLabel: missed ? "click again: approve despite the failed trigger test" : "click again: commit it and load it at the next start",
+      confirmLabel: missed ? "click again: approve despite a failed check" : "click again: commit it and load it at the next start",
       tone: "primary",
       small: false,
-      disabled: busy || blocked || !d.diff || untested,
+      disabled: busy || blocked || !d.diff || untested || unrun,
       onConfirm: () => act(async () => {
         const res = await skillPost(`${base}/approve`, { diff_sha256: d.diff_sha256 });
         onDone({ ok: true, text: `approved ${d.name}: ${res.note}` });
@@ -293,4 +353,4 @@ registerSlot("inspector.panels", {
   order: 35,
   render: ({ cousin }) => /* @__PURE__ */ React.createElement(CousinSkillsPanel, { cousin })
 });
-Object.assign(window, { SkillsSystemView, CousinSkillsPanel, SkillDraftReview, SkillApproved });
+Object.assign(window, { SkillsSystemView, CousinSkillsPanel, SkillDraftReview, SkillApproved, SkillOutside });

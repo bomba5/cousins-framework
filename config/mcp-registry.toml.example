@@ -200,21 +200,23 @@ argv = ["cancel", "{id}"]
 
 [tools.skill]
 command = "cousin-skill"
-description = "Your skills (procedures you load when you need them): list what loads at your next start and your drafts, show one, write a draft, diff a draft against what is approved. The operator approves drafts in the console; nothing here approves, rejects or removes a skill."
+description = "Your skills (procedures you load when you need them): list what loads at your next start and your drafts, show one, write a draft, import one published outside, diff a draft against what is approved, record the job that ran a dry run. The operator approves drafts in the console; nothing here approves, rejects or removes a skill."
 
 [tools.skill.properties]
-name = { type = "string", description = "a draft's name, or plugin:name for a loaded skill (show, draft, diff)" }
+name = { type = "string", description = "a draft's name, or plugin:name for a loaded skill (show, draft, diff, dry-run); another name for the draft (import)" }
 description = { type = "string", description = "one line: what it does and when to use it (draft)" }
-context = { type = "string", enum = ["personal", "work", "private"], description = "the repository it belongs in (draft)" }
-side_effect = { type = "string", enum = ["read-only", "writes-local", "outward"], description = "what it can change; an outward step stops at the operator's go (draft)" }
-scope = { type = "string", optional = true, enum = ["own", "shared"], description = "your own folder (default), or shared/ for a general skill in personal (draft)" }
-should_trigger = { type = "string", optional = true, description = "a prompt that should make you use it, for the trigger test (draft)" }
-must_not_trigger = { type = "string", optional = true, description = "a prompt that must not (draft)" }
-hosts = { type = "string", optional = true, description = "every host it may contact, comma-separated; \"\" for none (draft)" }
-reads = { type = "string", optional = true, description = "what it reads, pinned: repo@commit:path or path#sha256:<hex>, comma-separated (draft)" }
-rests_on = { type = "string", optional = true, description = "paths, tool versions and memory topics it depends on, comma-separated (draft)" }
-source = { type = "string", optional = true, description = "a skill from outside: <url>@<full commit> (draft)" }
-license = { type = "string", optional = true, description = "an SPDX identifier; required with source (draft)" }
+context = { type = "string", enum = ["personal", "work", "private"], description = "the repository it belongs in (draft, import)" }
+side_effect = { type = "string", enum = ["read-only", "writes-local", "outward"], description = "what it can change; an outward step stops at the operator's go (draft, import)" }
+scope = { type = "string", optional = true, enum = ["own", "shared"], description = "your own folder (default), or shared/ for a general skill in personal (draft, import)" }
+should_trigger = { type = "string", optional = true, description = "a prompt that should make you use it, for the trigger test (draft, import)" }
+must_not_trigger = { type = "string", optional = true, description = "a prompt that must not (draft, import)" }
+hosts = { type = "string", optional = true, description = "every host it may contact, comma-separated; \"\" for none (draft, import)" }
+reads = { type = "string", optional = true, description = "what it reads, pinned: repo@commit:path or path#sha256:<hex>, comma-separated (draft, import)" }
+rests_on = { type = "string", optional = true, description = "paths, tool versions and memory topics it depends on, comma-separated (draft, import)" }
+source = { type = "string", optional = true, description = "a skill from outside: <https url>@<full commit>:<folder> (import; draft)" }
+license = { type = "string", optional = true, description = "an SPDX identifier its licence file reads as; required with source (draft; import finds it)" }
+dry_run_task = { type = "string", optional = true, description = "a skill from outside: the sample task its dry run does (import, draft)" }
+job = { type = "integer", optional = true, description = "the job that ran the allowed dry run (dry-run)" }
 body = { type = "string", description = "the steps, in Markdown (draft)" }
 
 [tools.skill.commands.list]
@@ -225,8 +227,15 @@ argv = ["show", "{name}"]
 
 [tools.skill.commands.draft]
 argv = ["draft", "{name}", "--description", "{description}", "--context", "{context}", "--side-effect", "{side_effect}"]
-options = { scope = "--scope", should_trigger = "--should-trigger", must_not_trigger = "--must-not-trigger", hosts = "--hosts", reads = "--reads", rests_on = "--rests-on", source = "--source", license = "--license" }
+options = { scope = "--scope", should_trigger = "--should-trigger", must_not_trigger = "--must-not-trigger", hosts = "--hosts", reads = "--reads", rests_on = "--rests-on", source = "--source", license = "--license", dry_run_task = "--dry-run-task" }
 stdin = ["body"]
+
+[tools.skill.commands.import]
+argv = ["import", "{source}", "--context", "{context}", "--side-effect", "{side_effect}"]
+options = { name = "--name", scope = "--scope", should_trigger = "--should-trigger", must_not_trigger = "--must-not-trigger", dry_run_task = "--dry-run-task", hosts = "--hosts", reads = "--reads", rests_on = "--rests-on", license = "--license" }
+
+[tools.skill.commands.dry-run]
+argv = ["dry-run", "{name}", "--job", "{job}"]
 
 [tools.skill.commands.diff]
 argv = ["diff", "{name}"]

@@ -3,8 +3,9 @@
 **Status:** phase 1 is built (3.58.0, completed in 3.59.0): the repositories and approval
 records, loading on the `sdk` and `tmux` [lanes](../glossary.md#lane), the guard, the `skill` tool
 and `cousin-skill`, the console's inspect, approve, reject and remove, the
-trigger test, and the console setting for which repositories load. Phases 2 to 4 (installing from outside, proposals,
-staleness checks) are not built yet. Agreed in a team meeting (2026-10-21). Requirement words follow RFC 2119.
+trigger test, and the console setting for which repositories load. Phase 2,
+installing a skill from outside, is built in 3.60.0. Phases 3 and 4
+(proposals, staleness checks) are not built yet. Agreed in a team meeting (2026-10-21). Requirement words follow RFC 2119.
 
 A skill is a procedure a [cousin](../glossary.md#cousin) loads when it needs it: a folder with a
 `SKILL.md` (a name, a one-line "what it does and when to use it", then the
@@ -101,7 +102,10 @@ approval refuse a host that is not a host name, a `reads` pin in neither
 form or not pinned to a full commit, a `source` that is not a URL pinned to a
 full commit, a `license` that is not an
 SPDX expression, and a `source` without a `license`. Loading does not check
-them, so a format rule never unloads an approved skill.
+them, so a format rule never unloads an approved skill. Reading the
+frontmatter is the one rule loading shares: a value it cannot read (a
+double-quoted one with an escape JSON lacks) keeps that skill from loading,
+with the reason.
 
 Public interface, under the same rule (adding is MINOR, renaming or
 removing is MAJOR): these metadata keys, the `[skills] repos` key in
@@ -134,7 +138,7 @@ A cousin loads `shared/` (from `personal`) and its own `<slug>/` folder from
 each repository it lists. It never loads another cousin's folder. Nothing
 cousin-specific is shared: `shared/` holds only general procedures,
 written fresh for it (never stripped down from a work skill) and passed by
-the operator, who asks other cousins to review one when he wants to.
+the operator, who asks other cousins to review one when it fits.
 
 "Per cousin" means *loaded* only by that cousin, not hidden: every cousin
 runs as the same OS user and can read every folder with Bash. A private
@@ -187,8 +191,8 @@ tool still answers: `list` says "none: this lane loads no skills".
 
 A cousin drafts a skill as plain files in `<home>/skill-drafts/<name>/`,
 after the operator said yes to it. Cousins never commit to a skills
-repository: every commit there is the operator's approval, made by the
-console as him, so the house commit rule holds unchanged.
+repository: every commit there is an approval, made by the console as
+the operator, so the house commit rule holds unchanged.
 
 - **A draft never loads.** Only the approved state does.
 - **Where it goes** follows its frontmatter: `metadata.context` names the
@@ -265,6 +269,75 @@ in a child process and keeps the last result in
 Bash; the `tmux` lane has no gate), so a session does not write the pass
 by accident.
 
+## Installing a skill from outside
+
+A skill from outside is a folder with a `SKILL.md` in someone else's git
+repository, such as `skills/<name>/` in github.com/anthropics/skills. It
+enters the way a skill written here does: as a draft, approved in the
+console. This section adds how the draft is made and what the approve view
+shows for it. Agreed with the operator (2026-10-21).
+
+- **Importing.** After the operator said yes to it, a cousin imports with
+  the `skill` tool's `import` (or `cousin-skill import`). `source` names the
+  repository, the full commit and the skill's folder,
+  `<https url>@<commit>:<folder>`, and the call carries the draft's own keys
+  (`context`, `side-effect`, the trigger prompts, `dry-run-task` and the
+  rest). The framework fetches exactly that commit, depth 1, into a
+  temporary repository: no branch or tag is followed, and no credential,
+  hook, submodule or global git setting is used. git checks every object
+  it receives, and runs with none of the framework's git or askpass
+  variables and a home of its own, so no askpass, injected setting or
+  `~/.netrc` reaches the fetch. The URL MUST be `https://`.
+- **Byte for byte.** The draft is the folder as published. The framework
+  writes only `SKILL.md`'s frontmatter: upstream's `name` (or the one asked
+  for), `description` and `compatibility`, the licence as an SPDX id, the
+  draft's keys and `source`, under a comment line saying so (an
+  Apache-2.0 file changed is marked, as that licence asks). Upstream's
+  other frontmatter keys are not kept and are named, `allowed-tools`
+  first: a skill never pre-approves tools here, the policy hook decides.
+  An edit past the frontmatter is refused at approval; a skill that needs
+  real changes is written here instead.
+- **Refused at import:** a path in the folder with an empty, `.`, `..` or
+  `.git` part (in any case), a backslash or a control character, a symlink
+  or a submodule in the folder, no `SKILL.md`, over 2 MiB, no licence file in the folder or at the
+  repository's root (one at the root is copied into the folder), a licence
+  the repository does not take, a side effect of `outward`, and the `work`
+  repository.
+- **Licences.** A skill from outside carries a licence that allows copying
+  and changing. The framework reads the licence file and states its SPDX
+  id; `license` given by hand MUST be one the file reads as. `personal` and
+  `private` take Apache-2.0, BSD-3-Clause, BSD-2-Clause, MIT, ISC,
+  Unlicense, CC0-1.0 and CC-BY-4.0; `work` takes none until the employer's
+  policy is known. The lists are tuned as needed. Source-available terms
+  are out: Anthropic's document skills (`docx`, `pdf`, `pptx`, `xlsx`)
+  forbid keeping copies outside Anthropic's services and making derivative
+  works, which is what an import is.
+- **The approve view** for a draft with `source` adds where it came from
+  (URL, commit, folder), the licence and its file to read, the files an
+  agent could run (under `scripts/`, executable, starting with `#!`, or
+  with a script's suffix), and the source fetched again now: as published
+  past the frontmatter, or the paths that are not, and upstream's keys not
+  kept with their values.
+- **The dry run.** After reading the scripts, the operator allows a dry
+  run of the version shown. The cousin is told on its system [thread](../glossary.md#thread), does
+  the draft's `dry-run-task` once as a job (the `job` tool's `run`) and
+  records it with the `skill` tool's `dry-run`. The framework reads the job
+  row: the cousin's own, ended, started after the allow, with an exit code.
+  One allow takes one run: another needs another allow, so the operator
+  sees a failed one before there is a second. Approval needs that record
+  on the very diff shown; a failed one is the
+  operator's call, like a failed trigger test. The allow and the job are
+  kept in `<install>/data/skills/dry-runs/<slug>/<name>.json`
+  (`data/skills/private/dry-runs/` for a cousin that loads `private`).
+- **Approval** fetches the source once more and refuses a draft that is
+  not as published, then records `source` and the dry run's outcome
+  (`dry_run`: `pass` or `fail`) beside the rest.
+- **An update** is a new import at a newer commit, over the draft or the
+  approved skill: the diff shows what upstream changed, and it is approved
+  like any change.
+- **Not here:** plugin marketplaces (`marketplace.json`), npm, archive and
+  command sources, private repositories, and update checks (phase 4).
+
 ## Proposals
 
 Every cousin follows an operator rule: when it notices it is repeating
@@ -317,6 +390,7 @@ check:
    reject and remove, per cousin (inspector) and for `shared/` (System);
    the trigger test.
 2. Installing a skill from outside: a pinned commit, a licence, its text and
-   scripts reviewed, terms of use, a dry run on this host.
+   scripts reviewed, terms of use, a dry run on this host
+   ([above](#installing-a-skill-from-outside)).
 3. Proposals.
 4. Staleness: drift flags, scheduled checks, usage.

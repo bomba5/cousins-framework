@@ -3,6 +3,46 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.60.0 - 2026-10-21
+
+### Added
+
+- **Skills from outside, phase 2** ([reference](docs/reference/skills.md#installing-a-skill-from-outside)).
+  A cousin imports a skill someone else published with the `skill` tool's
+  `import` or `cousin-skill import <https url>@<full commit>:<folder>`.
+  Exactly that commit is fetched (depth 1, no credentials, hooks,
+  submodules, global git settings or git variables of ours, every object
+  checked by git), and the folder becomes a draft as published: only its `SKILL.md` frontmatter is written by the framework,
+  under a line saying so. Upstream's `allowed-tools` and other keys are not
+  kept and are named.
+  - Refused at import: a path with an empty, `.`, `..` or `.git` part, a
+    backslash or a control character, a symlink or a submodule, no
+    `SKILL.md`, over 2 MiB, no licence file, a licence the repository does not take, `outward`,
+    and the `work` repository. `personal` and `private` take open
+    licences only (Apache-2.0, BSD, MIT, ISC, Unlicense, CC0, CC-BY), each
+    found from the licence file and stated as its SPDX id.
+  - The approve view shows where it came from, the licence file to read,
+    the files an agent could run, and the source fetched again, as
+    published past the frontmatter or not.
+  - A dry run before approval. The operator allows it after reading the
+    scripts. The cousin is told on its system thread, does the draft's
+    `dry-run-task` once as a job, and records it with `skill dry-run NAME
+    --job ID`. The framework reads the job row (its owner, its end, its
+    exit code), so the result is the job's. One allow takes one run.
+  - Approval fetches the source again, refuses any change past the
+    frontmatter, needs the dry run on the diff shown (a failed one is the
+    operator's call), and records `source` and `dry_run`.
+- Console routes `GET .../skills/drafts/<name>/upstream` and `POST
+  .../skills/drafts/<name>/dry-run/allow`, and the draft's `outside` view.
+  A new delivery source, `skill`, carries the dry-run notice.
+
+### Changed
+
+- `metadata.source` takes an optional `:<folder>` after the commit.
+- A draft with a `source` answers to the rules for a skill from outside
+  (its folder named, an open licence its licence file reads as, a
+  `dry-run-task`), whether imported or written by hand.
+
 ## 3.59.0 - 2026-10-21
 
 ### Added

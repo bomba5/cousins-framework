@@ -8,6 +8,7 @@ import pathlib
 import tempfile
 
 from cousin_lib import skills
+from cousin_lib.console import routes_skills
 from tests.console._harness import ConsoleCase
 
 RUNNER = '\n[agent]\nrunner = "fake"\n'
@@ -184,3 +185,95 @@ class TestLoggedInApprover(SkillsRoutesCase):
         status, body = self.approve("wren")
         self.assertEqual(status, 200, body)
         self.assertEqual(body["record"]["user"], "ana")
+
+
+class TestFromOutside(SkillsRoutesCase):
+    """A draft imported from outside: the review shows where it came from
+    and its licence, fetches the source again, takes the operator's allow
+    for a dry run, and approves only with the dry run recorded. The source
+    is an https URL; the fetch reads a local repository instead."""
+
+    def setUp(self):
+        super().setUp()
+        from unittest import mock
+        from tests.test_skills import make_upstream
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.upstream, self.commit = make_upstream(tmp.name)
+        local, real = "file://%s" % self.upstream, skills.fetch_folder
+        self.timeouts = []
+
+        def fetch(_url, commit, folder, **kw):
+            self.timeouts.append(kw.get("timeout"))
+            return real(local, commit, folder, schemes=("file",))
+        patcher = mock.patch.object(skills, "fetch_folder", fetch)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.source = "https://example.test/wren-lab/skills@%s:skills/board-check" % self.commit
+        skills.import_draft(self.wren, "wren", self.source, context="personal",
+                            side_effect="read-only",
+                            metadata=dict(PROMPTS, **{"dry-run-task": "run scripts/check.py"}))
+
+    def test_review_allow_a_dry_run_then_approve(self):
+        self.serve()
+        base = "/api/cousins/wren/skills/drafts/board-check"
+        status, d = self.get(base)
+        self.assertEqual(status, 200, d)
+        o = d["outside"]
+        self.assertEqual((o["license"], o["folder"], o["task"], o["commit"]),
+                         ("MIT", "skills/board-check", "run scripts/check.py", self.commit))
+        self.assertIn("Permission is hereby granted", o["license_text"])
+        self.assertEqual([s["path"] for s in o["scripts"]], ["scripts/check.py"])
+        self.assertIsNone(o["dry_run"])
+        status, up = self.get(base + "/upstream")
+        self.assertEqual(status, 200, up)
+        self.assertEqual(up["differ"], [])
+        self.assertEqual(up["not_kept"], ["allowed-tools", "license", "metadata"])
+        self.assertEqual(up["upstream"]["allowed-tools"], "Bash(git:*) Read")
+        self.run_trigger("wren")
+        d = self.get(base)[1]
+        status, body = self.post(base + "/approve", {"diff_sha256": d["diff_sha256"]})
+        self.assertEqual(status, 409, body)
+        self.assertIn("no dry run on this version", body["error"])
+        status, body = self.post(base + "/dry-run/allow", {"diff_sha256": "0" * 64})
+        self.assertEqual(status, 409, body)
+        status, body = self.post(base + "/dry-run/allow", {"diff_sha256": d["diff_sha256"]})
+        self.assertEqual(status, 200, body)
+        self.assertIn("told", body)
+        allowed = body["dry_run"]
+        self.assertTrue(allowed["allowed_by"])
+        self.assertEqual(self.get(base)[1]["outside"]["dry_run"]["allowed_at"],
+                         allowed["allowed_at"])
+        skills.record_dry_run(self.root, self.wren, "wren", "board-check", 9, job={
+            "spawned_by": "wren", "status": "done", "exit_code": 0,
+            "started_at": allowed["allowed_at"]})
+        d = self.get(base)[1]
+        self.assertEqual((d["outside"]["dry_run"]["job"], d["outside"]["dry_run"]["pass"]),
+                         (9, True))
+        self.timeouts.clear()
+        status, body = self.post(base + "/approve", {"diff_sha256": d["diff_sha256"]})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(set(self.timeouts), {routes_skills.FETCH_TIMEOUT})   # the page waits
+        self.assertEqual((body["record"]["source"], body["record"]["dry_run"]),
+                         (self.source, "pass"))
+
+    def test_a_source_that_cannot_be_fetched_says_why(self):
+        from unittest import mock
+
+        def gone(*_a, **_kw):
+            raise skills.SkillError("fetching https://example.test/wren-lab/skills: not found")
+        self.serve()
+        with mock.patch.object(skills, "fetch_folder", gone):
+            status, body = self.get("/api/cousins/wren/skills/drafts/board-check/upstream")
+        self.assertEqual(status, 409, body)
+        self.assertIn("not found", body["error"])
+
+    def test_a_draft_written_here_has_no_outside_part_and_no_dry_run(self):
+        self.draft(self.wren, name="local-check")
+        self.serve()
+        base = "/api/cousins/wren/skills/drafts/local-check"
+        d = self.get(base)[1]
+        self.assertIsNone(d["outside"])
+        status, body = self.post(base + "/dry-run/allow", {"diff_sha256": d["diff_sha256"]})
+        self.assertEqual(status, 409, body)
+        self.assertIn("only a skill from outside", body["error"])

@@ -1040,11 +1040,19 @@ Body `{"diff_sha256"}`. Commits the removal and records it: `{"ok": true, "recor
 
 ### `GET /api/cousins/<slug>/skills/drafts/<name>`
 
-One draft: `{"name", "text", "files", "diff", "diff_sha256", "repo", "folder", "problems", "metadata", "trigger"}`. `diff` is against what is approved at the draft's target; `problems` is everything that keeps it from approval (the format, a target the cousin may not approve into, a missing trigger prompt); `trigger` is the last trigger test run on this very diff, else null.
+One draft: `{"name", "text", "files", "diff", "diff_sha256", "repo", "folder", "problems", "metadata", "trigger", "outside"}`. `diff` is against what is approved at the draft's target; `problems` is everything that keeps it from approval (the format, a target the cousin may not approve into, a missing trigger prompt, what a skill from outside needs); `trigger` is the last trigger test run on this very diff, else null. `outside`, for a draft with `metadata.source` ([skills](skills.md#installing-a-skill-from-outside)), else null: `{"source", "url", "commit", "folder", "license", "license_file", "license_text", "scripts": [{"path", "why", "bytes"}], "task", "dry_run"}`, offline; `dry_run` is the allow and then the job on this very diff (`{"allowed_by", "allowed_at", "diff_sha256", "task"}`, plus `"job", "status", "exit_code", "command", "log", "finished_at", "recorded_at", "pass"` once recorded), else null.
+
+### `GET /api/cousins/<slug>/skills/drafts/<name>/upstream`
+
+A draft from outside against its source, fetched again now (up to 60 s): `{"ok": true, "source", "differ": [paths], "not_kept": [keys], "upstream": {key: value}}`. `differ` names the paths that are not as published, `SKILL.md` compared past its frontmatter; `not_kept` the keys of upstream's frontmatter the import did not keep (`allowed-tools`, a `metadata` map), with the values it could read in `upstream`. `409` when the draft names no source or the source cannot be fetched, with git's reason.
+
+### `POST /api/cousins/<slug>/skills/drafts/<name>/dry-run/allow`
+
+Body `{"diff_sha256"}`, the diff shown: the operator's go for one dry run of that version of a draft from outside, kept in `<install>/data/skills/dry-runs/<slug>/<name>.json` (under `data/skills/private/` for a cousin that loads `private`). The cousin is told on its `system` thread (source `skill`). `{"ok": true, "dry_run", "told"}`; `told` is false when the notice could not be delivered. `409` for another diff, or a draft with no source.
 
 ### `POST /api/cousins/<slug>/skills/drafts/<name>/approve`
 
-Body `{"diff_sha256"}`, the diff shown. Commits the draft on the target repository's `main` with the repository's git identity, appends the approval record (the console user, the commit, the diff's sha256, and `trigger`: `pass` or `fail`) and removes the draft. Refused (`409`) when the draft has a problem, targets a repository the cousin does not load, is its own skill outside `private` for a cousin that loads `private`, the repository is not trusted, or no trigger test was run on this diff. A failed trigger test does not refuse: the operator decides. `{"ok": true, "record", "note"}`: it loads at the cousin's next start (a shared skill at every cousin's).
+Body `{"diff_sha256"}`, the diff shown. Commits the draft on the target repository's `main` with the repository's git identity, appends the approval record (the console user, the commit, the diff's sha256, and `trigger`: `pass` or `fail`; for a skill from outside also `source` and `dry_run`: `pass` or `fail`) and removes the draft. Refused (`409`) when the draft has a problem, targets a repository the cousin does not load, is its own skill outside `private` for a cousin that loads `private`, the repository is not trusted, or no trigger test was run on this diff; for a skill from outside also when its source, fetched again, shows it is not as published past the frontmatter, or no dry run is recorded on this diff. A failed trigger test or dry run does not refuse: the operator decides. `{"ok": true, "record", "note"}`: it loads at the cousin's next start (a shared skill at every cousin's).
 
 ### `POST /api/cousins/<slug>/skills/drafts/<name>/reject`
 

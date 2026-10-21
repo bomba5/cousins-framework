@@ -6,10 +6,10 @@ package's own, and skills.jsx is its browser side (System > skills, and a
 panel in each cousin's inspector).
 
 Everything goes through cousin_lib/skills: listing, showing, the diff a
-draft or a removal makes, and the three verbs only the console has,
-approve, reject and remove. Approve and remove take the sha256 of the
-diff the page showed and refuse any other. A record names the console
-user who acted.
+draft or a removal makes, and the verbs only the console has: approve,
+reject, remove, and allowing a dry run of a skill from outside. Approve,
+remove and the allow take the sha256 of the diff the page showed and
+refuse any other. A record names the console user who acted.
 
 Privacy: the System routes (GET /api/skills and /api/skills/shared/...)
 never show a cousin that loads the `private` repository, nor its drafts:
@@ -29,6 +29,7 @@ from cousin_lib.console.app import HttpError
 from cousin_lib.skills import SkillError
 
 TRIGGER_TIMEOUT = 300
+FETCH_TIMEOUT = 60
 
 
 def _who(req):
@@ -74,6 +75,26 @@ def _source(home, slug, plugin):
         if name == plugin:
             return repo, folder
     raise HttpError(404, "this cousin loads no %s skills" % plugin)
+
+
+def _fetch(url, commit, folder):
+    """The console's fetch of a source: skills.fetch_folder with a shorter
+    time limit, since a page waits on it."""
+    return skills.fetch_folder(url, commit, folder, timeout=FETCH_TIMEOUT)
+
+
+def _tell(home, text):
+    """One row on the cousin's system thread, from the framework (the way
+    jobs.notify_owner tells a job's owner). Whether it was taken; never
+    raises: the allow is recorded either way."""
+    try:
+        from cousin_lib import delivery
+        item = delivery.Item(thread_id=delivery.thread_id("system"), source="skill",
+                             body=text, sender="framework")
+        wait = not isinstance(delivery.backend_for(home), delivery.InboxBackend)
+        return bool(delivery.accepted(delivery.deliver(home, item, wait=wait), home))
+    except Exception:  # noqa: BLE001 - the operator sees told: false
+        return False
 
 
 def _restart_note(scope_text):
@@ -180,7 +201,32 @@ def register():
         return 200, dict(draft, diff=text, diff_sha256=sha, repo=summary.get("repo"),
                          folder=summary.get("folder"), problems=summary.get("problems", []),
                          metadata=summary.get("metadata", {}),
-                         trigger=skills.last_trigger_test(req.server.root, home, slug, name, sha))
+                         trigger=skills.last_trigger_test(req.server.root, home, slug, name, sha),
+                         outside=_call(skills.outside_view, req.server.root, home, slug, name,
+                                       sha))
+
+    @router.route("GET", "/api/cousins/{slug}/skills/drafts/{name}/upstream")
+    def draft_upstream(req, slug, name):
+        """A draft from outside against its source, fetched again now (the
+        approval fetches it once more): where it is not as published, and
+        what upstream's frontmatter held that the import did not keep."""
+        home = _cousin(req, slug)
+        return 200, dict(_call(skills.upstream_view, home, _name(name), fetch=_fetch), ok=True)
+
+    @router.route("POST", "/api/cousins/{slug}/skills/drafts/{name}/dry-run/allow")
+    def allow_dry_run(req, slug, name):
+        """The operator's go for one dry run of the version shown; the
+        cousin is told on its system thread, runs the task as a job and
+        records it (`skill dry-run`)."""
+        home = _cousin(req, slug)
+        entry = _call(skills.allow_dry_run, req.server.root, home, slug, _name(name),
+                      user=_who(req), diff_sha=str(req.body.get("diff_sha256") or ""))
+        told = _tell(home, "[cousin-skill] %s allowed a dry run of your draft %s. Do its task"
+                           " (%s) as one job with the job tool's run, then record it with the"
+                           " skill tool: dry-run, name %s, job <its id>. The operator approves"
+                           " in the console after that."
+                     % (_who(req), name, entry.get("task") or "metadata.dry-run-task", name))
+        return 200, {"ok": True, "dry_run": entry, "told": told}
 
     @router.route("POST", "/api/cousins/{slug}/skills/drafts/{name}/approve")
     def approve(req, slug, name):

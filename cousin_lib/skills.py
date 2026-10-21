@@ -44,6 +44,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import tomllib
 from datetime import datetime, timezone
@@ -69,9 +70,11 @@ HOST_RE = re.compile(r"^(?=.{1,253}$)%s(?:\.%s)*$" % (_LABEL, _LABEL))
 # fetch by commit needs it whole
 COMMIT = r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})"
 READS_RE = re.compile(r"^(?:[^\s@#,]+@%s:\S+|[^\s#,]+#sha256:[0-9a-fA-F]{64})$" % COMMIT)
-# a URL with a scheme and a host, or git's user@host:path
-SOURCE_RE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.-]*://[^\s/@]+(?:/\S*)?"
-                       r"|[^\s@:/]+@[^\s@:/]+:\S+)@%s$" % COMMIT)
+# a URL with a scheme and a host, or git's user@host:path; then the full
+# commit, and the skill's folder in that repository
+SOURCE_RE = re.compile(r"^(?P<url>[A-Za-z][A-Za-z0-9+.-]*://[^\s/@]+(?:/\S*)?"
+                       r"|[^\s@:/]+@[^\s@:/]+:\S+)@(?P<commit>%s)(?::(?P<folder>[^\s:]\S*))?$"
+                       % COMMIT)
 LICENSE_RE = re.compile(r"^[A-Za-z0-9.+()-]+(?: (?:AND|OR|WITH) [A-Za-z0-9.+()-]+)*$")
 NAME_MAX = 64
 DESCRIPTION_MAX = 1024
@@ -151,11 +154,16 @@ def parse(text):
 
 
 def render(front, body):
-    """A SKILL.md from a frontmatter dict (metadata nested) and a body.
-    Every value but the name is double-quoted, so a colon, a quote or a
-    leading `[` reads back as the same text in parse() and in a YAML
-    reader."""
-    out = ["---"]
+    """A SKILL.md from a frontmatter dict (metadata nested) and a body."""
+    return frontmatter_text(front) + "\n" + body.strip() + "\n"
+
+
+def frontmatter_text(front, comment=None):
+    """The frontmatter of a SKILL.md, its `---` lines included, with a
+    `# comment` line first when given. Every value but the name is
+    double-quoted, so a colon, a quote or a leading `[` reads back as the
+    same text in parse() and in a YAML reader."""
+    out = ["---"] + (["# %s" % comment] if comment else [])
     for key, value in front.items():
         if key == "metadata":
             continue
@@ -165,7 +173,7 @@ def render(front, body):
         out.append("metadata:")
         out.extend("  %s: %s" % (k, _quoted(v)) for k, v in meta.items())
     out.append("---")
-    return "\n".join(out) + "\n\n" + body.strip() + "\n"
+    return "\n".join(out) + "\n"
 
 
 _UNPRINTABLE = re.compile(r"[\x7f-\x84\x86-\x9f\ud800-\udfff\ufffe\uffff]")
@@ -228,7 +236,7 @@ def declared_problems(front):
                    " comma-separated, not %s" % ", ".join(bad))
     source = str(meta.get("source", "")).strip()
     if source and not SOURCE_RE.match(source):
-        out.append("metadata.source takes <url>@<full commit>, not %s" % source)
+        out.append("metadata.source takes <url>@<full commit>[:<folder>], not %s" % source)
     licence = str(front.get("license", "")).strip()
     if licence and not LICENSE_RE.match(licence):
         out.append("license takes an SPDX identifier, not %s" % licence)
@@ -272,11 +280,12 @@ def _records_path(root, repo):
 
 
 def record(root, repo, *, user, action, commit, skill=None, folder=None, diff_sha=None,
-           trigger=None):
+           trigger=None, source=None, dry_run=None):
     """Append one approval record: who did it in the console, to which
     repository, the commit it produced, the sha256 of the diff shown and,
-    for an approval, whether its trigger test passed. `private` keeps its
-    own file, since a record names the folder and a private cousin's
+    for an approval, whether its trigger test passed; for a skill from
+    outside, also its source and how its dry run ended. `private` keeps
+    its own file, since a record names the folder and a private cousin's
     folder is its name."""
     path = _records_path(root, repo)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -289,6 +298,10 @@ def record(root, repo, *, user, action, commit, skill=None, folder=None, diff_sh
              "folder": folder, "skill": skill, "diff_sha256": diff_sha}
     if trigger is not None:
         entry["trigger"] = trigger
+    if source is not None:
+        entry["source"] = source
+    if dry_run is not None:
+        entry["dry_run"] = dry_run
     fresh = not path.exists()
     jsonl.append_line(path, json.dumps(entry, sort_keys=True), fsync=True)
     if fresh:
@@ -499,9 +512,11 @@ def target(slug, front):
 
 def draft_problems(home, slug, name, front):
     """problems(), plus what a draft also needs before approval: sound
-    declared keys (declared_problems), a target this cousin may approve
-    into (placement_problem) and both trigger test prompts."""
+    declared keys (declared_problems), what a skill from outside needs
+    (outside_problems), a target this cousin may approve into
+    (placement_problem) and both trigger test prompts."""
     found = problems(name, front) + declared_problems(front)
+    found += [p for p in outside_problems(home, name, front) if p not in found]
     meta = front.get("metadata") or {}
     try:
         repo, _where = target(slug, front)
@@ -647,11 +662,15 @@ def _stamp():
     return time.strftime("%Y%m%d-%H%M%S")
 
 
-def approve_draft(root, home, slug, name, *, user, diff_sha):
+def approve_draft(root, home, slug, name, *, user, diff_sha, fetch=None):
     """Commit a draft on main and record it: only for the diff whose sha
     the console showed, and only once a trigger test has run on that
     very diff. A failed test does not refuse: the operator saw it, and
-    the record says so. The draft folder goes once it is committed."""
+    the record says so. A skill from outside also needs to be what its
+    source published, past the frontmatter (fetched again here), and a
+    dry run of this version; a failed dry run, like a failed trigger
+    test, is the operator's call. The draft folder goes once it is
+    committed."""
     folder = _draft_path(home, name)
     if not (folder / SKILL_FILE).is_file():
         raise SkillError("no draft %s" % name)
@@ -672,6 +691,18 @@ def approve_draft(root, home, slug, name, *, user, diff_sha):
     tested = last_trigger_test(root, home, slug, name, sha)
     if tested is None:
         raise SkillError("draft %s has no trigger test on this version; run it first" % name)
+    source = (front.get("metadata") or {}).get("source") or None
+    ran = None
+    if source:
+        _source, differ, _got = upstream_differences(home, name, fetch=fetch)
+        if differ:
+            raise SkillError("draft %s is not what %s published: %s differ%s; a skill from"
+                             " outside is approved as published" % (
+                                 name, source, ", ".join(differ), "" if len(differ) > 1 else "s"))
+        ran = last_dry_run(root, home, slug, name, sha)
+        if ran is None:
+            raise SkillError("draft %s has no dry run on this version: allow one, and the"
+                             " cousin runs it and records its job" % name)
     dest = path / where / name
     if dest.exists():
         shutil.rmtree(dest)
@@ -681,7 +712,8 @@ def approve_draft(root, home, slug, name, *, user, diff_sha):
     commit = _head(path)
     entry = record(root, repo, user=user, action="approve", commit=commit,
                    skill=name, folder=where, diff_sha=sha,
-                   trigger="pass" if tested.get("pass") is True else "fail")
+                   trigger="pass" if tested.get("pass") is True else "fail", source=source,
+                   dry_run=None if ran is None else ("pass" if ran.get("pass") else "fail"))
     shutil.rmtree(folder)
     return entry
 
@@ -860,7 +892,6 @@ def trigger_test(root, home, slug, name, *, checker=None):
     the draft as `draft:<name>`. Runs in a child process of the console
     (`cousin-skill --home H trigger-test NAME`), since the check scrubs
     the process's auth variables while it runs."""
-    import tempfile
     folder = _draft_path(home, name)
     if not (folder / SKILL_FILE).is_file():
         raise SkillError("no draft %s" % name)
@@ -923,6 +954,518 @@ def project_skills_dir(home):
     """Where the tmux lane's project settings would find skills that never
     passed approval."""
     return Path(home) / ".claude" / "skills"
+
+
+# ---------------------------------------------------------------- from outside
+
+FETCH_SCHEMES = ("https",)
+FETCH_TIMEOUT = 120
+DRY_RUN_KEY = "dry-run-task"
+IMPORT_NOTE = ("written by the cousins framework at import; the rest of the folder is as"
+               " published at metadata.source")
+LICENSE_NAME = re.compile(r"^(?:LICEN[CS]E|COPYING|UNLICENSE)(?:[.-][A-Za-z0-9.-]+)?$", re.I)
+# The open licences a skill from outside may carry, each as its SPDX id, the
+# phrases its text holds and the ones it does not; the more specific first.
+OPEN_LICENSES = (
+    ("Apache-2.0", ("apache license", "version 2.0"), ()),
+    ("BSD-3-Clause", ("redistribution and use in source and binary forms", "neither the name"), ()),
+    ("BSD-2-Clause", ("redistribution and use in source and binary forms",), ("neither the name",)),
+    ("MIT", ("permission is hereby granted, free of charge",), ()),
+    ("ISC", ("permission to use, copy, modify, and", "distribute this software for any purpose"),
+     ()),
+    ("Unlicense", ("this is free and unencumbered software released into the public domain",), ()),
+    ("CC0-1.0", ("cc0 1.0 universal",), ()),
+    ("CC-BY-4.0", ("creative commons attribution 4.0 international",), ()),
+)
+OPEN_IDS = tuple(spdx for spdx, _has, _not in OPEN_LICENSES)
+# The licences a skill from outside may carry, per repository it may go
+# to; `work` takes none until the employer's policy is known.
+OUTSIDE_LICENSES = {"personal": OPEN_IDS, "private": OPEN_IDS}
+OUTSIDE_REPOS = tuple(OUTSIDE_LICENSES)
+SCRIPT_SUFFIXES = (".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".cjs", ".ts", ".rb", ".pl",
+                   ".ps1", ".php", ".lua")
+UPSTREAM_KEPT = ("name", "description", "compatibility")
+
+
+def _reads_as(text, spdx):
+    norm = " ".join(str(text).lower().split())
+    for name, has, has_not in OPEN_LICENSES:
+        if name == spdx:
+            return all(p in norm for p in has) and not any(p in norm for p in has_not)
+    return False
+
+
+def license_of(text):
+    """The SPDX id of the open licence a licence file's text is, or None."""
+    return next((spdx for spdx in OPEN_IDS if _reads_as(text, spdx)), None)
+
+
+def _license_file(names):
+    found = sorted(n for n in names if "/" not in n and LICENSE_NAME.match(n))
+    return found[0] if found else None
+
+
+def _folder_ok(folder):
+    parts = str(folder).split("/")
+    return (bool(folder) and not str(folder).startswith("/") and "\\" not in str(folder)
+            and all(p not in ("", ".", "..") for p in parts))
+
+
+def split_source(source):
+    """(url, commit, folder) of a metadata.source, the folder None when it
+    names none. SkillError when it does not parse."""
+    m = SOURCE_RE.match(str(source or "").strip())
+    if not m:
+        raise SkillError("metadata.source takes <url>@<full commit>[:<folder>], not %s" % source)
+    folder = m.group("folder")
+    if folder is not None and not _folder_ok(folder):
+        raise SkillError("metadata.source names a bad folder: %s" % folder)
+    return m.group("url"), m.group("commit").lower(), folder
+
+
+def fetch_folder(url, commit, folder, *, schemes=FETCH_SCHEMES, timeout=FETCH_TIMEOUT):
+    """{"files": {path: bytes}, "executable": [path], "license_file": path,
+    "license_from_root": bool} of `folder` at `commit` in the git
+    repository at `url`, paths relative to the folder. Exactly that commit
+    is fetched, depth 1, into a temporary repository: no branch or tag is
+    followed, no credential, hook, submodule or global setting is used,
+    and only `schemes` may be spoken. Refused: a symlink or a submodule
+    in the folder, no SKILL.md, over DRAFT_MAX_BYTES, and no licence file
+    in the folder or at the repository's root (that one is added to the
+    folder's files under its own name)."""
+    scheme = url.split("://", 1)[0].lower() if "://" in url else "ssh"
+    if scheme not in schemes:
+        raise SkillError("a skill from outside is fetched over %s only, not %s"
+                         % (" or ".join(schemes), url))
+    if not _folder_ok(folder):
+        raise SkillError("bad folder %r" % folder)
+    config = ["-c", "protocol.allow=never", "-c", "credential.helper=",
+              "-c", "core.hooksPath=%s" % os.devnull]
+    for allowed in schemes:
+        config += ["-c", "protocol.%s.allow=always" % allowed]
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", LC_ALL="C", GIT_CONFIG_NOSYSTEM="1",
+               GIT_CONFIG_GLOBAL=os.devnull)
+
+    def git(*args, text=True):
+        proc = subprocess.run(["git", *config, *args], capture_output=True, text=text,
+                              env=env, timeout=timeout)
+        if proc.returncode != 0:
+            err = proc.stderr if text else proc.stderr.decode("utf-8", "replace")
+            raise SkillError("fetching %s at %s: %s" % (url, commit, (err or "").strip()[-300:]
+                                                        or "git exit %d" % proc.returncode))
+        return proc.stdout
+
+    with tempfile.TemporaryDirectory(prefix="cousin-skill-fetch-") as tmp:
+        repo = str(Path(tmp) / "repo.git")
+        try:
+            git("init", "-q", "--bare", repo)
+            git("-C", repo, "fetch", "-q", "--depth", "1", "--no-tags", url, commit)
+            got = git("-C", repo, "rev-parse", "--verify", "-q", "%s^{commit}" % commit).strip()
+            if got.lower() != commit.lower():
+                raise SkillError("%s has no commit %s" % (url, commit))
+            listing = git("-C", repo, "ls-tree", "-r", "-l", "-z", commit, "--", folder + "/")
+            files, executable, total = {}, [], 0
+            for rec in listing.split("\0"):
+                if not rec:
+                    continue
+                meta, _, path = rec.partition("\t")
+                mode, kind, oid, size = meta.split()
+                rel = path[len(folder) + 1:]
+                if mode == "120000":
+                    raise SkillError("%s holds a symlink (%s); a skill from outside holds regular"
+                                     " files only" % (folder, rel))
+                if kind != "blob":
+                    raise SkillError("%s holds a submodule (%s)" % (folder, rel))
+                total += int(size)
+                if total > DRAFT_MAX_BYTES:
+                    raise SkillError("%s is over %d bytes" % (folder, DRAFT_MAX_BYTES))
+                files[rel] = git("-C", repo, "cat-file", "blob", oid, text=False)
+                if mode == "100755":
+                    executable.append(rel)
+            if not files:
+                raise SkillError("%s has no folder %s at %s" % (url, folder, commit))
+            if SKILL_FILE not in files:
+                raise SkillError("%s has no %s at %s" % (folder, SKILL_FILE, commit))
+            licence, from_root = _license_file(files), False
+            if licence is None:
+                top = {}
+                for rec in git("-C", repo, "ls-tree", "-z", commit).split("\0"):
+                    meta, _, path = rec.partition("\t")
+                    if rec and meta.split()[1] == "blob":
+                        top[path] = meta.split()[2]
+                licence = _license_file(top)
+                if licence is not None:
+                    files[licence] = git("-C", repo, "cat-file", "blob", top[licence], text=False)
+                    from_root = True
+            if licence is None:
+                raise SkillError("%s has no licence file in %s or at its root" % (url, folder))
+        except subprocess.TimeoutExpired:
+            raise SkillError("fetching %s took over %ds" % (url, timeout)) from None
+    return {"files": files, "executable": sorted(executable), "license_file": licence,
+            "license_from_root": from_root}
+
+
+def _after_frontmatter(text):
+    """A SKILL.md's text after its closing `---` line, exactly."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        raise SkillError("SKILL.md must start with a --- frontmatter line")
+    try:
+        end = next(i for i in range(1, len(lines)) if lines[i].strip() == "---")
+    except StopIteration:
+        raise SkillError("SKILL.md frontmatter has no closing --- line") from None
+    return "\n".join(lines[end + 1:])
+
+
+def _split_upstream(text):
+    """({key: text}, [other keys]) of the frontmatter of a SKILL.md written
+    outside: plain, quoted and block (| or >) values are read; a key
+    holding a list or a map is named in the others."""
+    lines = text.split("\n")
+    _after_frontmatter(text)
+    end = next(i for i in range(1, len(lines)) if lines[i].strip() == "---")
+    values, others, i = {}, [], 1
+    while i < end:
+        raw = lines[i]
+        i += 1
+        if not raw.strip() or raw.lstrip().startswith("#") or raw[:1] in (" ", "\t"):
+            continue
+        key, sep, value = raw.partition(":")
+        key, value = key.strip(), value.strip()
+        if not sep or not key:
+            raise SkillError("frontmatter line does not parse: %r" % raw.strip())
+        more = []
+        while i < end and (not lines[i].strip() or lines[i][:1] in (" ", "\t")):
+            more.append(lines[i].strip())
+            i += 1
+        if value[:1] in ("|", ">"):
+            words = [m for m in more if m]
+            values[key] = (" ".join(words) if value[:1] == ">" else "\n".join(words))
+        elif not value or value[:1] in ("[", "{") or (more and more[0].startswith("- ")):
+            others.append(key)
+        else:
+            try:
+                values[key] = " ".join([_unquote(value)] + [m for m in more if m])
+            except SkillError:
+                others.append(key)
+    return values, others
+
+
+def import_draft(home, slug, source, *, context, side_effect, name=None, scope="own",
+                 metadata=None, license=None, fetch=None):
+    """Write a draft from a skill published outside (docs/reference/skills.md,
+    "Installing a skill from outside"): the folder `source` names, fetched
+    at its commit (fetch_folder), byte for byte, but for its SKILL.md
+    frontmatter, which is written here: its name and description, its
+    licence as an SPDX id the licence file must read as, our keys and the
+    source. Returns (path, report): what upstream's frontmatter held that
+    was not kept, and the licence. An import replaces the whole draft."""
+    url, commit, folder = split_source(source)
+    if not folder:
+        raise SkillError("an import names the skill's folder: <url>@<full commit>:<folder>")
+    if context not in OUTSIDE_REPOS:
+        raise SkillError("a skill from outside goes to %s, not %s"
+                         % (" or ".join(OUTSIDE_REPOS), context))
+    if side_effect == "outward":
+        raise SkillError("a skill from outside that acts outward is not imported")
+    got = (fetch or fetch_folder)(url, commit, folder)
+    files = got["files"]
+    try:
+        text = files[SKILL_FILE].decode("utf-8")
+    except UnicodeDecodeError:
+        raise SkillError("its %s is not UTF-8" % SKILL_FILE) from None
+    values, others = _split_upstream(text)
+    rest = _after_frontmatter(text)
+    name = name or values.get("name", "")
+    licence_text = files[got["license_file"]].decode("utf-8", "replace")
+    stated = license or license_of(licence_text)
+    if stated not in OUTSIDE_LICENSES[context]:
+        raise SkillError("its licence (%s) is not one %s takes from outside: %s"
+                         % (stated or got["license_file"], context,
+                            ", ".join(OUTSIDE_LICENSES[context])))
+    if not _reads_as(licence_text, stated):
+        raise SkillError("its licence file %s does not read as %s" % (got["license_file"], stated))
+    front = {"name": name, "description": " ".join(values.get("description", "").split()),
+             "license": stated}
+    if values.get("compatibility"):
+        front["compatibility"] = " ".join(values["compatibility"].split())
+    meta = {"context": context, "side-effect": side_effect, "scope": scope}
+    for key, value in (metadata or {}).items():
+        if key == "source" or value is None or (str(value).strip() == ""
+                                                and key not in DECLARED_KEYS):
+            continue
+        meta[key] = _normal(key, value)
+    meta["source"] = "%s@%s:%s" % (url, commit, folder)
+    front["metadata"] = meta
+    found = problems(name, front) + declared_problems(front)
+    if not found:
+        why = placement_problem(home, context, scope)
+        found = [why] if why else []
+    if found:
+        raise SkillError("; ".join(found))
+    dest = _draft_path(home, name)
+    if dest.exists():
+        shutil.rmtree(dest)
+    for rel, data in files.items():
+        path = dest / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if rel == SKILL_FILE:
+            data = (frontmatter_text(front, IMPORT_NOTE) + rest).encode("utf-8")
+        path.write_bytes(data)
+        if rel in got["executable"]:
+            os.chmod(path, 0o755)
+    report = {"license": stated, "license_file": got["license_file"],
+              "license_from_root": got["license_from_root"],
+              "not_kept": sorted(set(others) | (set(values) - set(UPSTREAM_KEPT)))}
+    return dest / SKILL_FILE, report
+
+
+def outside_problems(home, name, front):
+    """What a draft from outside (one with metadata.source) needs before
+    approval, offline: its folder named, a repository and side effect
+    phase 2 takes, an open licence its licence file reads as, and the
+    task its dry run does. [] for a draft written here."""
+    meta = front.get("metadata") or {}
+    if not meta.get("source"):
+        return []
+    try:
+        _url, _commit, folder = split_source(meta["source"])
+    except SkillError as err:
+        return [str(err)]
+    out = []
+    if not folder:
+        out.append("a skill from outside names its folder: metadata.source"
+                   " <url>@<full commit>:<folder>")
+    if meta.get("context") not in OUTSIDE_REPOS:
+        out.append("a skill from outside goes to %s only" % " or ".join(OUTSIDE_REPOS))
+    if meta.get("side-effect") == "outward":
+        out.append("a skill from outside may not act outward")
+    stated = str(front.get("license", "")).strip()
+    allowed = OUTSIDE_LICENSES.get(meta.get("context"), ())
+    if allowed and stated not in allowed:
+        out.append("a skill from outside in %s carries one of %s, not %s"
+                   % (meta.get("context"), ", ".join(allowed), stated or "no licence"))
+    try:
+        files = _files(_draft_path(home, name))
+    except SkillError as err:
+        files = {}
+        out.append(str(err))
+    licence = _license_file(files)
+    if licence is None:
+        out.append("a skill from outside keeps its licence file")
+    elif stated in allowed and not _reads_as(files[licence].decode("utf-8", "replace"), stated):
+        out.append("its licence file %s does not read as %s" % (licence, stated))
+    if not str(meta.get(DRY_RUN_KEY, "")).strip():
+        out.append("a skill from outside needs metadata.%s: the sample task its dry run does"
+                   % DRY_RUN_KEY)
+    return out
+
+
+def upstream_differences(home, name, *, fetch=None):
+    """(source, [paths], fetched) of a draft from outside: the paths where
+    it is not what its source published, its SKILL.md compared past the
+    frontmatter the import writes. SkillError when it names no source or
+    the source cannot be fetched."""
+    folder_path = _draft_path(home, name)
+    if not (folder_path / SKILL_FILE).is_file():
+        raise SkillError("no draft %s" % name)
+    front, _ = parse((folder_path / SKILL_FILE).read_text())
+    source = (front.get("metadata") or {}).get("source")
+    if not source:
+        raise SkillError("draft %s names no source" % name)
+    url, commit, folder = split_source(source)
+    if not folder:
+        raise SkillError("metadata.source names no folder")
+    got = (fetch or fetch_folder)(url, commit, folder)
+    mine, theirs = _files(folder_path), got["files"]
+    differ = []
+    for rel in sorted(set(mine) | set(theirs)):
+        a, b = mine.get(rel), theirs.get(rel)
+        if rel == SKILL_FILE and a is not None and b is not None:
+            try:
+                same = _after_frontmatter(a.decode("utf-8")) == _after_frontmatter(b.decode("utf-8"))
+            except (UnicodeDecodeError, SkillError):
+                same = False
+            if not same:
+                differ.append("%s past its frontmatter" % rel)
+        elif a != b:
+            differ.append(rel)
+    return source, differ, got
+
+
+def scripts_in(home, name):
+    """[{path, why}] of the files in a draft an agent could run: under
+    scripts/, executable, starting with #!, or with a script's suffix."""
+    folder = _draft_path(home, name)
+    out = []
+    for rel, data in sorted(_files(folder).items()):
+        why = []
+        if rel.startswith("scripts/"):
+            why.append("under scripts/")
+        if os.access(folder / rel, os.X_OK):
+            why.append("executable")
+        if data[:2] == b"#!":
+            why.append("starts with #!")
+        if rel.lower().endswith(SCRIPT_SUFFIXES):
+            why.append("a script's suffix")
+        if why:
+            out.append({"path": rel, "why": ", ".join(why), "bytes": len(data)})
+    return out
+
+
+def dry_run_path(root, home, slug, name):
+    """Where a draft's dry run is kept, beside its trigger test result
+    (trigger_path): the operator's allow, then the job that ran it."""
+    base = Path(root) / "data" / "skills"
+    if _loads_private(home):
+        base = base / "private"
+    return base / "dry-runs" / slug / ("%s.json" % name)
+
+
+def _read_json(path):
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_private_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent.parent, 0o700)
+    except OSError:
+        pass
+    atomic.write_text(path, json.dumps(data, indent=1, sort_keys=True) + "\n")
+
+
+def allow_dry_run(root, home, slug, name, *, user, diff_sha):
+    """The operator's go for a dry run of this very version of a draft from
+    outside (the console's verb): after reading its scripts, the cousin
+    may run its task once. Returns the record."""
+    _text, sha = diff_draft(root, home, slug, name)
+    if sha != diff_sha:
+        raise SkillError("the draft changed since it was shown; look again")
+    front, _ = parse((_draft_path(home, name) / SKILL_FILE).read_text())
+    meta = front.get("metadata") or {}
+    if not meta.get("source"):
+        raise SkillError("only a skill from outside has a dry run")
+    entry = {"allowed_by": user, "allowed_at": datetime.now(timezone.utc).isoformat(
+        timespec="seconds"), "diff_sha256": sha, "task": str(meta.get(DRY_RUN_KEY, ""))}
+    _write_private_json(dry_run_path(root, home, slug, name), entry)
+    return entry
+
+
+def record_dry_run(root, home, slug, name, job_id, *, job=None):
+    """Record the job that ran an allowed dry run (the cousin's verb): the
+    framework reads the job row, its owner, how it ended, its exit code
+    and its log, so the result is the job's, never the cousin's word.
+    Refused: no allow for this version, a job of another cousin's, one
+    still running, one started before the allow, one with no exit code
+    (the job tool's `run` records one)."""
+    _text, sha = diff_draft(root, home, slug, name)
+    path = dry_run_path(root, home, slug, name)
+    allowed = _read_json(path)
+    if not allowed or allowed.get("diff_sha256") != sha:
+        raise SkillError("no dry run of this version of %s is allowed: the operator allows one"
+                         " in the console" % name)
+    if job is None:
+        from cousin_lib import jobs
+        job = jobs.get_job(int(job_id))
+    if not job:
+        raise SkillError("no job #%s" % job_id)
+    if job.get("spawned_by") != slug:
+        raise SkillError("job #%s is %s's, not %s's" % (job_id, job.get("spawned_by"), slug))
+    if job.get("status") == "running":
+        raise SkillError("job #%s is still running" % job_id)
+    try:
+        started = datetime.fromisoformat(str(job.get("started_at")))
+        late = started < datetime.fromisoformat(allowed["allowed_at"])
+    except (TypeError, ValueError):
+        late = True
+    if late:
+        raise SkillError("job #%s started before the dry run was allowed" % job_id)
+    if job.get("exit_code") is None:
+        raise SkillError("job #%s has no exit code: run the dry run with the job tool's run"
+                         % job_id)
+    entry = dict(allowed, job=int(job_id), status=job.get("status"), exit_code=job["exit_code"],
+                 command=job.get("command"), log=job.get("log_path"),
+                 finished_at=job.get("finished_at"), recorded_at=datetime.now(
+                     timezone.utc).isoformat(timespec="seconds"))
+    entry["pass"] = job.get("status") == "done" and job["exit_code"] == 0
+    _write_private_json(path, entry)
+    return entry
+
+
+def import_written(home, slug, path, report):
+    """What the tool and the CLI say once an import wrote its draft."""
+    text = draft_written(home, slug, path.parent.name, path)
+    text += "; licence %s (%s%s)" % (report["license"], report["license_file"],
+                                     ", from the repository's root"
+                                     if report["license_from_root"] else "")
+    if report["not_kept"]:
+        text += "; upstream's %s not kept" % ", ".join(report["not_kept"])
+    return text + ("; next: the operator reads its scripts and allows a dry run in the"
+                   " console")
+
+
+def dry_run_written(entry):
+    return ("dry run recorded: job #%d %s, exit %s, so %s; the operator approves in the"
+            " console" % (entry["job"], entry["status"], entry["exit_code"],
+                          "a pass" if entry["pass"] else "a fail"))
+
+
+LICENSE_SHOWN = 64 * 1024
+
+
+def outside_view(root, home, slug, name, diff_sha):
+    """What the approve view shows for a draft from outside, offline: where
+    it came from, its licence and the file's text, the files an agent
+    could run, its dry-run task and the dry run on this diff. None for a
+    draft written here."""
+    folder_path = _draft_path(home, name)
+    front, _ = parse((folder_path / SKILL_FILE).read_text())
+    meta = front.get("metadata") or {}
+    source = meta.get("source")
+    if not source:
+        return None
+    try:
+        url, commit, folder = split_source(source)
+    except SkillError:
+        url = commit = folder = None
+    files = _files(folder_path)
+    licence = _license_file(files)
+    return {"source": source, "url": url, "commit": commit, "folder": folder,
+            "license": front.get("license"), "license_file": licence,
+            "license_text": files[licence].decode("utf-8", "replace")[:LICENSE_SHOWN]
+            if licence else "",
+            "scripts": scripts_in(home, name), "task": str(meta.get(DRY_RUN_KEY, "")),
+            "dry_run": dry_run_state(root, home, slug, name, diff_sha)}
+
+
+def upstream_view(home, name, *, fetch=None):
+    """The source fetched again: {source, differ, not_kept, upstream}, the
+    paths where the draft is not as published and what upstream's
+    frontmatter held that the import did not keep (allowed-tools, say),
+    with the values it could read."""
+    source, differ, got = upstream_differences(home, name, fetch=fetch)
+    values, others = _split_upstream(got["files"][SKILL_FILE].decode("utf-8", "replace"))
+    not_kept = sorted(set(others) | (set(values) - set(UPSTREAM_KEPT)))
+    return {"source": source, "differ": differ, "not_kept": not_kept,
+            "upstream": {k: values[k] for k in not_kept if k in values}}
+
+
+def dry_run_state(root, home, slug, name, diff_sha):
+    """The draft's dry run on this very diff: the allow, then its job, or
+    None (never allowed, or the draft changed since)."""
+    entry = _read_json(dry_run_path(root, home, slug, name))
+    return entry if entry and entry.get("diff_sha256") == diff_sha else None
+
+
+def last_dry_run(root, home, slug, name, diff_sha):
+    """The draft's recorded dry run on this very diff, or None."""
+    entry = dry_run_state(root, home, slug, name, diff_sha)
+    return entry if entry and entry.get("job") is not None else None
 
 
 # ---------------------------------------------------------------- the gate
@@ -1137,9 +1680,27 @@ def main(argv=None):
                                    " path#sha256:<hex>, comma-separated")
     p.add_argument("--rests-on", help="paths, tool versions, memory topics it depends on,"
                                       " comma-separated")
-    p.add_argument("--source", help="a skill from outside: <url>@<full commit>")
+    p.add_argument("--source", help="a skill from outside: <url>@<full commit>[:<folder>]")
     p.add_argument("--license", help="an SPDX identifier; required with --source")
     p.add_argument("--body-file", help="the steps (default: stdin)")
+    p.add_argument("--dry-run-task", default="",
+                   help="a skill from outside: the sample task its dry run does")
+    p = sub.add_parser("import", help="a draft from a skill published outside")
+    p.add_argument("source", help="<https url>@<full commit>:<folder>")
+    p.add_argument("--context", required=True, choices=REPOS)
+    p.add_argument("--side-effect", required=True, choices=SIDE_EFFECTS)
+    p.add_argument("--name", help="the draft's name (default: the skill's own)")
+    p.add_argument("--scope", default="own", choices=SCOPES)
+    p.add_argument("--should-trigger", default="")
+    p.add_argument("--must-not-trigger", default="")
+    p.add_argument("--dry-run-task", default="", help="the sample task its dry run does")
+    p.add_argument("--hosts", help="every host it may contact, comma-separated; \"\" for none")
+    p.add_argument("--reads", help="what it reads, pinned, comma-separated")
+    p.add_argument("--rests-on", help="what it depends on, comma-separated")
+    p.add_argument("--license", help="the SPDX id its licence file reads as (default: found)")
+    p = sub.add_parser("dry-run", help="record the job that ran a draft's allowed dry run")
+    p.add_argument("name")
+    p.add_argument("--job", required=True, type=int)
     p = sub.add_parser("diff", help="a draft against what is approved")
     p.add_argument("name")
     p = sub.add_parser("trigger-test", help="run a draft's trigger test (the console runs it)")
@@ -1159,8 +1720,20 @@ def main(argv=None):
                                metadata={"should-trigger": args.should_trigger,
                                          "must-not-trigger": args.must_not_trigger,
                                          "hosts": args.hosts, "reads": args.reads,
-                                         "rests-on": args.rests_on, "source": args.source})
+                                         "rests-on": args.rests_on, "source": args.source,
+                                         DRY_RUN_KEY: args.dry_run_task})
             print(draft_written(home, slug, args.name, path))
+        elif args.command == "import":
+            path, report = import_draft(
+                home, slug, args.source, context=args.context, side_effect=args.side_effect,
+                name=args.name, scope=args.scope, license=args.license,
+                metadata={"should-trigger": args.should_trigger,
+                          "must-not-trigger": args.must_not_trigger,
+                          DRY_RUN_KEY: args.dry_run_task, "hosts": args.hosts,
+                          "reads": args.reads, "rests-on": args.rests_on})
+            print(import_written(home, slug, path, report))
+        elif args.command == "dry-run":
+            print(dry_run_written(record_dry_run(root, home, slug, args.name, args.job)))
         elif args.command == "diff":
             text, _sha = diff_draft(root, home, slug, args.name)
             print(text or "no difference from what is approved")

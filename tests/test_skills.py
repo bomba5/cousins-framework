@@ -210,11 +210,16 @@ class TestDeclaredKeys(SkillsCase):
                 self.write(**declared)
         self.assertFalse((self.wren / "skill-drafts").exists())
 
-    def test_a_skill_from_outside_carries_its_source_and_licence(self):
+    def test_a_source_makes_it_a_skill_from_outside_with_what_that_needs(self):
+        """Written by hand rather than imported, it still answers to the
+        rules for a skill from outside (TestImport has the import)."""
         front = self.write(source="git@g.example:o/r.git@" + COMMIT, license="MIT OR Apache-2.0")
         self.assertEqual(front["metadata"]["source"], "git@g.example:o/r.git@" + COMMIT)
         self.assertEqual(front["license"], "MIT OR Apache-2.0")
-        self.assertEqual(skills.drafts(self.wren, "wren")[0]["problems"], [])
+        found = skills.drafts(self.wren, "wren")[0]["problems"]
+        for word in ("names its folder", "not MIT OR Apache-2.0", "keeps its licence file",
+                     "needs metadata.dry-run-task"):
+            self.assertTrue(any(word in f for f in found), (word, found))
 
     def test_a_hand_edited_draft_lists_them_and_is_not_approved_but_would_load(self):
         folder = self.wren / "skill-drafts" / "board-check"
@@ -243,7 +248,6 @@ class TestDeclaredKeys(SkillsCase):
                                      "should_trigger": PROMPTS["should-trigger"],
                                      "must_not_trigger": PROMPTS["must-not-trigger"],
                                      "hosts": "", "rests_on": "kicad-cli --version",
-                                     "source": "https://g.example/o/r@" + COMMIT,
                                      "license": "MIT"})
         self.assertIn("draft written", text)
         self.assertNotIn("before approval", text)
@@ -253,6 +257,259 @@ class TestDeclaredKeys(SkillsCase):
         self.assertEqual(front["metadata"]["rests-on"], "kicad-cli --version")
         self.assertNotIn("reads", front["metadata"])
         self.assertEqual(front["license"], "MIT")
+
+
+MIT = ("MIT License\n\nCopyright (c) 2026 Wren Lab\n\nPermission is hereby granted, free of"
+       " charge, to any person obtaining a copy of this software, to deal in it without"
+       " restriction.\n")
+PROPRIETARY = "(c) 2026 Wren Lab. All rights reserved. No copies outside our service.\n"
+UPSTREAM_SKILL = ("---\nname: board-check\ndescription: >\n  Check a board.\n  Use after a regen.\n"
+                  "license: Complete terms in LICENSE.txt\nallowed-tools: Bash(git:*) Read\n"
+                  "metadata:\n  author: wren-lab\n---\n\n# Steps\n\n1. Read the board.\n"
+                  "2. Run scripts/check.py as a job.\n")
+
+
+def _git(cwd, *args):
+    return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def make_upstream(base):
+    """A published skills repository: a sound skill, one with a symlink,
+    one with a submodule, one whose licence is only at the root, and one
+    under a proprietary licence. Returns (path, commit)."""
+    repo = pathlib.Path(base) / "upstream"
+    skills_dir = repo / "skills"
+    sound = skills_dir / "board-check"
+    (sound / "scripts").mkdir(parents=True)
+    (sound / "SKILL.md").write_text(UPSTREAM_SKILL)
+    (sound / "LICENSE.txt").write_text(MIT)
+    (sound / "scripts" / "check.py").write_text("#!/usr/bin/env python3\nprint('ok')\n")
+    os.chmod(sound / "scripts" / "check.py", 0o755)
+    (sound / "notes.md").write_text("Plain notes.\n")
+    for name in ("linked", "sub", "rootlic", "closed"):
+        (skills_dir / name).mkdir()
+        (skills_dir / name / "SKILL.md").write_text(UPSTREAM_SKILL.replace("board-check", name))
+    os.symlink("SKILL.md", skills_dir / "linked" / "alias.md")
+    (skills_dir / "linked" / "LICENSE").write_text(MIT)
+    (skills_dir / "closed" / "LICENSE.txt").write_text(PROPRIETARY)
+    (repo / "LICENSE").write_text(MIT)
+    _git(base, "init", "-q", "-b", "main", str(repo))
+    _git(repo, "add", "-A")
+    _git(repo, "update-index", "--add", "--cacheinfo", "160000,%s,skills/sub/mod" % ("1" * 40))
+    _git(repo, "commit", "-q", "-m", "skills")
+    return repo, _git(repo, "rev-parse", "HEAD")
+
+
+class OutsideCase(SkillsCase):
+    """A skill from outside: the source names an https URL, and the fetch
+    the tests hand in reads a local repository over file:// instead,
+    through the real fetch_folder."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.upstream, self.commit = make_upstream(tmp.name)
+        local, real = "file://%s" % self.upstream, skills.fetch_folder
+        self.fetch = lambda _url, commit, folder: real(local, commit, folder, schemes=("file",))
+
+    def source(self, folder="skills/board-check"):
+        return "https://example.test/wren-lab/skills@%s:%s" % (self.commit, folder)
+
+    def imported(self, folder="skills/board-check", **kw):
+        kw.setdefault("context", "personal")
+        kw.setdefault("side_effect", "read-only")
+        kw.setdefault("metadata", dict(PROMPTS, **{"dry-run-task": "run scripts/check.py"}))
+        return skills.import_draft(self.wren, "wren", self.source(folder), fetch=self.fetch, **kw)
+
+    def ready(self, name="board-check"):
+        """Trigger test and dry run of this version, both passing."""
+        self.run_trigger(self.wren, "wren", name)
+        _text, sha = skills.diff_draft(self.root, self.wren, "wren", name)
+        allowed = skills.allow_dry_run(self.root, self.wren, "wren", name, user="ana", diff_sha=sha)
+        skills.record_dry_run(self.root, self.wren, "wren", name, 7, job=self.job(allowed))
+        return sha
+
+    def job(self, allowed, **kw):
+        row = {"id": 7, "spawned_by": "wren", "status": "done", "exit_code": 0,
+               "started_at": allowed["allowed_at"], "finished_at": allowed["allowed_at"],
+               "command": "python3 scripts/check.py", "log_path": "/tmp/job-7.log"}
+        row.update(kw)
+        return row
+
+
+class TestImport(OutsideCase):
+    def test_the_folder_comes_as_published_under_a_frontmatter_of_ours(self):
+        path, report = self.imported()
+        draft = self.wren / "skill-drafts" / "board-check"
+        self.assertEqual(path, draft / "SKILL.md")
+        upstream = self.upstream / "skills" / "board-check"
+        for rel in ("LICENSE.txt", "scripts/check.py", "notes.md"):
+            self.assertEqual((draft / rel).read_bytes(), (upstream / rel).read_bytes(), rel)
+        self.assertTrue(os.access(draft / "scripts" / "check.py", os.X_OK))
+        text = path.read_text()
+        self.assertTrue(text.startswith("---\n# written by the cousins framework at import"))
+        self.assertTrue(text.endswith(UPSTREAM_SKILL.split("---\n", 2)[2]))   # the body, exactly
+        front, _ = skills.parse(text)
+        self.assertEqual(front["description"], "Check a board. Use after a regen.")
+        self.assertEqual(front["license"], "MIT")
+        self.assertEqual(front["metadata"]["source"], self.source())
+        self.assertNotIn("allowed-tools", front)
+        self.assertEqual(report["not_kept"], ["allowed-tools", "license", "metadata"])
+        self.assertEqual(skills.drafts(self.wren, "wren")[0]["problems"], [])
+        self.assertEqual(skills.upstream_differences(self.wren, "board-check",
+                                                     fetch=self.fetch)[1], [])
+        self.assertEqual([s["path"] for s in skills.scripts_in(self.wren, "board-check")],
+                         ["scripts/check.py"])
+
+    def test_a_licence_only_at_the_root_comes_into_the_folder(self):
+        _path, report = self.imported("skills/rootlic")
+        self.assertTrue(report["license_from_root"])
+        self.assertEqual((self.wren / "skill-drafts" / "rootlic" / "LICENSE").read_text(), MIT)
+
+    def test_refusals(self):
+        for folder, kw, word in (
+                ("skills/linked", {}, "symlink"),
+                ("skills/sub", {}, "submodule"),
+                ("skills/closed", {}, "not one personal takes from outside"),
+                ("skills/none", {}, "no folder skills/none"),
+                ("skills/board-check", {"license": "Apache-2.0"}, "does not read as Apache-2.0"),
+                ("skills/board-check", {"context": "work"}, "goes to personal or private"),
+                ("skills/board-check", {"side_effect": "outward"}, "acts outward")):
+            with self.assertRaisesRegex(SkillError, word, msg=(folder, kw)):
+                self.imported(folder, **kw)
+        with self.assertRaisesRegex(SkillError, "names the skill's folder"):
+            skills.import_draft(self.wren, "wren", self.source().rsplit(":", 1)[0],
+                                context="personal", side_effect="read-only", fetch=self.fetch)
+        with self.assertRaisesRegex(SkillError, "fetched over https only"):
+            skills.import_draft(self.wren, "wren", "http://example.test/o/r@%s:x" % self.commit,
+                                context="personal", side_effect="read-only")
+        with mock.patch.object(skills, "DRAFT_MAX_BYTES", 10):
+            with self.assertRaisesRegex(SkillError, "over 10 bytes"):
+                self.imported()
+        self.assertFalse((self.wren / "skill-drafts").exists())
+
+    def test_what_a_draft_from_outside_needs_before_approval(self):
+        self.imported(metadata=PROMPTS)
+        found = skills.drafts(self.wren, "wren")[0]["problems"]
+        self.assertEqual(found, ["a skill from outside needs metadata.dry-run-task: the sample"
+                                 " task its dry run does"])
+        self.imported()
+        licence = self.wren / "skill-drafts" / "board-check" / "LICENSE.txt"
+        licence.write_text(PROPRIETARY)
+        self.assertIn("its licence file LICENSE.txt does not read as MIT",
+                      skills.drafts(self.wren, "wren")[0]["problems"])
+        licence.unlink()
+        self.assertIn("a skill from outside keeps its licence file",
+                      skills.drafts(self.wren, "wren")[0]["problems"])
+
+
+class TestOutsideApproval(OutsideCase):
+    def test_approval_needs_it_as_published_and_a_dry_run(self):
+        self.imported()
+        self.run_trigger(self.wren, "wren")
+        _text, sha = skills.diff_draft(self.root, self.wren, "wren", "board-check")
+        with self.assertRaisesRegex(SkillError, "no dry run on this version"):
+            skills.approve_draft(self.root, self.wren, "wren", "board-check", user="ana",
+                                 diff_sha=sha, fetch=self.fetch)
+        sha = self.ready()
+        entry = skills.approve_draft(self.root, self.wren, "wren", "board-check", user="ana",
+                                     diff_sha=sha, fetch=self.fetch)
+        self.assertEqual((entry["source"], entry["dry_run"], entry["trigger"]),
+                         (self.source(), "pass", "pass"))
+        self.assertEqual([s["name"] for s in skills.loaded(self.root, self.wren, "wren")],
+                         ["board-check"])
+
+    def test_an_edit_past_the_frontmatter_is_refused(self):
+        self.imported()
+        script = self.wren / "skill-drafts" / "board-check" / "scripts" / "check.py"
+        script.write_text("#!/usr/bin/env python3\nprint('changed')\n")
+        sha = self.ready()
+        with self.assertRaisesRegex(SkillError, "not what .* published: scripts/check.py differs"):
+            skills.approve_draft(self.root, self.wren, "wren", "board-check", user="ana",
+                                 diff_sha=sha, fetch=self.fetch)
+
+    def test_a_failed_dry_run_is_recorded_and_can_be_approved(self):
+        self.imported()
+        self.run_trigger(self.wren, "wren")
+        _text, sha = skills.diff_draft(self.root, self.wren, "wren", "board-check")
+        allowed = skills.allow_dry_run(self.root, self.wren, "wren", "board-check", user="ana",
+                                       diff_sha=sha)
+        ran = skills.record_dry_run(self.root, self.wren, "wren", "board-check", 7,
+                                    job=self.job(allowed, status="failed", exit_code=1))
+        self.assertFalse(ran["pass"])
+        entry = skills.approve_draft(self.root, self.wren, "wren", "board-check", user="ana",
+                                     diff_sha=sha, fetch=self.fetch)
+        self.assertEqual(entry["dry_run"], "fail")
+
+    def test_a_dry_run_is_the_jobs_and_only_for_the_allowed_version(self):
+        self.imported()
+        _text, sha = skills.diff_draft(self.root, self.wren, "wren", "board-check")
+        with self.assertRaisesRegex(SkillError, "no dry run of this version .* is allowed"):
+            skills.record_dry_run(self.root, self.wren, "wren", "board-check", 7, job={})
+        allowed = skills.allow_dry_run(self.root, self.wren, "wren", "board-check", user="ana",
+                                       diff_sha=sha)
+        self.assertEqual(allowed["task"], "run scripts/check.py")
+        for kw, word in (({"spawned_by": "otto"}, "otto's, not wren's"),
+                         ({"status": "running"}, "still running"),
+                         ({"started_at": "2020-01-01T00:00:00+00:00"}, "before the dry run"),
+                         ({"exit_code": None}, "no exit code")):
+            with self.assertRaisesRegex(SkillError, word, msg=kw):
+                skills.record_dry_run(self.root, self.wren, "wren", "board-check", 7,
+                                      job=self.job(allowed, **kw))
+        with self.assertRaisesRegex(SkillError, "no job #7"):
+            skills.record_dry_run(self.root, self.wren, "wren", "board-check", 7, job={})
+        (self.wren / "skill-drafts" / "board-check" / "notes.md").write_text("changed\n")
+        with self.assertRaisesRegex(SkillError, "no dry run of this version"):
+            skills.record_dry_run(self.root, self.wren, "wren", "board-check", 7,
+                                  job=self.job(allowed))
+        with self.assertRaisesRegex(SkillError, "only a skill from outside"):
+            self.draft(self.otto)
+            _t, other = skills.diff_draft(self.root, self.otto, "otto", "board-check")
+            skills.allow_dry_run(self.root, self.otto, "otto", "board-check", user="ana",
+                                 diff_sha=other)
+
+
+class TestOutsideCli(OutsideCase):
+    def run_cli(self, *args, stdin=""):
+        out, err = [], []
+        with mock.patch("sys.stdin", __import__("io").StringIO(stdin)), \
+                mock.patch("builtins.print", lambda *a, **k: (err if k.get("file") else out)
+                           .append(" ".join(str(x) for x in a))):
+            os.environ["FRAMEWORK_ROOT"] = str(self.root)
+            code = skills.main(["--home", str(self.wren), *args])
+        return code, "\n".join(out), "\n".join(err)
+
+    def test_import_and_a_dry_run_through_the_tool_registry_and_the_command(self):
+        """The command lines the opencode and tmux lanes build from the
+        shipped registry, run: the import, then the dry run recorded from
+        a real job row."""
+        from cousin_lib import jobs, mcp_server
+        registry = mcp_server.load_registry(
+            pathlib.Path(skills.__file__).resolve().parents[1] / "config"
+            / "mcp-registry.toml.example")
+        tool = registry["tools"]["skill"]
+        argv, _ = mcp_server.build_call(tool, "import", {
+            "source": self.source(), "context": "personal", "side_effect": "read-only",
+            "should_trigger": PROMPTS["should-trigger"],
+            "must_not_trigger": PROMPTS["must-not-trigger"],
+            "dry_run_task": "run scripts/check.py", "hosts": ""}, resolve=lambda c: c)
+        with mock.patch.object(skills, "fetch_folder", self.fetch):
+            code, out, err = self.run_cli(*argv[1:])
+        self.assertEqual(code, 0, err)
+        self.assertIn("licence MIT (LICENSE.txt)", out)
+        self.assertIn("upstream's allowed-tools, license, metadata not kept", out)
+        self.assertNotIn("before approval", out)
+        _text, sha = skills.diff_draft(self.root, self.wren, "wren", "board-check")
+        skills.allow_dry_run(self.root, self.wren, "wren", "board-check", user="ana", diff_sha=sha)
+        job_id = jobs.register_job(kind="shell", title="dry run", spawned_by="wren")
+        jobs.finish_job(job_id, status="done", exit_code=0)
+        argv, _ = mcp_server.build_call(tool, "dry-run", {"name": "board-check", "job": job_id},
+                                        resolve=lambda c: c)
+        code, out, err = self.run_cli(*argv[1:])
+        self.assertEqual(code, 0, err)
+        self.assertIn("dry run recorded: job #%d done, exit 0, so a pass" % job_id, out)
 
 
 class TestDraftsAndApproval(SkillsCase):
@@ -580,13 +837,16 @@ class TestCli(SkillsCase):
                 "must_not_trigger": PROMPTS["must-not-trigger"], "hosts": "",
                 "reads": "w@%s:tools/x.py" % COMMIT, "rests_on": "kicad-cli --version",
                 "source": "https://g.example/o/r@" + COMMIT, "license": "MIT"}
-        self.assertEqual(set(args), set(tool["properties"]) - {"command"})
+        args["source"] += ":skills/board-check"
+        args["dry_run_task"] = "run the check"
+        self.assertEqual(set(args), set(tool["properties"]) - {"command", "job"})
         argv, stdin = mcp_server.build_call(tool, "draft", args, resolve=lambda c: c)
         self.assertEqual(argv[0], "cousin-skill")
         self.assertEqual(argv[argv.index("--hosts") + 1], "")
         code, out, _ = self.run_cli(*argv[1:], stdin=stdin.decode())
         self.assertEqual(code, 0, out)
-        self.assertNotIn("before approval", out)
+        # the draft tool writes no licence file: the one thing still missing
+        self.assertIn("before approval: a skill from outside keeps its licence file", out)
         meta = skills.parse((self.wren / "skill-drafts" / "board-check" / "SKILL.md")
                             .read_text())[0]["metadata"]
         self.assertEqual((meta["hosts"], meta["rests-on"]), ("", "kicad-cli --version"))

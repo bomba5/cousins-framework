@@ -25,9 +25,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
     loads nothing.
   - The trigger test runs a draft's `should-trigger` and `must-not-trigger`
     prompts on the cousin's own model, with only the `Skill` tool. Approval
-    needs a result on the diff shown, kept where tools may not write it; a
-    failed one can still be approved, after a confirm that says so, and the
-    record keeps the outcome.
+    needs a result on the diff shown, kept where the tool gate refuses
+    writes; a failed one can still be approved, after a confirm that says
+    so, and the record keeps the outcome.
   - The runner exports the approved skills afresh, read-only, at every
     start and passes them to the agent as local plugins; settings files
     stay unread. The tmux launcher passes them as `--plugin-dir` and refuses

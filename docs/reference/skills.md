@@ -247,8 +247,9 @@ so, and the approval record keeps the outcome. The console runs the test
 in a child process and keeps the last result in
 `<install>/data/skills/trigger-tests/<slug>/<name>.json`
 (`<install>/data/skills/private/trigger-tests/` for a cousin that loads
-`private`), where the policy hook denies tool writes, so a session cannot
-write the pass the approve view shows.
+`private`), where the policy hook denies tool writes (best-effort for
+Bash; the `tmux` lane has no gate), so a session does not write the pass
+by accident.
 
 ## Proposals
 

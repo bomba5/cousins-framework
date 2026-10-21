@@ -759,8 +759,9 @@ def _loads_private(home):
 
 def trigger_path(root, home, slug, name):
     """Where a draft's last trigger test result is kept: under
-    <install>/data/skills/, which guard_tool refuses to tools, so a session
-    cannot write the pass the approve view shows; never inside the draft,
+    <install>/data/skills/, which guard_tool refuses to tools (best-effort
+    for Bash), so a session does not write the pass the approve view shows
+    by accident; never inside the draft,
     where it would change the draft's own diff. A cousin that loads
     `private` keeps its results beside private's records, since the path
     names it."""

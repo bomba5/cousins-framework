@@ -34,8 +34,10 @@ steps, maybe scripts, and a closing pass/fail check.
   `tool --version`) instead of copying them into the text.
 - It MUST point at a repository's own scripts instead of copying them. A
   skill folder holds only scripts that belong to no repository.
-- It MUST resolve host tools by Nix attribute (`nix shell nixpkgs#poppler-utils`),
-  never by store path.
+- It MUST NOT hard-code where a tool is installed (a Nix store path, a
+  virtualenv, an `/opt` path). It names the tool and how this host provides
+  it (the distribution's package, `nix shell nixpkgs#<attr>` on NixOS, a
+  container), and its check runs `<tool> --version` first.
 - It MUST hold the procedure, never the state. Household lists, budgets,
   device lists and playthroughs stay in memory and are read at run time; a
   skill that needs one and finds none MUST stop (fail closed).

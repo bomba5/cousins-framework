@@ -78,7 +78,7 @@ from string keys to string *values*, so a list is one comma-separated string:
 
 | key | values | meaning |
 |---|---|---|
-| `context` | `personal`, `employer`, `private` | which repository it may live in; the approval checks it against the content |
+| `context` | `personal`, `work`, `private` | which repository it may live in; the approval checks it against the content |
 | `side-effect` | `read-only`, `writes-local`, `outward` | what it can change. An `outward` step (a push, an upload, a message, an order) MUST stop at the operator's go and never carries the go as a step |
 | `reads` | `repo@commit:path` or `path#sha256:<hex>`, comma-separated | what it reads; a change there flags the skill as stale |
 | `hosts` | host names, comma-separated | every host it may contact |
@@ -101,7 +101,7 @@ none published as a whole:
 | repository | holds | loaded by |
 |---|---|---|
 | `personal` | `shared/<name>/` (every cousin) and `<slug>/<name>/` | every cousin that lists it |
-| `employer` | `<slug>/<name>/` for employer work | only cousins that list it; it MUST have no remote, ever |
+| `work` | `<slug>/<name>/` for work done for an employer | only cousins that list it; it MUST have no remote, ever |
 | `private` | `<slug>/<name>/` for a private cousin, and private-life skills | only those cousins; never listed anywhere else |
 
 They sit under `<install>/skills/<repo>/`. A cousin's `cousin.toml` names the
@@ -109,7 +109,7 @@ repositories it loads from:
 
 ```toml
 [skills]
-repos = ["personal"]          # the default; ["personal", "employer"] for a cousin that does both
+repos = ["personal"]          # the default; ["personal", "work"] for a cousin that does both
 ```
 
 A cousin loads `shared/` (from `personal`) and its own `<slug>/` folder from
@@ -174,7 +174,7 @@ console as him, so the house commit rule holds unchanged.
   `reads` pins and the trigger test result. Approving commits the change on
   `main` as the operator (the house commit rule) and appends a record:
   the console session user, the repository, the commit, the skill and the
-  sha256 of the diff shown. Records for `personal` and `employer` go to
+  sha256 of the diff shown. Records for `personal` and `work` go to
   `<install>/data/skills/approvals.jsonl`. Records for `private` go to their
   own file, `<install>/data/skills/private/approvals.jsonl` (mode `0600`,
   which keeps out other OS users, not other cousins): a
@@ -210,7 +210,7 @@ stays byte-stable.
 
 | [lane](../glossary.md#lane) | how |
 |---|---|
-| `sdk` | At every start the [runner](../glossary.md#runner) exports the approved commit of each listed repository (`shared/` and the cousin's folder) afresh to `<home>/run/skills/<plugin>/`, read-only, with a plugin manifest, and passes each as a local plugin. The agent reads a skill's body when it uses the skill, not at start, so the export is denied to tools as well. Settings files stay unread (`setting_sources=[]`). The agent sees `shared:<name>`, `personal:<name>`, `employer:<name>`, `private:<name>`: the plugin is named for the repository, never the cousin. |
+| `sdk` | At every start the [runner](../glossary.md#runner) exports the approved commit of each listed repository (`shared/` and the cousin's folder) afresh to `<home>/run/skills/<plugin>/`, read-only, with a plugin manifest, and passes each as a local plugin. The agent reads a skill's body when it uses the skill, not at start, so the export is denied to tools as well. Settings files stay unread (`setting_sources=[]`). The agent sees `shared:<name>`, `personal:<name>`, `work:<name>`, `private:<name>`: the plugin is named for the repository, never the cousin. |
 | `tmux` | The same exports, passed as `--plugin-dir`. This lane reads project settings (`--setting-sources project,local`), which load `<home>/.claude/skills/` unapproved (probed 2026-10-21 with the host's Claude Code 2.1.282), so the launcher MUST refuse to start while that directory exists, naming it, and the policy hook denies writes there. |
 | `opencode` | Not supported. opencode has a skill tool of its own; the framework passes it nothing. |
 
@@ -261,7 +261,7 @@ check:
 - **board verification** (`personal`, `read-only`): wraps a repository's
   scripts pinned by commit.
 - **Zephyr upstream prep** (`personal`): reads the identity rules at use
-  time and never picks up the employer address.
+  time and never picks up the work address.
 - **recipe filing** (`writes-local`), and an **allergen pass** that MUST
   refuse to plan a dish when the household list is missing (fail closed).
 

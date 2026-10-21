@@ -214,5 +214,67 @@ class TestMain(LaunchCase):
         ex.assert_not_called()
 
 
+class TestSkills(LaunchCase):
+    """docs/reference/skills.md: this lane gets the approved skills as
+    plugin dirs, and refuses a home whose project settings would load
+    skills nobody approved."""
+
+    def approve_one(self, home):
+        from cousin_lib import skills
+        root = home.parent.parent
+        os.environ.update({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+                           "GIT_AUTHOR_NAME": "Ana Test", "GIT_AUTHOR_EMAIL": "ana@example.org",
+                           "GIT_COMMITTER_NAME": "Ana Test",
+                           "GIT_COMMITTER_EMAIL": "ana@example.org"})
+        skills.write_draft(home, "board-check", description="Check a board.",
+                           body="1. Read the board.\n", context="personal",
+                           side_effect="read-only",
+                           metadata={"should-trigger": "check the board",
+                                     "must-not-trigger": "what is for dinner?"})
+        skills.trigger_test(root, home, "wren", "board-check", checker=lambda prompt, dirs: (
+            "draft:board-check" if "board" in prompt else None, "ok"))
+        _text, sha = skills.diff_draft(root, home, "wren", "board-check")
+        skills.approve_draft(root, home, "wren", "board-check", user="ana", diff_sha=sha)
+
+    def test_an_approved_skill_comes_as_a_plugin_dir(self):
+        # the home sits in no install (no config/ above it), as on a
+        # bare host: the root is the home's grandparent, as on the sdk lane
+        home = self.home()
+        self.approve_one(home)
+        said = []
+        with mock.patch.object(tmux_launch, "_say", said.append):
+            rc, seen = self.run_main(home, fresh=False, environ={
+                "PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/tmp"),
+                "FRAMEWORK_ROOT": os.environ["FRAMEWORK_ROOT"]})
+        self.assertEqual(rc, 0, said)
+        self.assertEqual(said, [])
+        at = seen["argv"].index("--plugin-dir")
+        plugin = pathlib.Path(seen["argv"][at + 1])
+        self.assertEqual(plugin, home / "run" / "skills" / "personal")
+        self.assertTrue((plugin / "skills" / "board-check" / "SKILL.md").is_file())
+        self.assertTrue((plugin / ".claude-plugin" / "plugin.json").is_file())
+
+    def test_no_approved_skill_no_plugin_dir_and_nothing_said(self):
+        home = self.home()
+        said = []
+        with mock.patch.object(tmux_launch, "_say", said.append):
+            rc, seen = self.run_main(home, fresh=False, environ={
+                "PATH": "/usr/bin", "FRAMEWORK_ROOT": os.environ["FRAMEWORK_ROOT"]})
+        self.assertEqual(rc, 0)
+        self.assertNotIn("--plugin-dir", seen["argv"])
+        self.assertEqual(said, [])
+
+    def test_a_home_with_project_skills_is_refused(self):
+        home = self.home()
+        (home / ".claude" / "skills" / "sneaky").mkdir(parents=True)
+        with mock.patch.object(tmux_launch, "_say", lambda m: None):
+            rc, seen = self.run_main(home, fresh=False, environ={
+                "PATH": "/usr/bin", "FRAMEWORK_ROOT": os.environ["FRAMEWORK_ROOT"]})
+        self.assertEqual(rc, 2)
+        self.assertEqual(seen, {})
+        self.assertIn("without the console's approval",
+                      (home / "data" / "run" / "tmux-launch-exit.txt").read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

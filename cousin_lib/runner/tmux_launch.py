@@ -169,8 +169,11 @@ def main(argv=None):
         return _refuse(home, "%s exists: this lane would load those skills without the"
                        " console's approval; move them to %s as drafts" % (
                            unapproved, home / skills.DRAFTS))
+    # the root the sdk lane and the skill tool use (runner.main.root_for):
+    # the install above the home, else the home's grandparent
+    skills_root = root or Path(os.path.abspath(home)).parent.parent
     try:
-        plugin_dirs, _report = skills.export_plugins(root, home, home.name)
+        plugin_dirs, _report = skills.export_plugins(skills_root, home, home.name)
     except Exception as err:  # noqa: BLE001 - a bad export costs the skills, never the start
         _say("skills not loaded: %s: %s" % (type(err).__name__, err))
         plugin_dirs = []

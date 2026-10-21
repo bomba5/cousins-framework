@@ -144,7 +144,8 @@ console as him, so the house commit rule holds unchanged.
   the console session user, the repository, the commit, the skill and the
   sha256 of the diff shown. Records for `personal` and `employer` go to
   `<install>/data/skills/approvals.jsonl`. Records for `private` go to their
-  own file, `<install>/data/skills/private/approvals.jsonl` (mode `0600`): a
+  own file, `<install>/data/skills/private/approvals.jsonl` (mode `0600`,
+  which keeps out other OS users, not other cousins): a
   record names the folder, and a private cousin's folder is its name.
   `private` never shows in System > skills, only in its own cousin's
   inspector.

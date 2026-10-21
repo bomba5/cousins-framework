@@ -433,7 +433,7 @@ What the spawn dialog offers:
 
 ### `DELETE /api/cousins/<slug>`
 
-Dismiss. Stops the cousin (a cousin with no runner is not stopped, since nothing 2.0.0 starts can be running for it: the result carries `"stop": "skipped"` and `note`, the refusal line), tars the whole home (minus `.secrets/`) to `data/dismissed/<slug>-<YYYYmmdd-HHMMSS>.tar.gz`, then deletes the home. If the archive fails, nothing is deleted and you get `500` with `refusing to delete: ...`. `200 {"ok": true, "slug", "status": "deleted", "archive", "left_in_place": [...]}`. `left_in_place` lists the harness directories (`transcripts_dir`, `auto_memory_dir` from harness.toml) it didn't touch; clean those yourself if you want them gone.
+Dismiss. Stops the cousin (a cousin with no runner is not stopped, since nothing 2.0.0 starts can be running for it: the result carries `"stop": "skipped"` and `note`, the refusal line), tars the whole home (minus `.secrets/`) to `data/dismissed/<slug>-<YYYYmmdd-HHMMSS>.tar.gz`, then deletes the home. If the archive fails, nothing is deleted and you get `500` with `refusing to delete: ...`. Last, the running supervisor rescans the registry (as `cousin-supervisor reload` does, which also retries any failing child), so the cousin's runner and bridge rows go with the home. `200 {"ok": true, "slug", "status": "deleted", "archive", "left_in_place": [...], "supervisor"}`. `left_in_place` lists the harness directories (`transcripts_dir`, `auto_memory_dir` from harness.toml) it didn't touch; clean those yourself if you want them gone. `supervisor` is `rescanned`, `not running`, or why the rescan failed (`no answer: ...`, `refused: ...`); the home is gone either way.
 
 ### `POST /api/cousins/<slug>/start`
 

@@ -205,12 +205,39 @@ class TestRunnerLaneStop(_Case):
                                "error": "the supervisor is stopping"})
 
 
+class TestDismissRescansTheSupervisor(_Case):
+    """A dismiss ends with the supervisor's rescan, so the removed
+    cousin's runner row goes with its home: before, it stayed in the
+    supervisor's children, stopped and with a start button, until
+    something reloaded it."""
+
+    def test_the_stop_then_the_rescan(self):
+        home = runner_home(self.root, "toki")
+        stub = self.stub(reload={"ok": True, "added": [], "removed": ["runner:toki"]})
+        out = spawn.dismiss_cousin(self.root, slug="toki", tmux_bin=str(self.tmux))
+        self.assertEqual(out["supervisor"], "rescanned")
+        self.assertFalse(home.exists())
+        self.assertEqual([op for op, _ in stub.ops()], ["stop", "reload"])
+
+    def test_no_supervisor_is_said_not_raised(self):
+        home = runner_home(self.root, "toki")
+        out = spawn.dismiss_cousin(self.root, slug="toki", tmux_bin=str(self.tmux))
+        self.assertEqual((out["status"], out["supervisor"]), ("deleted", "not running"))
+        self.assertFalse(home.exists())
+
+    def test_a_refused_rescan_is_said_not_raised(self):
+        home = runner_home(self.root, "toki")
+        self.stub(reload={"ok": False, "error": "busy"})
+        out = spawn.dismiss_cousin(self.root, slug="toki", tmux_bin=str(self.tmux))
+        self.assertEqual(out["supervisor"], "refused: busy")
+        self.assertFalse(home.exists())
+
+
 class TestRealSupervisor(_Case):
     """start_cousin and stop_cousin against a real `cousin-supervisor run`
     over a `fake` runner cousin that does not auto-start."""
 
-    def test_start_then_stop_a_fake_runner(self):
-        home = runner_home(self.root, "toki", extra="auto_start = false\n")
+    def _supervise(self):
         log = open(self.dir / "supervisor.log", "w")
         self.addCleanup(log.close)
         proc = subprocess.Popen([sys.executable, "-m", "cousin_lib.supervisor", "run",
@@ -228,6 +255,10 @@ class TestRealSupervisor(_Case):
         self.addCleanup(_cleanup)
         self.assertTrue(_wait_for(lambda: supervisor.snapshot(self.root)),
                         (self.dir / "supervisor.log").read_text())
+
+    def test_start_then_stop_a_fake_runner(self):
+        home = runner_home(self.root, "toki", extra="auto_start = false\n")
+        self._supervise()
         self.assertFalse(is_running(home))
         spawn.start_cousin(home)
         self.assertTrue(_wait_for(lambda: is_running(home)),
@@ -246,6 +277,18 @@ class TestRealSupervisor(_Case):
                         (self.dir / "supervisor.log").read_text())
         spawn.stop_cousin(home, wait=False)
         self.assertTrue(held.exists())
+
+    def test_a_dismissed_cousin_leaves_the_supervisor_with_its_home(self):
+        home = runner_home(self.root, "toki", extra="auto_start = false\n")
+        self._supervise()
+        spawn.start_cousin(home)
+        self.assertTrue(_wait_for(lambda: is_running(home)),
+                        (self.dir / "supervisor.log").read_text())
+        self.assertIn("runner:toki", supervisor.request(self.root, "status")["children"])
+        out = spawn.dismiss_cousin(self.root, slug="toki", tmux_bin=str(self.tmux))
+        self.assertEqual(out["supervisor"], "rescanned")
+        self.assertNotIn("runner:toki", supervisor.request(self.root, "status")["children"],
+                         (self.dir / "supervisor.log").read_text())
 
 
 # ---- a new cousin is a runner cousin where the install says so

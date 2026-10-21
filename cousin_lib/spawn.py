@@ -637,7 +637,11 @@ def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
     A cousin with no runner kind (not a worker) is dismissed without the
     stop, which 2.0.0 refuses for it: nothing 2.0.0 started can be
     running for it. The result then carries "stop": "skipped" and a
-    "note" with delivery.lane_refusal."""
+    "note" with delivery.lane_refusal.
+
+    Last, the running supervisor rescans the registry (its `reload`), so
+    the cousin's runner and bridge children go with the home; the result
+    says how that went under "supervisor" (_rescan_supervisor)."""
     root = FrameworkConfig(root).root
     home = root / "cousins" / slug
     if not (home / "cousin.toml").is_file():
@@ -680,7 +684,26 @@ def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
         if cfg and cfg.get(key):
             left.append(str(expand_harness_path(cfg[key], home)))
     return {"slug": slug, "status": "deleted", "archive": str(archive),
-            "left_in_place": left, **(skipped or {})}
+            "left_in_place": left, "supervisor": _rescan_supervisor(root),
+            **(skipped or {})}
+
+
+def _rescan_supervisor(root):
+    """Ask the running supervisor to rescan the registry after a dismiss.
+    Without it a removed cousin stays in its children, a stopped runner
+    with a start button, until something reloads it. "rescanned", "not
+    running", or the reason it failed: the home is gone by now, so a
+    failed rescan is reported, never raised."""
+    from cousin_lib import supervisor
+    try:
+        answer = supervisor.request(root, "reload")
+    except supervisor.SupervisorAbsent:
+        return "not running"
+    except supervisor.SupervisorUnavailable as err:
+        return "no answer: %s" % err
+    if not answer.get("ok"):
+        return "refused: %s" % answer.get("error", "no reason given")
+    return "rescanned"
 
 
 def _persist_runtime_line(home, key, value):

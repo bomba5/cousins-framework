@@ -204,3 +204,22 @@ console.log(JSON.stringify([
                                   "agent.commit_attribution": None})
         self.assertEqual(got[2][:3], [None, None, None])
         self.assertIsNotNone(got[2][3])
+
+    def test_repo_toggles_keep_the_servers_order_and_lists_compare_by_value(self):
+        got = self.run_node("""
+const choices = ["personal", "work", "private"];
+const f = {"skills.repos": {value: ["personal"], set: false}};
+console.log(JSON.stringify([
+  cousinRepoToggle(choices, ["private"], "personal", true),
+  cousinRepoToggle(choices, ["personal", "work"], "personal", false),
+  cousinRepoToggle(choices, ["work", "personal"], "private", true),
+  cousinSettingChanges(f, {"skills.repos": ["personal"]}),
+  cousinSettingChanges(f, {"skills.repos": []}),
+  cousinSettingChanges(f, {"skills.repos": null})]));
+""")
+        self.assertEqual(got[0], ["personal", "private"])
+        self.assertEqual(got[1], ["work"])
+        self.assertEqual(got[2], ["personal", "work", "private"])
+        self.assertEqual(got[3], {})                    # the default, unchanged
+        self.assertEqual(got[4], {"skills.repos": []})  # none is a value
+        self.assertEqual(got[5], {})                    # unset already

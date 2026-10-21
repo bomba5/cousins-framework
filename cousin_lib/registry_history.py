@@ -196,6 +196,9 @@ SHIPPED_BEFORE = {
         {'to': '--user', 'image': '--image'},
         {'to': '--user'},
     ),
+    ('tools.skill.commands.draft', 'options'): (
+        {'scope': '--scope', 'should_trigger': '--should-trigger', 'must_not_trigger': '--must-not-trigger'},
+    ),
 }
 # --- end generated ---
 

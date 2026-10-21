@@ -210,6 +210,11 @@ side_effect = { type = "string", enum = ["read-only", "writes-local", "outward"]
 scope = { type = "string", optional = true, enum = ["own", "shared"], description = "your own folder (default), or shared/ for a general skill in personal (draft)" }
 should_trigger = { type = "string", optional = true, description = "a prompt that should make you use it, for the trigger test (draft)" }
 must_not_trigger = { type = "string", optional = true, description = "a prompt that must not (draft)" }
+hosts = { type = "string", optional = true, description = "every host it may contact, comma-separated; \"\" for none (draft)" }
+reads = { type = "string", optional = true, description = "what it reads, pinned: repo@commit:path or path#sha256:<hex>, comma-separated (draft)" }
+rests_on = { type = "string", optional = true, description = "paths, tool versions and memory topics it depends on, comma-separated (draft)" }
+source = { type = "string", optional = true, description = "a skill from outside: <url>@<full commit> (draft)" }
+license = { type = "string", optional = true, description = "an SPDX identifier; required with source (draft)" }
 body = { type = "string", description = "the steps, in Markdown (draft)" }
 
 [tools.skill.commands.list]
@@ -220,7 +225,7 @@ argv = ["show", "{name}"]
 
 [tools.skill.commands.draft]
 argv = ["draft", "{name}", "--description", "{description}", "--context", "{context}", "--side-effect", "{side_effect}"]
-options = { scope = "--scope", should_trigger = "--should-trigger", must_not_trigger = "--must-not-trigger" }
+options = { scope = "--scope", should_trigger = "--should-trigger", must_not_trigger = "--must-not-trigger", hosts = "--hosts", reads = "--reads", rests_on = "--rests-on", source = "--source", license = "--license" }
 stdin = ["body"]
 
 [tools.skill.commands.diff]

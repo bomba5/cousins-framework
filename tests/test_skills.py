@@ -82,6 +82,49 @@ class TestFormat(SkillsCase):
         self.assertEqual(parsed, front)
         self.assertEqual(body.strip(), BODY.strip())
 
+    def test_quotes_colons_and_non_ascii_round_trip_as_utf8_json_strings(self):
+        """Every value but the name is written as a JSON string, which a
+        YAML reader takes as the same text: a prompt with a quote or a
+        Danish letter reaches the trigger test as written, and a
+        description with ': ' or a leading '[' stays one string."""
+        prompt = 'hvad skal vi have: æbler "nu" \\ ok'
+        front = {"name": "a-b", "description": "[wip] Plan: dinner #1",
+                 "metadata": {"context": "personal", "should-trigger": prompt, "hosts": "",
+                              "odd": "del\x7fc1\x85\ufffe"}}
+        text = skills.render(front, BODY)
+        self.assertIn('description: "[wip] Plan: dinner #1"\n', text)
+        self.assertIn("æbler", text)
+        self.assertNotIn("\\u00e6", text)
+        self.assertIn('  hosts: ""\n', text)
+        self.assertNotIn("\x7f", text)
+        self.assertNotIn("\ufffe", text)              # escaped: YAML refuses it raw
+        for line in text.split("---")[1].strip().split("\n"):   # not splitlines: NEL
+            key, _, value = line.strip().partition(": ")
+            if key not in ("name", "metadata:"):
+                json.loads(value)           # each one a JSON (so YAML) string
+        parsed, _ = skills.parse(text)
+        self.assertEqual(parsed, front)
+
+    def test_hand_written_values_read_as_yaml_would(self):
+        text = ("---\nname: a\ndescription: 'it''s plain'\nlicense:\nmetadata:\n"
+                '  context: personal\n  reads: "x@abc1234:p"\n  hosts:\n  source: ""\n'
+                "---\nsteps\n")
+        front, _ = skills.parse(text)
+        self.assertEqual(front["description"], "it's plain")
+        self.assertNotIn("license", front)                  # an empty plain value is null
+        meta = front["metadata"]
+        self.assertEqual((meta["context"], meta["reads"]), ("personal", "x@abc1234:p"))
+        self.assertNotIn("hosts", meta)                     # blank: not declared
+        self.assertEqual(meta["source"], "")                # "": declared none
+
+    def test_an_escape_only_yaml_reads_is_refused_not_kept(self):
+        """Kept as written, the approve view and the trigger test would see
+        other text than the agent's YAML reader loads."""
+        for value in ('"C:\\path"', '"a\\x41b"', '"a" and "b"'):
+            text = "---\nname: a\ndescription: %s\n---\nsteps\n" % value
+            with self.assertRaisesRegex(SkillError, "takes JSON's escapes only", msg=value):
+                skills.parse(text)
+
     def test_a_missing_or_broken_frontmatter_is_an_error(self):
         for text in ("no frontmatter", "---\nname: x\n", "---\njust words\n---\n",
                      "---\n  indented: x\n---\n"):
@@ -102,6 +145,114 @@ class TestFormat(SkillsCase):
                      {"context": "work", "side-effect": "read-only", "scope": "shared"},
                      {"context": "personal", "side-effect": "read-only", "scope": "fleet"}):
             self.assertTrue(skills.problems("board-check", dict(good, metadata=meta)), meta)
+
+
+SHA = "ab" * 32
+COMMIT = "0123456789abcdef" * 2 + "01234567"      # a full one
+
+
+class TestDeclaredKeys(SkillsCase):
+    """hosts, reads, rests-on, source and license: what a skill reaches and
+    where it came from, set by the draft tool and checked before approval,
+    never at load."""
+
+    def write(self, home=None, **declared):
+        license = declared.pop("license", None)
+        meta = dict(PROMPTS, **declared)
+        path = skills.write_draft(home or self.wren, "board-check",
+                                  description="Check a board.", body=BODY,
+                                  context="personal", side_effect="read-only",
+                                  metadata=meta, license=license)
+        return skills.parse(path.read_text())[0]
+
+    def test_written_normalized_and_an_empty_value_declares_none(self):
+        front = self.write(hosts=" a.example ,b.example,, ",
+                           reads="wren-lab/widget@%s:tools/x.py, notes/a.md#sha256:%s" % (COMMIT, SHA),
+                           **{"rests-on": "kicad-cli --version,  board-notes"})
+        meta = front["metadata"]
+        self.assertEqual(meta["hosts"], "a.example, b.example")
+        self.assertEqual(meta["reads"],
+                         "wren-lab/widget@%s:tools/x.py, notes/a.md#sha256:%s" % (COMMIT, SHA))
+        self.assertEqual(meta["rests-on"], "kicad-cli --version, board-notes")
+        self.assertNotIn("source", meta)
+        self.assertNotIn("license", front)
+        meta = self.write(hosts="", source=None)["metadata"]
+        self.assertEqual(meta["hosts"], "")             # declared: contacts no host
+        self.assertNotIn("source", meta)                # not declared
+        self.assertNotIn("reads", meta)
+        meta = skills.parse(skills.write_draft(
+            self.wren, "board-check", description="Check a board.", body=BODY,
+            context="personal", side_effect="read-only",
+            metadata={"should-trigger": "", "must-not-trigger": None}).read_text())[0]["metadata"]
+        self.assertNotIn("should-trigger", meta)        # an empty prompt is no prompt
+
+    def test_malformed_values_are_refused_when_written(self):
+        for declared, word in (({"hosts": "https://a.example/x"}, "metadata.hosts"),
+                               ({"hosts": "a b"}, "metadata.hosts"),
+                               ({"hosts": "-a.example"}, "metadata.hosts"),
+                               ({"reads": "tools/x.py"}, "metadata.reads"),
+                               ({"reads": "w@main:tools/x.py"}, "metadata.reads"),
+                               ({"reads": "notes/a.md#sha256:abc"}, "metadata.reads"),
+                               ({"source": "github.com/o/r@" + COMMIT, "license": "MIT"},
+                                "metadata.source"),
+                               ({"source": "https://g.example/o/r@v1.0", "license": "MIT"},
+                                "metadata.source"),
+                               ({"license": "MIT; rm -rf"}, "license takes"),
+                               ({"reads": "w@abc1234:tools/x.py"}, "metadata.reads"),
+                               ({"source": ":@" + COMMIT, "license": "MIT"}, "metadata.source"),
+                               ({"source": "https://@" + COMMIT, "license": "MIT"},
+                                "metadata.source"),
+                               ({"source": "https://g.example/o/r@abc1234", "license": "MIT"},
+                                "metadata.source"),
+                               ({"source": "https://g.example/o/r.git@" + COMMIT},
+                                "needs a license")):
+            with self.assertRaisesRegex(SkillError, word, msg=declared):
+                self.write(**declared)
+        self.assertFalse((self.wren / "skill-drafts").exists())
+
+    def test_a_skill_from_outside_carries_its_source_and_licence(self):
+        front = self.write(source="git@g.example:o/r.git@" + COMMIT, license="MIT OR Apache-2.0")
+        self.assertEqual(front["metadata"]["source"], "git@g.example:o/r.git@" + COMMIT)
+        self.assertEqual(front["license"], "MIT OR Apache-2.0")
+        self.assertEqual(skills.drafts(self.wren, "wren")[0]["problems"], [])
+
+    def test_a_hand_edited_draft_lists_them_and_is_not_approved_but_would_load(self):
+        folder = self.wren / "skill-drafts" / "board-check"
+        folder.mkdir(parents=True)
+        front = {"name": "board-check", "description": "Check a board.",
+                 "metadata": dict(PROMPTS, context="personal", hosts="https://a.example",
+                                  **{"side-effect": "read-only"})}
+        (folder / "SKILL.md").write_text(skills.render(front, BODY))
+        found = skills.drafts(self.wren, "wren")[0]["problems"]
+        self.assertEqual(len(found), 1)
+        self.assertIn("metadata.hosts takes host names", found[0])
+        self.run_trigger(self.wren, "wren")
+        _text, sha = skills.diff_draft(self.root, self.wren, "wren", "board-check")
+        with self.assertRaisesRegex(SkillError, "cannot be approved: metadata.hosts"):
+            skills.approve_draft(self.root, self.wren, "wren", "board-check", user="ana",
+                                 diff_sha=sha)
+        self.assertEqual(skills.problems("board-check", front), [])     # the loader's rules
+
+    def test_the_runner_tool_passes_them_and_tells_absent_from_empty(self):
+        from types import SimpleNamespace
+        from cousin_lib.runner import tools
+        ctx = SimpleNamespace(home=self.wren, slug="wren", root=self.root)
+        text = tools._sk_draft(ctx, {"command": "draft", "name": "board-check",
+                                     "description": "Check a board.", "context": "personal",
+                                     "side_effect": "read-only", "body": BODY,
+                                     "should_trigger": PROMPTS["should-trigger"],
+                                     "must_not_trigger": PROMPTS["must-not-trigger"],
+                                     "hosts": "", "rests_on": "kicad-cli --version",
+                                     "source": "https://g.example/o/r@" + COMMIT,
+                                     "license": "MIT"})
+        self.assertIn("draft written", text)
+        self.assertNotIn("before approval", text)
+        front = skills.parse((self.wren / "skill-drafts" / "board-check" / "SKILL.md")
+                             .read_text())[0]
+        self.assertEqual(front["metadata"]["hosts"], "")
+        self.assertEqual(front["metadata"]["rests-on"], "kicad-cli --version")
+        self.assertNotIn("reads", front["metadata"])
+        self.assertEqual(front["license"], "MIT")
 
 
 class TestDraftsAndApproval(SkillsCase):
@@ -390,12 +541,55 @@ class TestCli(SkillsCase):
         _, out, _ = self.run_cli("list")
         self.assertIn("board-check -> personal:wren", out)
         _, out, _ = self.run_cli("show", "board-check")
-        self.assertIn("should-trigger: check the regenerated board", out)
+        self.assertIn('should-trigger: "check the regenerated board"', out)
         _, out, _ = self.run_cli("diff", "board-check")
         self.assertIn("+1. Read the board.", out)
         code, _, err = self.run_cli("diff", "nope")
         self.assertEqual(code, 2)
         self.assertIn("no draft nope", err)
+
+    def test_the_declared_keys_from_a_terminal(self):
+        base = ("draft", "board-check", "--description", "Check a board.", "--context",
+                "personal", "--side-effect", "read-only")
+        code, out, _ = self.run_cli(*base, "--hosts", "", "--reads", "w@%s:tools/x.py" % COMMIT,
+                                    "--rests-on", "kicad-cli --version", "--source",
+                                    "https://g.example/o/r@" + COMMIT, "--license", "MIT",
+                                    stdin=BODY)
+        self.assertEqual(code, 0, out)
+        _, out, _ = self.run_cli("show", "board-check")
+        for line in ('license: "MIT"', 'hosts: ""', 'reads: "w@%s:tools/x.py"' % COMMIT,
+                     'rests-on: "kicad-cli --version"',
+                     'source: "https://g.example/o/r@%s"' % COMMIT):
+            self.assertIn(line, out)
+        code, _, err = self.run_cli(*base, "--hosts", "https://a.example", stdin=BODY)
+        self.assertEqual(code, 2)
+        self.assertIn("metadata.hosts takes host names", err)
+
+    def test_the_tool_registry_maps_every_draft_key_to_a_flag_the_command_takes(self):
+        """The opencode and tmux lanes run the shipped registry's draft
+        command line: each property it passes is a flag cousin-skill
+        accepts, and an empty hosts still reaches it."""
+        from cousin_lib import mcp_server
+        registry = mcp_server.load_registry(
+            pathlib.Path(skills.__file__).resolve().parents[1] / "config"
+            / "mcp-registry.toml.example")
+        tool = registry["tools"]["skill"]
+        args = {"name": "board-check", "description": "Check a board.", "context": "personal",
+                "side_effect": "read-only", "body": BODY, "scope": "own",
+                "should_trigger": PROMPTS["should-trigger"],
+                "must_not_trigger": PROMPTS["must-not-trigger"], "hosts": "",
+                "reads": "w@%s:tools/x.py" % COMMIT, "rests_on": "kicad-cli --version",
+                "source": "https://g.example/o/r@" + COMMIT, "license": "MIT"}
+        self.assertEqual(set(args), set(tool["properties"]) - {"command"})
+        argv, stdin = mcp_server.build_call(tool, "draft", args, resolve=lambda c: c)
+        self.assertEqual(argv[0], "cousin-skill")
+        self.assertEqual(argv[argv.index("--hosts") + 1], "")
+        code, out, _ = self.run_cli(*argv[1:], stdin=stdin.decode())
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("before approval", out)
+        meta = skills.parse((self.wren / "skill-drafts" / "board-check" / "SKILL.md")
+                            .read_text())[0]["metadata"]
+        self.assertEqual((meta["hosts"], meta["rests-on"]), ("", "kicad-cli --version"))
 
 
 class TestTriggerTest(SkillsCase):

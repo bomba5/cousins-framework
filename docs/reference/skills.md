@@ -1,9 +1,9 @@
 # Skills
 
-**Status:** phase 1 is built (3.58.0): the repositories and approval
+**Status:** phase 1 is built (3.58.0, completed in 3.59.0): the repositories and approval
 records, loading on the `sdk` and `tmux` [lanes](../glossary.md#lane), the guard, the `skill` tool
-and `cousin-skill`, the console's inspect, approve, reject and remove, and
-the trigger test. Phases 2 to 4 (installing from outside, proposals,
+and `cousin-skill`, the console's inspect, approve, reject and remove, the
+trigger test, and the console setting for which repositories load. Phases 2 to 4 (installing from outside, proposals,
 staleness checks) are not built yet. Agreed in a team meeting (2026-10-21). Requirement words follow RFC 2119.
 
 A skill is a procedure a [cousin](../glossary.md#cousin) loads when it needs it: a folder with a
@@ -76,19 +76,32 @@ folder name, 1-64 lowercase letters, digits and `-`, not starting or ending
 with `-` and with no `--`; `description` is one line of 1-1024 characters. `license` is an SPDX
 identifier; it is REQUIRED for a skill from outside. The framework's own keys
 sit under `metadata`, as the format asks. The format makes `metadata` a map
-from string keys to string *values*, so a list is one comma-separated string:
+from string keys to string *values*, so a list is one comma-separated string.
+The draft tool writes every value but the name double-quoted, as a JSON
+string, which a YAML reader takes as the same text; a double-quoted value
+with an escape JSON lacks (`\x41`) is refused, since it would read
+differently here and in the agent:
 
 | key | values | meaning |
 |---|---|---|
 | `context` | `personal`, `work`, `private` | which repository it may live in; the approval checks it against the content |
 | `side-effect` | `read-only`, `writes-local`, `outward` | what it can change. An `outward` step (a push, an upload, a message, an order) MUST stop at the operator's go and never carries the go as a step |
-| `reads` | `repo@commit:path` or `path#sha256:<hex>`, comma-separated | what it reads; a change there flags the skill as stale |
+| `reads` | `repo@commit:path` (the full commit) or `path#sha256:<hex>`, comma-separated | what it reads; a change there flags the skill as stale |
 | `hosts` | host names, comma-separated | every host it may contact |
 | `rests-on` | paths, tool versions, memory topics, comma-separated | what it depends on, checked for drift |
 | `should-trigger` | a prompt | one that SHOULD make the cousin use the skill (the trigger test); a draft without it is not approved |
 | `must-not-trigger` | a prompt | one that MUST NOT; a draft without it is not approved |
 | `scope` | `own`, `shared` | the cousin's folder (the default) or `shared/`; `shared` only for a general skill in `personal` |
-| `source` | `<url>@<commit>` | a skill from outside: where it came from |
+| `source` | `<url>@<commit>`, the full commit | a skill from outside: where it came from |
+
+`hosts`, `reads`, `rests-on` and `source` left out, or with nothing after
+the colon (YAML's null), are not declared; `""` declares none (`hosts: ""`
+contacts no host). The draft tool and
+approval refuse a host that is not a host name, a `reads` pin in neither
+form or not pinned to a full commit, a `source` that is not a URL pinned to a
+full commit, a `license` that is not an
+SPDX expression, and a `source` without a `license`. Loading does not check
+them, so a format rule never unloads an approved skill.
 
 Public interface, under the same rule (adding is MINOR, renaming or
 removing is MAJOR): these metadata keys, the `[skills] repos` key in
@@ -109,7 +122,8 @@ none published as a whole:
 | `private` | `<slug>/<name>/` for a private cousin, and private-life skills | only those cousins; never listed anywhere else |
 
 They sit under `<install>/skills/<repo>/`. A cousin's `cousin.toml` names the
-repositories it loads from:
+repositories it loads from, set in the console's inspector (cousin settings,
+"skill repos"; it takes effect at the cousin's next start):
 
 ```toml
 [skills]
@@ -149,7 +163,7 @@ server, beside `memory`, `job` and `schedule`:
 |---|---|
 | `list` | the skills it loads (from which repository) and its drafts |
 | `show` | one skill's `SKILL.md` and file list, approved or draft |
-| `draft` | writes or edits a draft in `<home>/skill-drafts/<name>/` |
+| `draft` | writes or edits a draft in `<home>/skill-drafts/<name>/`, with the metadata keys above |
 | `diff` | a draft against the approved version |
 
 `list` and `show` cover only what the cousin loads (`shared/` and its own

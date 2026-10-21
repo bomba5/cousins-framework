@@ -517,9 +517,12 @@ def _sk_draft(ctx, a):
         description=_required(a, "description", "draft"), body=_str(a, "body"),
         context=_required(a, "context", "draft"),
         side_effect=_required(a, "side_effect", "draft"),
-        scope=_str(a, "scope", "own") or "own",
+        scope=_str(a, "scope", "own") or "own", license=_str(a, "license", None),
         metadata={"should-trigger": _str(a, "should_trigger"),
-                  "must-not-trigger": _str(a, "must_not_trigger")})
+                  "must-not-trigger": _str(a, "must_not_trigger"),
+                  # absent is not declared; "" declares none
+                  "hosts": _str(a, "hosts", None), "reads": _str(a, "reads", None),
+                  "rests-on": _str(a, "rests_on", None), "source": _str(a, "source", None)})
     return skills.draft_written(ctx.home, ctx.slug, name, path)
 
 

@@ -321,6 +321,50 @@ class CousinSettings(AgentCase):
         self.assertIs(settings["includeCoAuthoredBy"], False)
         self.assertIn("harness settings", body.get("note", ""))
 
+    def test_skill_repos_are_a_list_of_the_offered_names_read_at_start(self):
+        from cousin_lib import skills
+        home = self.cousin("wren")
+        self.serve()
+        row = self.get("/api/cousins/wren/settings")[1]["fields"]["skills.repos"]
+        self.assertEqual((row["value"], row["set"], row["default"]),
+                         (["personal"], False, ["personal"]))
+        self.assertEqual(row["choices"], list(skills.REPOS))
+        self.assertTrue(row["restart"])
+        for want in (["personal", "work"], ["private"], []):
+            status, body = self.post("/api/cousins/wren/settings",
+                                     {"changes": {"skills.repos": want}})
+            self.assertEqual(status, 200, body)
+            self.assertTrue(body["restart_required"])
+            self.assertEqual(tomllib.loads((home / "cousin.toml").read_text())["skills"],
+                             {"repos": want})
+            self.assertEqual(skills.cousin_repos(home), want)     # what a start loads
+            self.assertEqual(body["settings"]["fields"]["skills.repos"]["value"], want)
+        status, body = self.post("/api/cousins/wren/settings", {"changes": {"skills.repos": None}})
+        self.assertEqual(status, 200, body)
+        self.assertNotIn("repos", tomllib.loads((home / "cousin.toml").read_text())
+                         .get("skills", {}))
+        self.assertEqual(skills.cousin_repos(home), ["personal"])
+        self.assertFalse(body["settings"]["fields"]["skills.repos"]["set"])
+
+    def test_skill_repos_refusals_write_nothing(self):
+        home = self.cousin("wren")
+        self.serve()
+        before = (home / "cousin.toml").read_bytes()
+        for bad, word in (("personal", "list"), ([1], "list"), (["employer"], "unknown 'employer'"),
+                          (["work", "work"], "twice")):
+            status, body = self.post("/api/cousins/wren/settings",
+                                     {"changes": {"skills.repos": bad}})
+            self.assertEqual(status, 400, body)
+            self.assertIn(word, body["errors"]["skills.repos"])
+        self.assertEqual((home / "cousin.toml").read_bytes(), before)
+
+    def test_a_hand_written_bad_repos_list_is_shown_with_why(self):
+        self.cousin("wren", extra='\n[skills]\nrepos = ["personal", "fleet"]\n')
+        self.serve()
+        body = self.get("/api/cousins/wren/settings")[1]
+        self.assertEqual(body["fields"]["skills.repos"]["value"], ["personal", "fleet"])
+        self.assertIn("unknown 'fleet'", body["errors"]["skills.repos"])
+
     def test_an_unknown_cousin_is_404(self):
         self.serve()
         self.assertEqual(self.get("/api/cousins/nobody/settings")[0], 404)

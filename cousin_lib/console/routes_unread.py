@@ -8,9 +8,11 @@ not say how many. Here it is a message id kept on the server per console
 user, in their preferences (routes_prefs, under `chat_read`): one mark
 per cousin and thread, which the chat pane moves forward, never back.
 
-Counts cover the cousins whose chat this console answers itself, a
-runner cousin on this machine, over its chat.db. A cousin the console
-forwards (a hive node, a cousin with a chat host) has none."""
+Counts cover the cousins whose chat this console answers itself: a
+runner cousin on this machine (any [agent] runner kind, tmux included),
+over its chat.db. A hive node and a cousin with a chat host, which the
+console forwards, have none, and so does a local cousin with no runner
+kind, which has no chat to count."""
 from __future__ import annotations
 
 import sqlite3

@@ -20,8 +20,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   for its own counts again. Fleet rows carry `lastMsgId`. The first
   time a browser loads this version it sends the server what its old
   local mark said it had seen, so a dot you had cleared stays cleared.
-  A cousin the console forwards (a hive node, a cousin with a chat
-  host) has no count.
+  Counts cover the runner cousins on this machine, any `[agent] runner`
+  kind. A cousin with a chat host, which the console forwards, loses
+  the per-browser dot it had; a hive node and a local cousin with no
+  runner kind never had one.
 
 ## 3.55.1 - 2026-10-20
 

@@ -140,8 +140,8 @@ server, beside `memory`, `job` and `schedule`:
 
 `list` and `show` cover only what the cousin loads (`shared/` and its own
 folder in each repository it lists) and its own drafts. They never list or
-show another cousin's skill, or a `private` folder, whose name is a private
-cousin's: Bash can read those (per cousin is not hidden), but the
+show another cousin's skill, or another cousin's `private` folder, whose
+name is a private cousin's: Bash can read those (per cousin is not hidden), but the
 framework's own tool does not hand them out.
 
 `cousin-skill` is the same for a terminal, with the same commands, and the
@@ -152,7 +152,7 @@ skill.
 Two tools carry the word, and a `policy.toml` rule must name the right one:
 `Skill` is the agent's own loader, and denying it stops a cousin *using*
 skills; `mcp__cousin__skill` (on opencode `cousin_skill`) is this tool, and
-denying it stops *drafting*. On a lane that loads no skills (opencode), the
+denying it stops *drafting*. On a [lane](../glossary.md#lane) that loads no skills (opencode), the
 tool still answers: `list` says "none: this lane loads no skills".
 
 ## Drafting and approval

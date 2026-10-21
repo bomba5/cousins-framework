@@ -118,13 +118,16 @@ const HeartbeatGraph = React.memo(function HeartbeatGraph({ state = "idle", widt
 //                  render: (props) => <AccountsView {...props} /> });
 // Slots in use: inspector.lane (beside the lane rows), inspector.panels
 // (with the other panels), inspector.actions (the button row), each with
-// props { cousin }; settings.panels, props { auth, setAuth }. Entries
-// render by `order` (default 100), an id registered again replaces the
-// old entry, and each renders inside its own error boundary. A view gets a
-// NAV entry after the built-in ones and props { cousins, sessionUser,
-// onOpen }. Pure JS down to the end marker: the tests run it under node.
+// props { cousin }; settings.panels, props { auth, setAuth }; system.tabs,
+// a tab of the System view ({ id, label, order, render }, props
+// { cousins, sessionUser, onOpen }). Entries render by `order` (default
+// 100), an id registered again replaces the old entry, and each renders
+// inside its own error boundary. A view gets a NAV entry after the
+// built-in ones and props { cousins, sessionUser, onOpen, loops, auth,
+// setAuth }. Pure JS down to the end marker: the tests run it under node.
+// loops, settings and accounts are System tabs now; their ids stay taken.
 const RESERVED_VIEW_IDS = ["chat", "overview", "cousins", "jobs", "memory", "loops",
-                           "tokens", "tracker", "meetings", "settings"];
+                           "tokens", "tracker", "meetings", "settings", "accounts"];
 const SEAM_SLOTS = {};
 const SEAM_VIEWS = [];
 

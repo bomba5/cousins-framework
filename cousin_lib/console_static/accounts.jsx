@@ -561,8 +561,9 @@ function CousinAccountPanel({ cousin }) {
   );
 }
 
-registerView({ id: "accounts", label: "Accounts", icon: I.host, order: 50,
-               render: (props) => <AccountsView {...props} /> });
+// A System tab since 3.57.0, no longer a sidebar view of its own.
+registerSlot("system.tabs", { id: "accounts", label: "accounts", order: 40,
+                              render: (props) => <AccountsView {...props} /> });
 registerSlot("inspector.panels", { id: "account", order: 20,
                                    render: ({ cousin }) => <CousinAccountPanel cousin={cousin} /> });
 

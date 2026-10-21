@@ -34,6 +34,17 @@ class SystemView(unittest.TestCase):
                       "SysAgentDefaultsPanel", "SysConfigEditors"):
             self.assertIn("<%s" % panel, view, panel)
 
+    def test_loops_settings_and_accounts_are_its_tabs(self):
+        tabs = self.src[self.src.index("const SYSTEM_TABS = ["):self.src.index("];", self.src.index("const SYSTEM_TABS = ["))]
+        ids = re.findall(r'id: "([a-z]+)"', tabs)
+        self.assertEqual(ids, ["services", "loops", "schedules", "users", "agent", "config",
+                               "backup", "settings"])
+        self.assertIn('slotEntries("system.tabs")', self.src)
+        self.assertIn("<LoopsView loops={loops || []} />", self.src)
+        self.assertIn("<SettingsView auth={auth} setAuth={setAuth} />", self.src)
+        # a package's tab renders in its own error boundary
+        self.assertIn('<SlotBoundary label={"system/" + slotTab.id}>', self.src)
+
     def test_every_route_it_calls_is_registered(self):
         from cousin_lib.console import app, router
         from tests.console.test_static_files import _TEMPLATE_PARAM, _api_literals

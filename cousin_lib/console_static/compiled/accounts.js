@@ -417,11 +417,10 @@ function CousinAccountPanel({ cousin }) {
     "validate · spends one model turn"
   )), op && (op.kind === "check-auth" || op.kind === "validate") && /* @__PURE__ */ React.createElement(AccountOpStages, { op }), err && /* @__PURE__ */ React.createElement("div", { style: { ...ACCOUNT_MONO, color: "var(--red)" } }, err)));
 }
-registerView({
+registerSlot("system.tabs", {
   id: "accounts",
-  label: "Accounts",
-  icon: I.host,
-  order: 50,
+  label: "accounts",
+  order: 40,
   render: (props) => /* @__PURE__ */ React.createElement(AccountsView, { ...props })
 });
 registerSlot("inspector.panels", {

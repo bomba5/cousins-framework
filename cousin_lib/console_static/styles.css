@@ -500,6 +500,9 @@ select.sel-inline:focus { border-color: var(--accent); }
   white-space: nowrap;
 }
 .radio-row > button:hover { color: var(--fg-0); }
+/* System's nine tabs wrap onto a second row on a phone instead of squeezing. */
+.system-view .radio-row { flex-wrap: wrap; }
+.system-view .radio-row > button { flex: 1 0 auto; }
 .radio-row > button.sel {
   background: var(--bg-3);
   color: var(--fg-0);

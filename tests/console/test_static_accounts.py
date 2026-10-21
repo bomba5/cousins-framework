@@ -17,7 +17,7 @@ _STATIC = _ROOT / "cousin_lib" / "console_static"
 def _component(text, name):
     start = text.index("function %s(" % name)
     rest = text[start + 1:]
-    m = re.search(r"^(function \w+\(|class \w+ |const \w+ = |registerView\()", rest, re.M)
+    m = re.search(r"^(function \w+\(|class \w+ |const \w+ = |registerView\(|registerSlot\()", rest, re.M)
     return text[start:start + 1 + (m.start() if m else len(rest))]
 
 
@@ -26,7 +26,9 @@ class AccountsJsx(unittest.TestCase):
         self.src = (_STATIC / "accounts.jsx").read_text(encoding="utf-8")
 
     def test_registered_through_the_seams(self):
-        self.assertRegex(self.src, r'registerView\(\{ id: "accounts", label: "Accounts"')
+        # a System tab since 3.57.0 (#383), not a sidebar view of its own
+        self.assertIn('registerSlot("system.tabs", { id: "accounts", label: "accounts", order: 40', self.src)
+        self.assertNotIn("registerView(", self.src)
         self.assertIn('registerSlot("inspector.panels", { id: "account"', self.src)
         self.assertIn("<AccountsView {...props} />", self.src)
         self.assertIn("<CousinAccountPanel cousin={cousin} />", self.src)

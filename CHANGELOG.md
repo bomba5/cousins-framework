@@ -32,6 +32,13 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
     contract bytes: each SDK and opencode cousin's prompt cache starts
     fresh once, at its next start.
 
+### Fixed
+
+- **An exported skill's scripts run.** The export that loads a cousin's
+  skills wrote every file 0644 and then made it read-only (0444), so a
+  script the skill's steps say to run was refused (`Permission denied`).
+  A file git keeps executable now exports 0555, still read-only.
+
 ## 3.60.1 - 2026-10-22
 
 ### Fixed

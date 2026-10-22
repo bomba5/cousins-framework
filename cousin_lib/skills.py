@@ -779,17 +779,20 @@ def _writable_tree(path):
 
 
 def _readonly_tree(path):
+    """Every file read-only, a script keeping its executable bit (0555), so
+    an exported skill's scripts run as its steps say."""
     for dirpath, dirnames, filenames in os.walk(path, topdown=False):
         for f in filenames:
             p = os.path.join(dirpath, f)
             if not os.path.islink(p):
-                os.chmod(p, 0o444)
+                os.chmod(p, 0o555 if os.stat(p).st_mode & 0o111 else 0o444)
         os.chmod(dirpath, 0o555)
 
 
 def _extract(path, commit, folder, dest):
     """The approved `folder` of a repository into dest/skills/, its prefix
-    dropped; regular files and directories only."""
+    dropped; regular files and directories only, a file git keeps
+    executable (100755) staying executable."""
     data = subprocess.run(["git", "-C", str(path), "archive", "--format=tar", commit,
                            "%s/" % folder], capture_output=True, timeout=120)
     if data.returncode != 0:
@@ -808,6 +811,8 @@ def _extract(path, commit, folder, dest):
             elif member.isfile():
                 target_path.parent.mkdir(parents=True, exist_ok=True)
                 target_path.write_bytes(tf.extractfile(member).read())
+                if member.mode & 0o111:
+                    os.chmod(target_path, 0o755)
     return sorted(p.name for p in out.iterdir() if p.is_dir())
 
 

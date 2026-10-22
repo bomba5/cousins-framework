@@ -238,9 +238,33 @@ function SkillApproved({ showUrl, removalUrl, removeUrl, onDone }) {
     }
   )));
 }
-function SkillRow({ label, item, open, onToggle, children }) {
+function skillWhen(iso) {
+  return iso ? String(iso).replace("T", " ").slice(0, 16) : "never";
+}
+function SkillHealth({ item, unusedDays }) {
+  const check = item.check;
+  const use = item.usage || {};
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", paddingLeft: 18, ...SKILL_MONO } }, !check && /* @__PURE__ */ React.createElement("span", { className: "pill gray", title: "the staleness run has not reached it yet" }, "not checked yet"), check && check.stale && /* @__PURE__ */ React.createElement("span", { className: "pill red", title: `changed: ${(check.changed || []).join(", ")}` }, "stale"), check && !check.stale && /* @__PURE__ */ React.createElement("span", { className: "pill green", title: `checked ${skillWhen(check.at)}` }, "ok"), check && check.update && /* @__PURE__ */ React.createElement("span", { className: "pill amber", title: "its source upstream changed: a new import, by the operator" }, "upstream changed"), item.unused && /* @__PURE__ */ React.createElement("span", { className: "pill gray", title: `no use for ${unusedDays || 30} days: consider removing it` }, "unused ", unusedDays || 30, "d"), /* @__PURE__ */ React.createElement("span", { className: "muted" }, "used ", skillWhen(use.last), use.count ? ` (${use.count}x)` : ""), check && /* @__PURE__ */ React.createElement("span", { className: "muted" }, "checked ", skillWhen(check.at), check.unknown ? `, ${check.unknown} not checkable` : ""), check && check.stale && /* @__PURE__ */ React.createElement("span", { style: { color: "var(--red)" } }, "changed: ", (check.changed || []).join(", ")));
+}
+function SkillRow({ label, item, open, onToggle, children, unusedDays }) {
   const meta = item.metadata || {};
-  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } }, /* @__PURE__ */ React.createElement("div", { onClick: onToggle, style: { display: "flex", gap: 10, alignItems: "baseline", cursor: "pointer", ...SKILL_MONO } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-0)", minWidth: 180 } }, open ? "v" : ">", " ", label), /* @__PURE__ */ React.createElement(SkillSideEffect, { value: meta["side-effect"] }), /* @__PURE__ */ React.createElement("span", { className: "muted", style: { flex: 1 } }, item.description), (item.problems || []).length > 0 && /* @__PURE__ */ React.createElement("span", { className: "pill red", title: item.problems.join("; ") }, "problem")), open && children);
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } }, /* @__PURE__ */ React.createElement("div", { onClick: onToggle, style: { display: "flex", gap: 10, alignItems: "baseline", cursor: "pointer", ...SKILL_MONO } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-0)", minWidth: 180 } }, open ? "v" : ">", " ", label), /* @__PURE__ */ React.createElement(SkillSideEffect, { value: meta["side-effect"] }), /* @__PURE__ */ React.createElement("span", { className: "muted", style: { flex: 1 } }, item.description), (item.problems || []).length > 0 && /* @__PURE__ */ React.createElement("span", { className: "pill red", title: item.problems.join("; ") }, "problem")), "check" in item && /* @__PURE__ */ React.createElement(SkillHealth, { item, unusedDays }), open && children);
+}
+function SkillsCheckPanel({ run, onNote, reload }) {
+  const [busy, setBusy] = React.useState(false);
+  const start = async () => {
+    setBusy(true);
+    try {
+      await skillPost("/api/skills/check");
+      onNote({ ok: true, text: "a staleness run started: it reads every skill's pins and may fetch for a few minutes" });
+      setTimeout(reload, 15e3);
+    } catch (e) {
+      onNote({ ok: false, text: String(e.message || e) });
+    }
+    setBusy(false);
+  };
+  const r = run || null;
+  return /* @__PURE__ */ React.createElement(SysPanel, { title: "staleness", sub: "every approved skill's pins and what it rests on, checked read-only once a day" }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap", ...SKILL_MONO } }, !r && /* @__PURE__ */ React.createElement("span", { className: "muted" }, "no run yet"), r && /* @__PURE__ */ React.createElement("span", { className: "muted" }, "last run ", skillWhen(r.at), r.running ? " (running)" : ""), r && !r.running && /* @__PURE__ */ React.createElement("span", null, r.checked, " checked, ", /* @__PURE__ */ React.createElement("span", { style: { color: r.stale ? "var(--red)" : "inherit" } }, r.stale, " stale"), ", ", r.updates, " upstream changed, ", r.unknown, " items not checkable", r.errors ? `, ${r.errors} errors` : ""), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", disabled: busy, onClick: start }, "check now")));
 }
 function SkillsSystemView() {
   const [data, setData] = React.useState(null);
@@ -257,7 +281,7 @@ function SkillsSystemView() {
   };
   const toggle = (key) => setOpen((o) => o === key ? null : key);
   if (!data) return /* @__PURE__ */ React.createElement("div", { className: "wrap-pad muted" }, "loading skills...");
-  return /* @__PURE__ */ React.createElement("div", { className: "wrap-pad", style: { maxWidth: 1100 } }, note && /* @__PURE__ */ React.createElement(SysNote, { msg: note }), /* @__PURE__ */ React.createElement(SysPanel, { title: "drafts waiting", sub: `${data.drafts.length} from the cousins; a private cousin's are in its inspector` }, data.drafts.length === 0 && /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "none"), data.drafts.map((d) => {
+  return /* @__PURE__ */ React.createElement("div", { className: "wrap-pad", style: { maxWidth: 1100 } }, note && /* @__PURE__ */ React.createElement(SysNote, { msg: note }), /* @__PURE__ */ React.createElement(SkillsCheckPanel, { run: data.check_run, onNote: setNote, reload: load }), /* @__PURE__ */ React.createElement(SysPanel, { title: "drafts waiting", sub: `${data.drafts.length} from the cousins; a private cousin's are in its inspector` }, data.drafts.length === 0 && /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "none"), data.drafts.map((d) => {
     const key = `draft/${d.cousin}/${d.name}`;
     return /* @__PURE__ */ React.createElement(
       SkillRow,
@@ -281,15 +305,26 @@ function SkillsSystemView() {
     repo.folders.map((f) => /* @__PURE__ */ React.createElement("div", { key: f.folder, style: { display: "flex", flexDirection: "column", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, f.folder === "shared" ? "shared (every cousin)" : f.folder), f.skills.map((sk) => {
       const key = `${repo.repo}/${f.folder}/${sk.name}`;
       const urls = f.folder === "shared" ? { base: `/api/skills/shared/${skillPath(sk.name)}` } : { base: `/api/cousins/${skillPath(f.folder)}/skills/approved/${skillPath(repo.repo, sk.name)}` };
-      return /* @__PURE__ */ React.createElement(SkillRow, { key, label: sk.name, item: sk, open: open === key, onToggle: () => toggle(key) }, /* @__PURE__ */ React.createElement(
-        SkillApproved,
+      return /* @__PURE__ */ React.createElement(
+        SkillRow,
         {
-          showUrl: urls.base,
-          removalUrl: `${urls.base}/removal`,
-          removeUrl: `${urls.base}/remove`,
-          onDone: done
-        }
-      ));
+          key,
+          label: sk.name,
+          item: sk,
+          open: open === key,
+          onToggle: () => toggle(key),
+          unusedDays: data.unused_days
+        },
+        /* @__PURE__ */ React.createElement(
+          SkillApproved,
+          {
+            showUrl: urls.base,
+            removalUrl: `${urls.base}/removal`,
+            removeUrl: `${urls.base}/remove`,
+            onDone: done
+          }
+        )
+      );
     })))
   )));
 }
@@ -323,7 +358,8 @@ function CousinSkillsPanel({ cousin }) {
         label: `${sk.plugin}:${sk.name}`,
         item: sk,
         open: open === key,
-        onToggle: () => toggle(key)
+        onToggle: () => toggle(key),
+        unusedDays: data.unused_days
       },
       /* @__PURE__ */ React.createElement(SkillApproved, { showUrl: url, removalUrl: `${url}/removal`, removeUrl: `${url}/remove`, onDone: done })
     );
@@ -353,4 +389,12 @@ registerSlot("inspector.panels", {
   order: 35,
   render: ({ cousin }) => /* @__PURE__ */ React.createElement(CousinSkillsPanel, { cousin })
 });
-Object.assign(window, { SkillsSystemView, CousinSkillsPanel, SkillDraftReview, SkillApproved, SkillOutside });
+Object.assign(window, {
+  SkillsSystemView,
+  CousinSkillsPanel,
+  SkillDraftReview,
+  SkillApproved,
+  SkillOutside,
+  SkillHealth,
+  SkillsCheckPanel
+});

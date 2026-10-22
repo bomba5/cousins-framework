@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 from cousin_lib import skills
 from cousin_lib.config import FrameworkConfig
@@ -63,6 +64,35 @@ def _cousin(req, slug):
     check_slug(slug)
     home = cousin_home(req.server, slug)
     return home
+
+
+def _usage_homes(cousins, private, folder):
+    """The homes whose use of a skill in `folder` counts in the System view:
+    every non-private cousin loading personal for shared/, else the folder's
+    own cousin when it is not private."""
+    if folder == skills.SHARED:
+        return [home for slug, home, repos in cousins if slug not in private and "personal" in repos]
+    return [home for slug, home, _repos in cousins if slug == folder and slug not in private]
+
+
+def _start_check(root):
+    """Start a staleness run of every approved skill in a child process of
+    its own (skills_check.main run): a run may fetch for minutes, and a page
+    does not wait on it. Refused within skills_check.NOW_GAP of the last."""
+    from cousin_lib import skills_check
+    last = skills_check._when((skills_check.last_run(root) or {}).get("at"))
+    import time
+    if last is not None and time.time() - last < skills_check.NOW_GAP:
+        raise HttpError(409, "the last check began %ds ago; another may start in %ds"
+                        % (time.time() - last, skills_check.NOW_GAP - (time.time() - last)))
+    log = Path(root) / "data" / "skills" / "checks.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with open(log, "a") as out:
+        proc = subprocess.Popen([sys.executable, "-m", "cousin_lib.skills_check", "--root",
+                                 str(root), "run", "--gap", str(skills_check.NOW_GAP)],
+                                stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                                start_new_session=True)
+    return proc.pid
 
 
 def _source(home, slug, plugin):
@@ -116,7 +146,9 @@ def register():
         """The shared set and every non-private cousin's folders in
         personal and work, with each repository's state, and the drafts
         waiting from those cousins."""
-        private = _private_slugs(req.server)
+        from cousin_lib import skills_check
+        cousins = _cousins(req.server)
+        private = {slug for slug, _home, repos in cousins if "private" in repos}
         repos = []
         for repo in ("personal", "work"):
             st = skills.state(req.server.root, repo)
@@ -127,6 +159,9 @@ def register():
                 for folder in sorted(set(listed) - private):
                     found = skills.approved(req.server.root, repo, folder)
                     if found:
+                        homes = _usage_homes(cousins, private, folder)
+                        found = [skills_check.annotate(req.server.root, s, homes=homes)
+                                 for s in found]
                         folders.append({"folder": folder, "skills": found})
             repos.append(dict(st, folders=folders))
         drafts = []
@@ -137,7 +172,15 @@ def register():
                 if d.get("repo") == "private":
                     continue
                 drafts.append(dict(d, cousin=slug))
-        return 200, {"repos": repos, "drafts": drafts}
+        return 200, {"repos": repos, "drafts": drafts,
+                     "check_run": skills_check.last_run(req.server.root),
+                     "unused_days": skills_check.UNUSED_DAYS}
+
+    @router.route("POST", "/api/skills/check")
+    def check_now(req):
+        """Start a staleness run of every approved skill now (read-only,
+        rate-limited); its summary shows in GET /api/skills as check_run."""
+        return 202, {"ok": True, "pid": _start_check(req.server.root)}
 
     @router.route("GET", "/api/skills/shared/{name}")
     def show_shared(req, name):
@@ -163,11 +206,15 @@ def register():
             repos = skills.cousin_repos(home)
         except SkillError as err:
             return 200, {"repos": [], "error": str(err), "loaded": [], "drafts": []}
+        from cousin_lib import skills_check
+        loaded = [skills_check.annotate(req.server.root, s, homes=[home])
+                  for s in skills.loaded(req.server.root, home, slug)]
         return 200, {"repos": repos,
                      "states": [skills.state(req.server.root, r) for r in repos],
                      "lane": skills.lane_of(home),
-                     "loaded": skills.loaded(req.server.root, home, slug),
-                     "drafts": skills.drafts(home, slug)}
+                     "loaded": loaded,
+                     "drafts": skills.drafts(home, slug),
+                     "unused_days": skills_check.UNUSED_DAYS}
 
     @router.route("GET", "/api/cousins/{slug}/skills/approved/{plugin}/{name}")
     def show_loaded(req, slug, plugin, name):

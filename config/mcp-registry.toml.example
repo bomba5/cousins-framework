@@ -200,10 +200,10 @@ argv = ["cancel", "{id}"]
 
 [tools.skill]
 command = "cousin-skill"
-description = "Your skills (procedures you load when you need them): list what loads at your next start and your drafts, show one, write a draft, import one published outside, diff a draft against what is approved, record the job that ran a dry run. The operator approves drafts in the console; nothing here approves, rejects or removes a skill."
+description = "Your skills (procedures you load when you need them): list what loads at your next start and your drafts, show one, write a draft, import one published outside, diff a draft against what is approved, record the job that ran a dry run, check whether your loaded skills went stale. The operator approves drafts in the console; nothing here approves, rejects or removes a skill."
 
 [tools.skill.properties]
-name = { type = "string", description = "a draft's name, or plugin:name for a loaded skill (show, draft, diff, dry-run); another name for the draft (import)" }
+name = { type = "string", description = "a draft's name, or plugin:name for a loaded skill (show, draft, diff, dry-run, check; check without it covers every loaded skill); another name for the draft (import)" }
 description = { type = "string", description = "one line: what it does and when to use it (draft)" }
 context = { type = "string", enum = ["personal", "work", "private"], description = "the repository it belongs in (draft, import)" }
 side_effect = { type = "string", enum = ["read-only", "writes-local", "outward"], description = "what it can change; an outward step stops at the operator's go (draft, import)" }
@@ -239,3 +239,7 @@ argv = ["dry-run", "{name}", "--job", "{job}"]
 
 [tools.skill.commands.diff]
 argv = ["diff", "{name}"]
+
+[tools.skill.commands.check]
+argv = ["check"]
+options = { name = "--name" }

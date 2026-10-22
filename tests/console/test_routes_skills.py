@@ -277,3 +277,55 @@ class TestFromOutside(SkillsRoutesCase):
         status, body = self.post(base + "/dry-run/allow", {"diff_sha256": d["diff_sha256"]})
         self.assertEqual(status, 409, body)
         self.assertIn("only a skill from outside", body["error"])
+
+
+class TestStalenessRoutes(SkillsRoutesCase):
+    """Phase 4 (cousin_lib/skills_check.py): System > skills and the
+    inspector show each approved skill's last check, use and the unused
+    flag; POST /api/skills/check starts a run in a child process and
+    refuses a second within NOW_GAP."""
+
+    def setUp(self):
+        super().setUp()
+        self.serve()
+
+    def test_the_listing_carries_health_and_the_last_run(self):
+        from cousin_lib import skills_check
+        self.draft(self.wren)
+        status, d = self.approve("wren")
+        self.assertEqual(status, 200, d)
+        skills_check.check_all(self.root)
+        skills_check.record_use(self.root / "cousins" / "wren", "personal:board-check")
+        status, d = self.get("/api/skills")
+        self.assertEqual(status, 200, d)
+        [sk] = [s for r in d["repos"] for f in r["folders"] for s in f["skills"]]
+        self.assertFalse(sk["check"]["stale"])
+        self.assertEqual(sk["usage"]["count"], 1)
+        self.assertFalse(sk["unused"])
+        self.assertEqual((d["check_run"]["checked"], d["unused_days"]), (1, 30))
+        status, d = self.get("/api/cousins/wren/skills")
+        self.assertEqual(d["loaded"][0]["usage"]["count"], 1)
+
+    def test_check_now_starts_a_child_and_refuses_a_second_inside_the_gap(self):
+        from unittest import mock
+        with mock.patch.object(routes_skills.subprocess, "Popen") as popen:
+            popen.return_value.pid = 4242
+            status, d = self.post("/api/skills/check", {})
+            self.assertEqual((status, d["pid"]), (202, 4242), d)
+            argv = popen.call_args.args[0]
+            self.assertEqual(argv[1:4], ["-m", "cousin_lib.skills_check", "--root"])
+            self.assertIn("--gap", argv)
+        from cousin_lib import skills_check
+        skills_check.check_all(self.root)
+        with mock.patch.object(routes_skills.subprocess, "Popen") as popen:
+            status, d = self.post("/api/skills/check", {})
+            self.assertEqual(status, 409, d)
+            popen.assert_not_called()
+
+    def test_system_never_names_a_private_cousin_in_the_run(self):
+        from cousin_lib import skills_check
+        self.draft(self.kit, context="private")
+        self.approve("kit")
+        skills_check.check_all(self.root)
+        status, d = self.get("/api/skills")
+        self.assertNotIn("kit", json.dumps(d))

@@ -3,6 +3,35 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.61.0 - 2026-10-22
+
+### Added
+
+- **Skills: staleness and use, phase 4** ([reference](docs/reference/skills.md#staleness-and-use)).
+  - Each approved skill gets a baseline at approval: the value of every
+    `reads` pin and `rests-on` item it declares.
+  - A check compares them with now, item by item (`same`, `changed`,
+    `missing`, `unknown`). A skill whose pin or dependency changed or went
+    missing is stale. One imported from outside also shows when its source
+    folder changed upstream.
+  - The check is read-only: files, memory, `<tool> --version` with no
+    shell, and https fetches at depth 1 with the import's hardening and a
+    user agent naming the framework. An item it cannot check is unknown,
+    never stale.
+  - The loops daemon runs it every 20 hours (health row `skills-check`).
+    System > skills has **check now** (`POST /api/skills/check`, at most
+    every 5 minutes).
+  - The tool hook records each skill use in the using cousin's own home.
+    A skill unused for 30 days is flagged for removal.
+  - System > skills and the inspector show each skill's last check, last
+    use and its flags. `cousin-skill check` and the `skill` tool's `check`
+    check a cousin's own skills; `cousin-skill list` marks stale, updated
+    and unused ones; `cousin-doctor skills` warns about a stale skill, a
+    repository moved past its approval and an overdue run.
+  - The `skill` tool's description now names `check`, which moves the
+    contract bytes: each SDK and opencode cousin's prompt cache starts
+    fresh once, at its next start.
+
 ## 3.60.1 - 2026-10-22
 
 ### Fixed

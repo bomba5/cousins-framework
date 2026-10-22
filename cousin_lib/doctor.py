@@ -23,13 +23,20 @@ contradicts a fact the framework owns: a terminal-lane CLI on a runner
 lane, a billing claim against the account's kind, a peer said to be
 unable to message it when it can, an mcp__cousin__ tool the registry
 does not serve. Each finding names the file, the line, the fact and its
-source, and the fix (cousin_lib/identity_lint.py)."""
+source, and the fix (cousin_lib/identity_lint.py).
+
+skills. The skills after approval (cousin_lib/skills_check.py): a skills
+repository whose main moved past its last approval, a stale skill (one of
+its pins or what it rests on changed), a staleness run overdue. Upstream
+updates of skills from outside and skills unused for 30 days are notes.
+A private repository's skills are counted, never named."""
 import argparse
 import json
 import os
 import shlex
 import stat
 import sys
+import time
 from pathlib import Path
 
 HOME_MODE = 0o700
@@ -114,7 +121,62 @@ def check_identity(root, cousin=None):
     return identity_lint.check_identity(root, cousin_homes(root), cousin)
 
 
-CHECKS = {"homes": check_homes, "identity": check_identity}
+def check_skills(root, cousin=None):
+    """The skills after approval (cousin_lib/skills_check.py): a repository
+    whose main moved past its last approval (nothing loads from it), a
+    stale skill, a staleness run overdue; skills unused for UNUSED_DAYS and
+    upstream updates are notes. A private repository's skills are counted,
+    never named: their folders are private cousins' names."""
+    from cousin_lib import skills, skills_check
+    root = Path(os.path.abspath(root))
+    items, notes, errors = [], [], []
+    for repo in skills.REPOS:
+        st = skills.state(root, repo)
+        if st["exists"] and not st["trusted"]:
+            items.append({"repo": repo, "problem": "main has moved past its last approval;"
+                          " nothing loads from it until the console approves the difference"})
+    last = skills_check.last_run(root)
+    when = skills_check._when((last or {}).get("at"))
+    if when is None:
+        notes.append("no staleness run yet: the loops daemon runs one every %dh, or press"
+                     " Check now in System > skills" % (skills_check.CHECK_EVERY // 3600))
+    elif time.time() - when > 2 * skills_check.CHECK_EVERY:
+        items.append({"problem": "the last staleness run began %s; the loops daemon should run"
+                      " one every %dh" % (last.get("at"), skills_check.CHECK_EVERY // 3600)})
+    hidden_stale = 0
+    for repo, folder, name in skills_check.approved_skills(root):
+        if cousin and folder not in (cousin, skills.SHARED):
+            continue
+        res = skills_check.last_check(root, repo, folder, name) or {}
+        label = "%s:%s/%s" % (repo, folder, name)
+        if res.get("stale"):
+            if repo == "private":
+                hidden_stale += 1
+            else:
+                changed = [r["item"] for r in res.get("items") or []
+                           if r.get("state") in ("changed", "missing")]
+                items.append({"skill": label, "problem": "stale: %s" % ", ".join(changed)})
+        if repo == "private":
+            continue
+        if res.get("update"):
+            notes.append("%s: its source upstream changed (a new import, by the operator)" % label)
+        if skills_check.unused(skills_check.approved_at(root, repo, folder, name),
+                               skills_check.last_use(repo, folder, name,
+                                                     cousin_homes(root))[0]):
+            notes.append("%s: unused for %d days; consider removing it"
+                         % (label, skills_check.UNUSED_DAYS))
+    if hidden_stale:
+        items.append({"problem": "%d stale skill%s in the private repository (see its cousin's"
+                      " inspector)" % (hidden_stale, "" if hidden_stale == 1 else "s")})
+    summary = ("%d problem%s" % (len(items), "" if len(items) == 1 else "s")) if items \
+        else "no stale skill, every repository approved"
+    notes = ["%s" % (i.get("skill") and "%s: %s" % (i["skill"], i["problem"]) or i["problem"])
+             for i in items] + notes
+    return {"check": "skills", "ok": not items and not errors, "summary": summary,
+            "items": items, "fixes": [], "errors": errors, "notes": notes}
+
+
+CHECKS = {"homes": check_homes, "identity": check_identity, "skills": check_skills}
 
 
 def run_checks(root, names=None, cousin=None):

@@ -548,6 +548,11 @@ def _sk_dry_run(ctx, a):
     return skills.dry_run_written(entry)
 
 
+def _sk_check(ctx, a):
+    from cousin_lib import skills_check
+    return skills_check.text_check(ctx.root, ctx.home, ctx.slug, _str(a, "name") or None)
+
+
 def _sk_diff(ctx, a):
     text, _sha = skills.diff_draft(ctx.root, ctx.home, ctx.slug, _required(a, "name", "diff"))
     return text or "no difference from what is approved"
@@ -564,7 +569,7 @@ HANDLERS = {
     "tracker": {"add": _t_add, "update": _t_update, "state": _t_state, "list": _t_list,
                 "show": _t_show, "delete": _t_delete},
     "skill": {"list": _sk_list, "show": _sk_show, "draft": _sk_draft, "diff": _sk_diff,
-              "import": _sk_import, "dry-run": _sk_dry_run},
+              "import": _sk_import, "dry-run": _sk_dry_run, "check": _sk_check},
 }
 
 

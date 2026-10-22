@@ -850,6 +850,13 @@ cousin-doctor
     prompt keeps only `## Identity` and `## Voice` there, so the section
     never reaches the system prompt; the fix is to make it a `###`
     subsection of one of them, or to move it below the marker.
+- `skills`: the skills after approval ([skills](reference/skills.md#staleness-and-use)).
+  A skills repository whose `main` moved past its last approval (nothing
+  loads from it until the console approves the difference), a stale skill
+  (one of its pins or what it rests on changed, named), and a staleness run
+  that is overdue. A skill from outside whose source changed upstream, and a
+  skill unused for 30 days, are notes. The private repository's skills are
+  counted, never named.
 
   A `lane`, `billing`, `peer` or `tool` line is not reported when the phrase
   is negated or dated in its sentence (not, never, no longer, used to, was,

@@ -197,6 +197,7 @@ SHIPPED_BEFORE = {
         {'to': '--user'},
     ),
     ('tools.skill', 'description'): (
+        'Your skills (procedures you load when you need them): list what loads at your next start and your drafts, show one, write a draft, import one published outside, diff a draft against what is approved, record the job that ran a dry run. The operator approves drafts in the console; nothing here approves, rejects or removes a skill.',
         'Your skills (procedures you load when you need them): list what loads at your next start and your drafts, show one, write a draft, diff a draft against what is approved. The operator approves drafts in the console; nothing here approves, rejects or removes a skill.',
     ),
     ('tools.skill.commands.draft', 'options'): (
@@ -228,9 +229,11 @@ SHIPPED_BEFORE = {
         'a prompt that must not (draft)',
     ),
     ('tools.skill.properties', 'name'): (
+        {'type': 'string', 'description': "a draft's name, or plugin:name for a loaded skill (show, draft, diff, dry-run); another name for the draft (import)"},
         {'type': 'string', 'description': "a draft's name, or plugin:name for a loaded skill (show, draft, diff)"},
     ),
     ('tools.skill.properties', 'name.description'): (
+        "a draft's name, or plugin:name for a loaded skill (show, draft, diff, dry-run); another name for the draft (import)",
         "a draft's name, or plugin:name for a loaded skill (show, draft, diff)",
     ),
     ('tools.skill.properties', 'reads'): (

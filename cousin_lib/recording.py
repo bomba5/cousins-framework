@@ -387,6 +387,16 @@ def handle(payload, home, root, *, slug=None, cancelled=None):
             activity.record(home, payload)
         except Exception as err:  # noqa: BLE001 - never fail the call
             log(home, "activity: %s" % err)
+        if payload.get("tool_name") == "Skill":
+            # a skill's last use, for the console and the unused flag
+            # (skills_check); kept in this cousin's own home
+            try:
+                from cousin_lib import skills_check
+                skills_check.record_use(
+                    home, (payload.get("tool_input") or {}).get("skill"),
+                    ok=event == "PostToolUse" and not is_error(payload.get("tool_response")))
+            except Exception as err:  # noqa: BLE001 - never fail the call
+                log(home, "skill use: %s" % err)
         if payload.get("tool_name") not in SUBAGENT_TOOLS + SHELL_TOOLS:
             return
     if event == "PreToolUse":

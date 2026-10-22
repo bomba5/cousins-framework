@@ -1004,11 +1004,15 @@ Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", 
 
 ## Skills
 
-A cousin's skills ([the skills reference](skills.md)): what it loads, its drafts, and the three verbs only the console has. Approving, rejecting and removing a skill happen here and nowhere else; the `skill` tool and `cousin-skill` only list, show, draft and diff. Approve and remove take the `diff_sha256` of the diff the page showed, and refuse with `409` when the draft or the skill changed since. Each records the console user who acted. The System routes (`/api/skills...`) never show a cousin that loads the `private` repository, nor its drafts: its folder is its name. Its skills show only on its own routes. `400` bad slug or skill name, `404` unknown cousin, draft or skill, `409` a refusal from the skills store (its message says why).
+A cousin's skills ([the skills reference](skills.md)): what it loads, its drafts, and the three verbs only the console has. Approving, rejecting and removing a skill happen here and nowhere else; the `skill` tool and `cousin-skill` only list, show, draft, diff and check. Approve and remove take the `diff_sha256` of the diff the page showed, and refuse with `409` when the draft or the skill changed since. Each records the console user who acted. The System routes (`/api/skills...`) never show a cousin that loads the `private` repository, nor its drafts: its folder is its name. Its skills show only on its own routes. `400` bad slug or skill name, `404` unknown cousin, draft or skill, `409` a refusal from the skills store (its message says why).
 
 ### `GET /api/skills`
 
-`{"repos": [{"repo", "exists", "head", "approved", "trusted", "folders": [{"folder", "skills": [...]}]}], "drafts": [...]}` for `personal` and `work`. A skill is `{"name", "description", "metadata", "problems", "repo", "folder"}`; `shared` is the folder every cousin loads. `trusted` is false when `main` has moved past the commit of the repository's last approval record, and then nothing loads from it. `drafts` are the waiting drafts of every cousin that does not load `private`, each with `cousin`, `repo` and `folder` (where approving would put it).
+`{"repos": [{"repo", "exists", "head", "approved", "trusted", "folders": [{"folder", "skills": [...]}]}], "drafts": [...], "check_run", "unused_days"}` for `personal` and `work`. A skill is `{"name", "description", "metadata", "problems", "repo", "folder", "check", "usage", "approved_at", "unused"}`; `shared` is the folder every cousin loads. `check` is its last staleness check (`{"at", "stale", "update", "changed", "unknown"}`: `changed` names the items that changed or went missing, `unknown` counts the ones not checkable), or null before its first; `usage` is `{"last", "count"}` across the cousins that load it (none that loads `private`); `unused` is true after `unused_days` with no use, counted from the later of its approval (`approved_at`) and its last use. `check_run` is the last staleness run, counts only (`{"at", "checked", "stale", "updates", "unknown", "errors", "running"?, "finished"?}`), or null. `trusted` is false when `main` has moved past the commit of the repository's last approval record, and then nothing loads from it. `drafts` are the waiting drafts of every cousin that does not load `private`, each with `cousin`, `repo` and `folder` (where approving would put it).
+
+### `POST /api/skills/check`
+
+Starts a staleness run of every approved skill now, in a child process of its own (read-only; it may fetch for a few minutes). `202 {"ok": true, "pid"}`; `409` when the last run began less than five minutes ago. Its outcome shows as `check_run` in `GET /api/skills`. The loops daemon starts one every 20 hours by itself.
 
 ### `GET /api/skills/shared/<name>`
 
@@ -1024,7 +1028,7 @@ Body `{"diff_sha256"}`, the removal diff shown. Commits the removal and records 
 
 ### `GET /api/cousins/<slug>/skills`
 
-`{"repos", "states", "lane", "loaded", "drafts"}`: the repositories the cousin loads (`cousin.toml [skills] repos`), each one's state, its runner kind, the approved skills it loads at its next start (each with `plugin`: `shared`, `personal`, `work` or `private`), and its drafts. A `cousin.toml` list that does not parse is `{"error"}` with empty lists.
+`{"repos", "states", "lane", "loaded", "drafts", "unused_days"}`: the repositories the cousin loads (`cousin.toml [skills] repos`), each one's state, its runner kind, the approved skills it loads at its next start (each with `plugin`: `shared`, `personal`, `work` or `private`, and the `check`, `usage`, `approved_at` and `unused` of `GET /api/skills`, its use counted from this cousin only), and its drafts. A `cousin.toml` list that does not parse is `{"error"}` with empty lists.
 
 ### `GET /api/cousins/<slug>/skills/approved/<plugin>/<name>`
 

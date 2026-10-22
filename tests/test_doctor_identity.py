@@ -454,9 +454,10 @@ class TestMain(_Case):
         os.chmod(self.cousin("sam"), 0o700)
         rc, out, _ = self.main("--cousin", "sam", "--json")
         self.assertEqual(rc, 0, out)
-        homes, identity = json.loads(out)
+        homes, identity, skills_result = json.loads(out)
         self.assertEqual(homes["summary"], "1 cousin home, none open to group or other")
         self.assertEqual(identity["items"], [])
+        self.assertEqual((skills_result["check"], skills_result["items"]), ("skills", []))
 
     def test_an_unknown_cousin_is_exit_2(self):
         self.cousin("wren")

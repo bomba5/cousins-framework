@@ -151,7 +151,7 @@ class TestMain(_RootCase):
         rc, out, _ = self.main("--json")
         self.assertEqual(rc, 0)
         self.assertEqual([r["check"] for r in json.loads(out)], list(doctor.CHECKS))
-        self.assertEqual(list(doctor.CHECKS), ["homes", "identity"])
+        self.assertEqual(list(doctor.CHECKS), ["homes", "identity", "skills"])
 
     def test_cousin_limits_homes_to_that_home(self):
         self.home("wren", 0o755)

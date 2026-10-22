@@ -7,6 +7,11 @@
 // cousin's inspector shows what that cousin loads and its drafts, a private
 // cousin's included. Approve, reject and remove exist only here, and each
 // acts on the diff this page showed (its sha256), never on a newer one.
+//
+// An approved skill also shows its health (cousin_lib/skills_check.py):
+// stale when one of its pins or what it rests on changed, upstream changed
+// for a skill from outside, unused after 30 days, and its last use. System
+// > skills shows the last staleness run and starts one now.
 
 const SKILL_MONO = { fontFamily: "var(--mono)", fontSize: 12 };
 const SKILL_TONES = { "read-only": "green", "writes-local": "amber", "outward": "red" };
@@ -239,7 +244,28 @@ function SkillApproved({ showUrl, removalUrl, removeUrl, onDone }) {
   </div>;
 }
 
-function SkillRow({ label, item, open, onToggle, children }) {
+function skillWhen(iso) {
+  return iso ? String(iso).replace("T", " ").slice(0, 16) : "never";
+}
+
+// An approved skill's health: its last check, an upstream change, the
+// unused flag and its last use. Drafts carry none of it.
+function SkillHealth({ item, unusedDays }) {
+  const check = item.check;
+  const use = item.usage || {};
+  return <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", paddingLeft: 18, ...SKILL_MONO }}>
+    {!check && <span className="pill gray" title="the staleness run has not reached it yet">not checked yet</span>}
+    {check && check.stale && <span className="pill red" title={`changed: ${(check.changed || []).join(", ")}`}>stale</span>}
+    {check && !check.stale && <span className="pill green" title={`checked ${skillWhen(check.at)}`}>ok</span>}
+    {check && check.update && <span className="pill amber" title="its source upstream changed: a new import, by the operator">upstream changed</span>}
+    {item.unused && <span className="pill gray" title={`no use for ${unusedDays || 30} days: consider removing it`}>unused {unusedDays || 30}d</span>}
+    <span className="muted">used {skillWhen(use.last)}{use.count ? ` (${use.count}x)` : ""}</span>
+    {check && <span className="muted">checked {skillWhen(check.at)}{check.unknown ? `, ${check.unknown} not checkable` : ""}</span>}
+    {check && check.stale && <span style={{ color: "var(--red)" }}>changed: {(check.changed || []).join(", ")}</span>}
+  </div>;
+}
+
+function SkillRow({ label, item, open, onToggle, children, unusedDays }) {
   const meta = item.metadata || {};
   return <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
     <div onClick={onToggle} style={{ display: "flex", gap: 10, alignItems: "baseline", cursor: "pointer", ...SKILL_MONO }}>
@@ -248,8 +274,33 @@ function SkillRow({ label, item, open, onToggle, children }) {
       <span className="muted" style={{ flex: 1 }}>{item.description}</span>
       {(item.problems || []).length > 0 && <span className="pill red" title={item.problems.join("; ")}>problem</span>}
     </div>
+    {"check" in item && <SkillHealth item={item} unusedDays={unusedDays} />}
     {open && children}
   </div>;
+}
+
+// The last staleness run and the button that starts one now (read-only,
+// rate-limited: the console refuses a second within 5 minutes).
+function SkillsCheckPanel({ run, onNote, reload }) {
+  const [busy, setBusy] = React.useState(false);
+  const start = async () => {
+    setBusy(true);
+    try {
+      await skillPost("/api/skills/check");
+      onNote({ ok: true, text: "a staleness run started: it reads every skill's pins and may fetch for a few minutes" });
+      setTimeout(reload, 15000);
+    } catch (e) { onNote({ ok: false, text: String(e.message || e) }); }
+    setBusy(false);
+  };
+  const r = run || null;
+  return <SysPanel title="staleness" sub="every approved skill's pins and what it rests on, checked read-only once a day">
+    <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap", ...SKILL_MONO }}>
+      {!r && <span className="muted">no run yet</span>}
+      {r && <span className="muted">last run {skillWhen(r.at)}{r.running ? " (running)" : ""}</span>}
+      {r && !r.running && <span>{r.checked} checked, <span style={{ color: r.stale ? "var(--red)" : "inherit" }}>{r.stale} stale</span>, {r.updates} upstream changed, {r.unknown} items not checkable{r.errors ? `, ${r.errors} errors` : ""}</span>}
+      <button className="btn ghost" disabled={busy} onClick={start}>check now</button>
+    </div>
+  </SysPanel>;
 }
 
 function SkillsSystemView() {
@@ -263,6 +314,7 @@ function SkillsSystemView() {
   if (!data) return <div className="wrap-pad muted">loading skills...</div>;
   return <div className="wrap-pad" style={{ maxWidth: 1100 }}>
     {note && <SysNote msg={note} />}
+    <SkillsCheckPanel run={data.check_run} onNote={setNote} reload={load} />
     <SysPanel title="drafts waiting" sub={`${data.drafts.length} from the cousins; a private cousin's are in its inspector`}>
       {data.drafts.length === 0 && <span className="muted" style={SKILL_MONO}>none</span>}
       {data.drafts.map(d => {
@@ -287,7 +339,8 @@ function SkillsSystemView() {
               const urls = f.folder === "shared"
                 ? { base: `/api/skills/shared/${skillPath(sk.name)}` }
                 : { base: `/api/cousins/${skillPath(f.folder)}/skills/approved/${skillPath(repo.repo, sk.name)}` };
-              return <SkillRow key={key} label={sk.name} item={sk} open={open === key} onToggle={() => toggle(key)}>
+              return <SkillRow key={key} label={sk.name} item={sk} open={open === key} onToggle={() => toggle(key)}
+                               unusedDays={data.unused_days}>
                 <SkillApproved showUrl={urls.base} removalUrl={`${urls.base}/removal`}
                                removeUrl={`${urls.base}/remove`} onDone={done} />
               </SkillRow>;
@@ -323,7 +376,7 @@ function CousinSkillsPanel({ cousin }) {
         const key = `loaded/${sk.plugin}/${sk.name}`;
         const url = `${base}/approved/${skillPath(sk.plugin, sk.name)}`;
         return <SkillRow key={key} label={`${sk.plugin}:${sk.name}`} item={sk} open={open === key}
-                         onToggle={() => toggle(key)}>
+                         onToggle={() => toggle(key)} unusedDays={data.unused_days}>
           <SkillApproved showUrl={url} removalUrl={`${url}/removal`} removeUrl={`${url}/remove`} onDone={done} />
         </SkillRow>;
       })}
@@ -344,4 +397,5 @@ registerSlot("system.tabs", { id: "skills", label: "skills", order: 45,
 registerSlot("inspector.panels", { id: "skills", order: 35,
                                    render: ({ cousin }) => <CousinSkillsPanel cousin={cousin} /> });
 
-Object.assign(window, { SkillsSystemView, CousinSkillsPanel, SkillDraftReview, SkillApproved, SkillOutside });
+Object.assign(window, { SkillsSystemView, CousinSkillsPanel, SkillDraftReview, SkillApproved, SkillOutside,
+                        SkillHealth, SkillsCheckPanel });

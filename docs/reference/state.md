@@ -112,6 +112,9 @@ built from it.
 | `data/meetings.db` | transactional | `meetings` | meetings and their transcripts |
 | `skills/<repo>/` (git), `data/skills/approvals.jsonl`, `data/skills/private/approvals.jsonl` | transactional + raw event | `skills` (the console's approve and remove only) | the approved skills; a repository loads only while its `main` is at the commit its last approval record names, so the records win over git ([skills](skills.md)) |
 | `data/skills/trigger-tests/<slug>/<name>.json`, `data/skills/private/trigger-tests/<slug>/<name>.json` | transactional | `skills`, the console's trigger test | a draft's last trigger test; it counts only for the diff it was run on, and approval needs one |
+| `data/skills/baselines/<repo>/<folder>/<name>.json`, `data/skills/private/baselines/...` | transactional | `skills_check` (at approval, at a first check) | what a skill's pins and the items it rests on were when it was approved: the staleness check compares with them |
+| `data/skills/checks/<repo>/<folder>/<name>.json`, `data/skills/private/checks/...`, `data/skills/checks/last-run.json`, `data/skills/checks/run.lock`, `data/skills/checks.log` (and one `.1`) | transactional | `skills_check` (the loops daemon, the console's check now) | each skill's last staleness check, the last run's counts, the lock that keeps runs from overlapping, and the console-started runs' output (moved to `.1` past 1 MiB) |
+| `<home>/data/skills-usage.json` | transactional | `recording` (the tool hook) | when the cousin last used each skill, and how often; it never leaves the cousin's home |
 | `data/scheduled.db` | transactional | `schedule` | one-shot prompts |
 | `data/loop-requests.db`, `data/loops-state.json`, `data/loops-fires.jsonl` | transactional + raw event | `loops` | timed flips and fires; the daemon's state |
 | `data/outbox.db`, `data/inbound-seen.db` | transactional | `outbox`, `peer_inbound` | messages to and from other installs, deduplicated by id |

@@ -67,9 +67,10 @@ class TestNoBareAppends(HermeticCase):
     ALLOWED = {
         # lock files: opened for their descriptor, nothing is written
         ("cousin_lib/artifacts.py", "lock"), ("cousin_lib/memory_search.py", "lock_path"),
+        ("cousin_lib/skills_check.py", "lock"),
         # a child process's stdout and stderr, handed to it whole
         ("cousin_lib/supervisor.py", "log_file"), ("cousin_lib/chat_hooks.py", "log_path"),
-        ("cousin_lib/upgrade_switch.py", "log"),
+        ("cousin_lib/upgrade_switch.py", "log"), ("cousin_lib/console/routes_skills.py", "log"),
         # an import's bulk copy of whole lines, with its own newline guard
         ("cousin_lib/memory_export.py", "path"),
         # job logs: free text a command or a transcript writes, read by people

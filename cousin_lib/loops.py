@@ -1039,6 +1039,46 @@ def schedule_dreams(now, report, *, homes, root, run=_dream_one, background=True
         state["thread"].start()
 
 
+# Skills (skills_check.py): every skills_check.CHECK_EVERY seconds, every
+# approved skill is checked for staleness in a thread of its own (a run
+# may fetch, within its time budget); the run's summary lands in
+# report["skills_checked"] on the next tick.
+_skills_worker = {"thread": None, "done": []}
+
+
+def schedule_skills_check(now, report, *, root, run=None, background=True):
+    """Start a staleness run when one is due (skills_check.due) and none is
+    running; report finished ones."""
+    import threading
+    from cousin_lib import skills_check
+
+    state = _skills_worker
+    report.setdefault("skills_checked", [])
+    while state["done"]:
+        report["skills_checked"].append(state["done"].pop(0))
+    thread = state["thread"]
+    if thread is not None and thread.is_alive():
+        return
+    if not skills_check.due(root, now=now) or skills_check.running(root):
+        return
+    run = run or (lambda: skills_check.check_all(root))
+
+    def work():
+        try:
+            out = run()
+        except Exception as err:  # noqa: BLE001 - a run never stops the loops
+            out = {"error": "%s: %s" % (type(err).__name__, err)}
+        state["done"].append(out)
+
+    if not background:
+        work()
+        while state["done"]:
+            report["skills_checked"].append(state["done"].pop(0))
+        return
+    state["thread"] = threading.Thread(target=work, name="skills-check", daemon=True)
+    state["thread"].start()
+
+
 DREAM_OK = ("done", "no_change", "budget")
 
 
@@ -1121,7 +1161,7 @@ def _check_upkeep(slug, home, state, now, report):
 
 
 def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
-         index_refresh=False, dreams=False):
+         index_refresh=False, dreams=False, skills=False):
     """One scheduler tick, per docs/reference/loops.md: per-cousin
     exception isolation, liveness gate, coalesced delivery,
     commit-after-delivery, request consumption, one-shot firing
@@ -1134,8 +1174,9 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     firing), `delivery:<slug>` a delivery to the cousin, `distill:<slug>`,
     `requests`, `schedules`, `index-refresh` and `index:<slug>`,
     `dream-due:<slug>` and `dreaming:<slug>` (a finished pass: error or
-    lost fails, done, no_change and budget are ok), `outbox`, `meetings`,
-    `chat-redelivery`."""
+    lost fails, done, no_change and budget are ok), `skills-check` (a
+    staleness run of the approved skills, skills_check.py), `outbox`,
+    `meetings`, `chat-redelivery`."""
     now = now or time.time()
     state = _load_state()
     report = {"fired": [], "errors": [], "requests": 0, "flips": [],
@@ -1271,6 +1312,16 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
             _health(report, "dreaming", True)
         for slug, out in report.get("dreamed", []):
             _health(report, "dreaming:" + slug, *dream_outcome(out))
+    if skills:
+        try:
+            schedule_skills_check(now, report, root=FrameworkConfig.from_env().root)
+        except Exception as err:
+            report["errors"].append("skills check: %s" % err)
+            _health(report, "skills-check", False, err)
+        else:
+            failed = [out.get("error") for out in report.get("skills_checked", [])
+                      if isinstance(out, dict) and out.get("error")]
+            _health(report, "skills-check", not failed, failed[0] if failed else None)
     try:
         from cousin_lib import outbox
         # its own clock, never the tick's start: the outbox's deadline and
@@ -1536,7 +1587,7 @@ def loops_main(argv=None):
             try:
                 report = tick(deliver=_default_deliver,
                               is_alive=_default_is_alive, index_refresh=True,
-                              dreams=True)
+                              dreams=True, skills=True)
             except Exception as err:
                 # The tick's own failure is the one the daemon dies of:
                 # on record before the supervisor restarts it.

@@ -836,6 +836,21 @@ class TestExport(SkillsCase):
         paths2, _ = skills.export_plugins(self.root, self.wren, "wren")
         self.assertEqual([p.name for p in paths2], ["shared", "personal"])
 
+    def test_a_script_stays_executable_and_read_only_in_the_export(self):
+        self.draft(self.wren)
+        script = self.wren / "skill-drafts" / "board-check" / "scripts" / "check.sh"
+        script.parent.mkdir()
+        script.write_text("#!/bin/sh\necho ok\n")
+        script.chmod(0o755)
+        (script.parent / "notes.txt").write_text("plain\n")
+        self.approve(self.wren, "wren")
+        paths, _ = skills.export_plugins(self.root, self.wren, "wren")
+        exported = paths[-1] / "skills" / "board-check" / "scripts"
+        self.assertEqual(stat.S_IMODE((exported / "check.sh").stat().st_mode), 0o555)
+        self.assertEqual(stat.S_IMODE((exported / "notes.txt").stat().st_mode), 0o444)
+        out = subprocess.run([str(exported / "check.sh")], capture_output=True, text=True)
+        self.assertEqual(out.stdout, "ok\n")
+
     def test_a_cousin_on_two_repositories_gets_both_and_never_anothers(self):
         home = self.home("ines", repos=["personal", "work"])
         self.draft(home, name="build-proof", context="work")

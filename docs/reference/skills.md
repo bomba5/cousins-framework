@@ -169,6 +169,7 @@ server, beside `memory`, `job` and `schedule`:
 | `show` | one skill's `SKILL.md` and file list, approved or draft |
 | `draft` | writes or edits a draft in `<home>/skill-drafts/<name>/`, with the metadata keys above |
 | `diff` | a draft against the approved version |
+| `check` | whether its loaded skills (or one) went stale: read-only ([Staleness and use](#staleness-and-use)) |
 
 `list` and `show` cover only what the cousin loads (`shared/` and its own
 folder in each repository it lists) and its own drafts. They never list or
@@ -336,7 +337,8 @@ shows for it. Agreed with the operator (2026-10-21).
   approved skill: the diff shows what upstream changed, and it is approved
   like any change.
 - **Not here:** plugin marketplaces (`marketplace.json`), npm, archive and
-  command sources, private repositories, and update checks (phase 4).
+  command sources, and private repositories. Update checks are part of
+  [staleness](#staleness-and-use).
 
 ## Proposals
 
@@ -367,6 +369,67 @@ multi-step work, it considers a skill. Proposals go **only to the operator**.
 - A skill is judged by "its check passed and no correction followed", not by
   how often it fires.
 
+How the framework does it: [Staleness and use](#staleness-and-use).
+
+## Staleness and use
+
+Built in 3.61.0 (`cousin_lib/skills_check.py`).
+
+- **Baseline.** Each approved skill gets one at approval: the value of
+  every item it declares, kept in `data/skills/baselines/`
+  (`data/skills/private/baselines/` for the private repository). It is the
+  skill's own: a new one is taken only when the skill's folder changes, and
+  an approval of another skill in the repository leaves it as it is. A
+  skill approved before 3.61.0 gets its baseline at its first check, and an
+  item with no value yet (one that needs the network, or was unreadable at
+  approval) takes the value its first check reads.
+- **What is checked**, item by item:
+
+| declared | compared |
+|---|---|
+| `reads` `path#sha256:<hex>` | the file's sha256 now with the pin; a relative path is looked up under the owning cousin's home, then the install root |
+| `reads` `repo@<commit>:path` | the file at the repository's default branch now with the file at the pinned commit. `owner/name` is on github.com, `host/owner/name` on that host, and an absolute path is a local repository, read at its `HEAD` |
+| `rests-on` `<tool> --version` | the first line the tool prints, at the path its baseline found (so every process checks the same binary, whatever its PATH); no shell, 10 seconds |
+| `rests-on` `reference_<name>` | `<install>/shared/<name>.md` |
+| `rests-on` `owner/name:path` | the file at the repository's default branch now with its value at the baseline |
+| `rests-on` a path | the file's sha256 |
+| `rests-on` a word on PATH | the binary's sha256; a word the baseline read as a tool stays one, whatever a later check's PATH finds |
+| `rests-on` anything else | a memory topic: the id of the newest entry on it in the owning cousin's memory (a shared skill has no owner: unknown) |
+| `source` | the source folder's tree at upstream's default branch with its tree at the pinned commit |
+
+- **States.** Each item is `same`, `changed`, `missing` or `unknown` (not
+  checkable here, never found, or not reachable now). A skill is **stale**
+  when an item changed or went missing; an unknown item never makes it
+  stale. An upstream change sets **update**: news for the operator, whose
+  new import at the newer commit is the update, not staleness.
+- **Read-only and rate-limited.** A check reads files and memory, runs
+  `<tool> --version`, and fetches over https only, depth 1, with the
+  import's hardening (no credential, hook or global git setting) and the
+  user agent `cousins-framework/<version> (skills check; read-only)`, into a
+  temporary repository it deletes. It never runs a skill, its scripts or an
+  outward step. One run at a time (a lock). The loops daemon starts a run
+  once every 20 hours (health row `skills-check`); the console's **check
+  now** starts one at most every 5 minutes, never while one runs; a run
+  stops starting fetches after 5 minutes and leaves the rest unknown.
+- **Use.** The tool hook records each use of the `Skill` tool in the using
+  cousin's own `data/skills-usage.json` (last time, count), so a private
+  cousin's use never leaves its home. A trigger test is not a use.
+- **Unused.** A skill with no use for 30 days, counted from the later of its
+  approval and its last use, is flagged for removal. Removing it stays the
+  operator's act, as always.
+- **Where it shows.**
+  - System > skills: each approved skill's last check (ok, or stale with
+    what changed, or upstream changed), its last use and the unused flag;
+    the last run's counts; and **check now**.
+  - The inspector shows the same for what a cousin loads, its use counted
+    from that cousin.
+  - `cousin-skill list` and the `skill` tool's `list` mark a stale, updated
+    or unused skill. `cousin-skill check [name]` (the tool's `check`)
+    checks the cousin's own skills now, reusing a result under 5 minutes old.
+  - `cousin-doctor skills` warns about a stale skill, a repository moved past
+    its approval, and an overdue run.
+
+
 ## Acceptance tests
 
 The spec is met when these install, pass the trigger test and pass their own
@@ -393,4 +456,5 @@ check:
    scripts reviewed, terms of use, a dry run on this host
    ([above](#installing-a-skill-from-outside)).
 3. Proposals.
-4. Staleness: drift flags, scheduled checks, usage.
+4. Staleness: drift flags, scheduled checks, usage (built in 3.61.0,
+   [Staleness and use](#staleness-and-use)).

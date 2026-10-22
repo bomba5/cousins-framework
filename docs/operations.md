@@ -297,6 +297,7 @@ was last seen. One ok result resets the streak.
 | `index-refresh`, `index:<slug>` | queueing the memory index refresh, and one home's finished refresh |
 | `dream-due:<slug>`, `dreaming:<slug>` | whether a dreaming pass is due, and each finished pass: `error` or `lost` fails, `done`, `no_change` and `budget` are ok |
 | `dreaming` | queueing the dreaming passes |
+| `skills-check` | the staleness run of the approved skills, once every 20 hours ([skills](reference/skills.md#staleness-and-use)): starting one, and a finished run that raised |
 | `outbox` | the outbox step: sending again what external peers did not confirm ([chat](chat.md#cousins-on-another-install)) |
 | `meetings` | the meetings step |
 | `chat-redelivery` | putting again the inbound chat rows whose sender died before their inbox put returned ([chat API](reference/chat-api.md)); fails when a cousin's chat store could not be read, or a row its inbox won't take stays pending |

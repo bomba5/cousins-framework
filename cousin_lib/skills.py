@@ -715,6 +715,13 @@ def approve_draft(root, home, slug, name, *, user, diff_sha, fetch=None):
                    trigger="pass" if tested.get("pass") is True else "fail", source=source,
                    dry_run=None if ran is None else ("pass" if ran.get("pass") else "fail"))
     shutil.rmtree(folder)
+    try:
+        # the baseline its staleness is judged against (skills_check); a
+        # failure here never undoes an approval: the first check takes it
+        from cousin_lib import skills_check
+        skills_check.capture_baseline(root, repo, where, name)
+    except Exception:  # noqa: BLE001
+        pass
     return entry
 
 
@@ -772,17 +779,20 @@ def _writable_tree(path):
 
 
 def _readonly_tree(path):
+    """Every file read-only, a script keeping its executable bit (0555), so
+    an exported skill's scripts run as its steps say."""
     for dirpath, dirnames, filenames in os.walk(path, topdown=False):
         for f in filenames:
             p = os.path.join(dirpath, f)
             if not os.path.islink(p):
-                os.chmod(p, 0o444)
+                os.chmod(p, 0o555 if os.stat(p).st_mode & 0o111 else 0o444)
         os.chmod(dirpath, 0o555)
 
 
 def _extract(path, commit, folder, dest):
     """The approved `folder` of a repository into dest/skills/, its prefix
-    dropped; regular files and directories only."""
+    dropped; regular files and directories only, a file git keeps
+    executable (100755) staying executable."""
     data = subprocess.run(["git", "-C", str(path), "archive", "--format=tar", commit,
                            "%s/" % folder], capture_output=True, timeout=120)
     if data.returncode != 0:
@@ -801,6 +811,8 @@ def _extract(path, commit, folder, dest):
             elif member.isfile():
                 target_path.parent.mkdir(parents=True, exist_ok=True)
                 target_path.write_bytes(tf.extractfile(member).read())
+                if member.mode & 0o111:
+                    os.chmod(target_path, 0o755)
     return sorted(p.name for p in out.iterdir() if p.is_dir())
 
 
@@ -1636,9 +1648,24 @@ def lane_of(home):
 def text_list(root, home, slug, *, lane=None):
     if (lane or lane_of(home)) == "opencode":
         return "none: this lane loads no skills"
+    from cousin_lib import skills_check
     lines = []
     for item in loaded(root, home, slug):
         flag = " (problem: %s)" % "; ".join(item["problems"]) if item["problems"] else ""
+        try:
+            homes = skills_check.usage_homes(root, item["folder"])
+            if Path(home) not in homes:
+                homes.append(Path(home))
+            seen = skills_check.annotate(root, item, homes=homes)
+        except Exception:  # noqa: BLE001 - a listing never fails on a check file
+            seen = {}
+        check = seen.get("check") or {}
+        if check.get("stale"):
+            flag += " [stale: %s]" % ", ".join(check.get("changed") or [])
+        if check.get("update"):
+            flag += " [upstream changed]"
+        if seen.get("unused"):
+            flag += " [unused %d days]" % skills_check.UNUSED_DAYS
         lines.append("%s:%s - %s%s" % (item["plugin"], item["name"], item["description"], flag))
     out = ["loaded at the next start:"] + (["  " + l for l in lines] or ["  none"])
     found = drafts(home, slug)
@@ -1686,7 +1713,7 @@ def _cli_home(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="cousin-skill",
-        description="a cousin's skills: list, show, draft, diff (approval is the console's)")
+        description="a cousin's skills: list, show, draft, diff, check (approval is the console's)")
     parser.add_argument("--home", help="the cousin's home (default: COUSIN_HOME)")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list", help="what loads at the next start, and the drafts")
@@ -1730,6 +1757,10 @@ def main(argv=None):
     p.add_argument("name")
     p = sub.add_parser("trigger-test", help="run a draft's trigger test (the console runs it)")
     p.add_argument("name")
+    p = sub.add_parser("check", help="whether the cousin's loaded skills (or one) went stale;"
+                                     " read-only")
+    p.add_argument("name", nargs="?", help="plugin:name or a bare name (default: all)")
+    p.add_argument("--name", dest="name_flag", help="the same, as a flag (the skill tool's form)")
     args = parser.parse_args(argv)
     try:
         root, home, slug = _cli_home(args)
@@ -1764,6 +1795,9 @@ def main(argv=None):
             print(text or "no difference from what is approved")
         elif args.command == "trigger-test":
             print(json.dumps(trigger_test(root, home, slug, args.name)))
+        elif args.command == "check":
+            from cousin_lib import skills_check
+            print(skills_check.text_check(root, home, slug, args.name_flag or args.name))
     except SkillError as err:
         print("cousin-skill: %s" % err, file=sys.stderr)
         return 2

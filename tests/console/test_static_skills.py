@@ -28,6 +28,12 @@ class SkillsJsx(unittest.TestCase):
         self.assertIn("a private cousin's are in its inspector", self.src)
         self.assertIn('data.lane === "opencode"', self.src)
 
+    def test_it_shows_health_and_starts_a_staleness_run(self):
+        self.assertIn('<SkillsCheckPanel run={data.check_run}', self.src)
+        self.assertIn('skillPost("/api/skills/check")', self.src)
+        self.assertIn('{"check" in item && <SkillHealth item={item}', self.src)
+        self.assertIn("upstream changed", self.src)
+
     def test_no_colour_literals_and_no_em_dash(self):
         self.assertNotRegex(self.src, r"#[0-9a-fA-F]{3,8}\b")
         self.assertNotIn("oklch(", self.src)

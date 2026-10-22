@@ -527,21 +527,6 @@ def _sk_draft(ctx, a):
     return skills.draft_written(ctx.home, ctx.slug, name, path)
 
 
-def _sk_import(ctx, a):
-    path, report = skills.import_draft(
-        ctx.home, ctx.slug, _required(a, "source", "import"),
-        context=_required(a, "context", "import"),
-        side_effect=_required(a, "side_effect", "import"),
-        name=_str(a, "name", None) or None, scope=_str(a, "scope", "own") or "own",
-        license=_str(a, "license", None) or None,
-        metadata={"should-trigger": _str(a, "should_trigger"),
-                  "must-not-trigger": _str(a, "must_not_trigger"),
-                  skills.DRY_RUN_KEY: _str(a, "dry_run_task"),
-                  "hosts": _str(a, "hosts", None), "reads": _str(a, "reads", None),
-                  "rests-on": _str(a, "rests_on", None)})
-    return skills.import_written(ctx.home, ctx.slug, path, report)
-
-
 def _sk_dry_run(ctx, a):
     entry = skills.record_dry_run(ctx.root, ctx.home, ctx.slug, _required(a, "name", "dry-run"),
                                   _int(a, "job", "dry-run"))
@@ -569,7 +554,7 @@ HANDLERS = {
     "tracker": {"add": _t_add, "update": _t_update, "state": _t_state, "list": _t_list,
                 "show": _t_show, "delete": _t_delete},
     "skill": {"list": _sk_list, "show": _sk_show, "draft": _sk_draft, "diff": _sk_diff,
-              "import": _sk_import, "dry-run": _sk_dry_run, "check": _sk_check},
+              "dry-run": _sk_dry_run, "check": _sk_check},
 }
 
 

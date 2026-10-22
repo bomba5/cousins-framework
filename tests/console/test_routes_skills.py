@@ -144,6 +144,9 @@ class TestPrivacy(SkillsRoutesCase):
         self.assertNotIn("kit", json.dumps(overview))
         status, mine = self.get("/api/cousins/kit/skills")
         self.assertEqual([d["name"] for d in mine["drafts"]], ["board-check"])
+        self.assertEqual(mine["import_targets"], {"own": ["private"], "shared": []})
+        self.assertEqual(self.get("/api/cousins/wren/skills")[1]["import_targets"],
+                         {"own": ["personal"], "shared": ["personal"]})
         self.assertEqual(self.approve("kit")[0], 200)
         status, overview = self.get("/api/skills")
         self.assertNotIn("kit", json.dumps(overview))
@@ -256,6 +259,24 @@ class TestFromOutside(SkillsRoutesCase):
         self.assertEqual(set(self.timeouts), {routes_skills.FETCH_TIMEOUT})   # the page waits
         self.assertEqual((body["record"]["source"], body["record"]["dry_run"]),
                          (self.source, "pass"))
+
+    def test_the_operator_imports_through_the_inspector(self):
+        self.serve()
+        status, body = self.post("/api/cousins/wren/skills/import", {
+            "source": self.source, "context": "personal", "side_effect": "read-only",
+            "name": "board-check-two", "should_trigger": PROMPTS["should-trigger"],
+            "must_not_trigger": PROMPTS["must-not-trigger"],
+            "dry_run_task": "run scripts/check.py"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["draft"], "board-check-two")
+        self.assertIn("licence MIT", body["text"])
+        self.assertIn(routes_skills.FETCH_TIMEOUT, self.timeouts)   # the page waits
+        status, d = self.get("/api/cousins/wren/skills/drafts/board-check-two")
+        self.assertEqual((status, d["outside"]["commit"]), (200, self.commit))
+        status, body = self.post("/api/cousins/wren/skills/import", {
+            "source": self.source, "context": "work", "side_effect": "read-only", "name": "w"})
+        self.assertEqual(status, 409, body)
+        self.assertIn("not work", body["error"])
 
     def test_a_source_that_cannot_be_fetched_says_why(self):
         from unittest import mock

@@ -278,12 +278,20 @@ enters the way a skill written here does: as a draft, approved in the
 console. This section adds how the draft is made and what the approve view
 shows for it. Agreed with the operator (2026-10-21).
 
-- **Importing.** After the operator said yes to it, a cousin imports with
-  the `skill` tool's `import` (or `cousin-skill import`). `source` names the
-  repository, the full commit and the skill's folder,
-  `<https url>@<commit>:<folder>`, and the call carries the draft's own keys
-  (`context`, `side-effect`, the trigger prompts, `dry-run-task` and the
-  rest). The framework fetches exactly that commit, depth 1, into a
+- **Importing is the operator's act** ([who does what](#who-does-what)). The
+  operator imports in the cousin's inspector (skills, *import a skill from
+  outside*), or with `cousin-skill --home <home> import` in their own
+  terminal. A cousin suggests one, naming its source; it never imports. Its
+  `skill` tool has no `import`, the policy guard refuses a `cousin-skill
+  import` from a cousin's shell, and the command itself refuses to run
+  where `COUSIN_HOME` is set. Those stop a cousin that follows its tools;
+  they are a policy line, not a boundary, since a shell can get past both.
+  The boundary is the operator's approval: nothing loads before it. The
+  inspector's form offers only the scopes and repositories the import
+  takes for that cousin. `source` names the repository, the full commit
+  and the skill's folder, `<https url>@<commit>:<folder>`, and the import
+  carries the draft's own keys (`context`, `side-effect`, the trigger
+  prompts, `dry-run-task` and the rest). The framework fetches exactly that commit, depth 1, into a
   temporary repository: no branch or tag is followed, and no credential,
   hook, submodule or global git setting is used. git checks every object
   it receives, and runs with none of the framework's git or askpass
@@ -339,6 +347,24 @@ shows for it. Agreed with the operator (2026-10-21).
 - **Not here:** plugin marketplaces (`marketplace.json`), npm, archive and
   command sources, and private repositories. Update checks are part of
   [staleness](#staleness-and-use).
+
+## Who does what
+
+Agreed with the operator (2026-10-22).
+
+| act | who | where |
+|---|---|---|
+| notice repeated work and propose a skill | a cousin, to the operator only | its chat with the operator ([proposals](#proposals)) |
+| say yes to a draft | the operator | the chat |
+| write the draft | the cousin, after that yes | the `skill` tool's `draft` |
+| suggest a skill from outside | a cousin, to the operator only | the chat, naming its source |
+| import a skill from outside | the operator | the inspector's import form, or `cousin-skill --home <home> import` in their own terminal |
+| allow a dry run; run the trigger test | the operator | the console |
+| do the dry run | the cousin the draft is for | a job, recorded with the `skill` tool's `dry-run` |
+| approve, reject, remove | the operator | the console only |
+| own a skill | the cousin that uses it most; others ask it to run the skill, or report a problem to it | [life after approval](#life-after-approval) |
+| flag a stale or unused skill | the framework | [staleness and use](#staleness-and-use) |
+| decide what a flag means | the operator: an edit drafted by the owner after a yes, a new import, or a removal | the console |
 
 ## Proposals
 

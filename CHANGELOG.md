@@ -3,6 +3,46 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.0.0 - 2026-10-22
+
+Skills governance, agreed with the operator ([who does what](docs/reference/skills.md#who-does-what)):
+importing a skill from outside is the operator's act.
+
+### Removed (breaking)
+
+- **A cousin cannot import a skill from outside.**
+  - The `skill` tool has no `import` command any more.
+  - `cousin-skill import` refuses to run where `COUSIN_HOME` is set (a
+    cousin's environment, on every lane), and the policy guard refuses it
+    from a cousin's shell on the sdk lane.
+  - A cousin suggests an import to the operator, naming its source.
+  - An existing home's registry still lists the old command until
+    `cousin-upgrade --apply-homes --prune-retired`. Calling it on the sdk
+    lane is an unknown command; elsewhere `cousin-skill` refuses it.
+
+### Added
+
+- **The operator imports in the console:** the cousin's inspector, skills,
+  *import a skill from outside* (`POST /api/cousins/<slug>/skills/import`).
+  - The source is pinned to a full commit, with the draft's own keys:
+    the scope, the trigger prompts, the dry-run task, `hosts`, `reads`,
+    `rests-on` and the licence.
+  - The form offers only the scopes and repositories the import takes for
+    that cousin: `import_targets` in `GET /api/cousins/<slug>/skills`.
+  - The draft then goes through the same review, dry run and approval as
+    before.
+  - `cousin-skill --home <home> import` in the operator's own terminal
+    stays.
+- **"Who does what"** in the skills reference: who proposes, says yes,
+  drafts, suggests and imports, allows the dry run, approves, owns, and
+  decides what a stale or unused flag means.
+
+### Changed
+
+- The `skill` tool's description and parameters no longer mention
+  `import`, which moves the contract bytes: each SDK and opencode cousin's
+  prompt cache starts fresh once, at its next start.
+
 ## 3.61.0 - 2026-10-22
 
 ### Added

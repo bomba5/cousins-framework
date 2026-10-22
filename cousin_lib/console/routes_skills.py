@@ -6,8 +6,9 @@ package's own, and skills.jsx is its browser side (System > skills, and a
 panel in each cousin's inspector).
 
 Everything goes through cousin_lib/skills: listing, showing, the diff a
-draft or a removal makes, and the verbs only the console has: approve,
-reject, remove, and allowing a dry run of a skill from outside. Approve,
+draft or a removal makes, and the verbs only the console has: import a
+skill from outside, approve, reject, remove, and allowing a dry run of a
+skill from outside. Approve,
 remove and the allow take the sha256 of the diff the page showed and
 refuse any other. A record names the console user who acted.
 
@@ -201,7 +202,8 @@ def register():
         try:
             repos = skills.cousin_repos(home)
         except SkillError as err:
-            return 200, {"repos": [], "error": str(err), "loaded": [], "drafts": []}
+            return 200, {"repos": [], "error": str(err), "loaded": [], "drafts": [],
+                         "import_targets": skills.import_targets(home)}
         from cousin_lib import skills_check
         loaded = [skills_check.annotate(req.server.root, s, homes=[home])
                   for s in skills.loaded(req.server.root, home, slug)]
@@ -210,7 +212,8 @@ def register():
                      "lane": skills.lane_of(home),
                      "loaded": loaded,
                      "drafts": skills.drafts(home, slug),
-                     "unused_days": skills_check.UNUSED_DAYS}
+                     "unused_days": skills_check.UNUSED_DAYS,
+                     "import_targets": skills.import_targets(home)}
 
     @router.route("GET", "/api/cousins/{slug}/skills/approved/{plugin}/{name}")
     def show_loaded(req, slug, plugin, name):
@@ -234,6 +237,32 @@ def register():
                       user=_who(req), diff_sha=str(req.body.get("diff_sha256") or ""))
         who = "every cousin" if folder == skills.SHARED else slug
         return 200, {"ok": True, "record": entry, "note": _restart_note(who)}
+
+    @router.route("POST", "/api/cousins/{slug}/skills/import")
+    def import_skill(req, slug):
+        """Import a skill published outside into the cousin's drafts: the
+        operator's act, here or with `cousin-skill --home <home> import` in
+        their own terminal; a cousin only suggests one (docs/reference/
+        skills.md, "Who does what"). The draft then goes through review,
+        the dry run and approval like any other."""
+        home = _cousin(req, slug)
+        body = req.body or {}
+
+        def text(key):
+            return str(body.get(key) or "").strip()
+
+        metadata = {"should-trigger": text("should_trigger"),
+                    "must-not-trigger": text("must_not_trigger"),
+                    skills.DRY_RUN_KEY: text("dry_run_task")}
+        for key, field in (("hosts", "hosts"), ("reads", "reads"), ("rests-on", "rests_on")):
+            if field in body:
+                metadata[key] = text(field)
+        path, report = _call(skills.import_draft, home, slug, text("source"),
+                             context=text("context"), side_effect=text("side_effect"),
+                             name=text("name") or None, scope=text("scope") or "own",
+                             license=text("license") or None, metadata=metadata, fetch=_fetch)
+        return 200, {"ok": True, "draft": path.parent.name, "by": _who(req),
+                     "text": skills.import_written(home, slug, path, report)}
 
     @router.route("GET", "/api/cousins/{slug}/skills/drafts/{name}")
     def show_draft(req, slug, name):

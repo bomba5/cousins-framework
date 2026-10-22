@@ -34,6 +34,19 @@ class SkillsJsx(unittest.TestCase):
         self.assertIn('{"check" in item && <SkillHealth item={item}', self.src)
         self.assertIn("upstream changed", self.src)
 
+    def test_the_operator_imports_from_the_inspector(self):
+        self.assertIn("skillPost(`/api/cousins/${skillPath(slug)}/skills/import`, body)", self.src)
+        self.assertIn('<SkillImportForm slug={c.slug} targets={data.import_targets} onDone={done} />',
+                      self.src)
+        self.assertIn("import a skill from outside...", self.src)
+        # only where the import lands, and every key the route takes
+        self.assertIn("{(where[f.scope] || []).map(r => <option", self.src)
+        self.assertIn('{scopes.map(s => <option key={s} value={s}>{s}</option>)}', self.src)
+        self.assertNotIn('["personal", "private"].map', self.src)
+        for key in ("hosts", "reads", "rests_on", "license"):
+            self.assertIn('{field("%s", ' % key, self.src)
+        self.assertIn("no repository this cousin loads takes a skill from outside", self.src)
+
     def test_no_colour_literals_and_no_em_dash(self):
         self.assertNotRegex(self.src, r"#[0-9a-fA-F]{3,8}\b")
         self.assertNotIn("oklch(", self.src)

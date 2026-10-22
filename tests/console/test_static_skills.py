@@ -34,6 +34,11 @@ class SkillsJsx(unittest.TestCase):
         self.assertIn('{"check" in item && <SkillHealth item={item}', self.src)
         self.assertIn("upstream changed", self.src)
 
+    def test_the_operator_imports_from_the_inspector(self):
+        self.assertIn("skillPost(`/api/cousins/${skillPath(slug)}/skills/import`, f)", self.src)
+        self.assertIn('<SkillImportForm slug={c.slug} repos={data.repos} onDone={done} />', self.src)
+        self.assertIn("import a skill from outside...", self.src)
+
     def test_no_colour_literals_and_no_em_dash(self):
         self.assertNotRegex(self.src, r"#[0-9a-fA-F]{3,8}\b")
         self.assertNotIn("oklch(", self.src)

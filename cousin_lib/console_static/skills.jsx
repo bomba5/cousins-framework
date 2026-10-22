@@ -5,8 +5,10 @@
 // System > skills shows the shared set, each cousin's folders in the
 // personal and work repositories, and the drafts waiting; a panel in each
 // cousin's inspector shows what that cousin loads and its drafts, a private
-// cousin's included. Approve, reject and remove exist only here, and each
-// acts on the diff this page showed (its sha256), never on a newer one.
+// cousin's included. Import, approve, reject and remove exist only here, and
+// each of the last three acts on the diff this page showed (its sha256),
+// never on a newer one. Importing a skill from outside is the operator's
+// act: the inspector's import form, never a cousin's tool.
 //
 // An approved skill also shows its health (cousin_lib/skills_check.py):
 // stale when one of its pins or what it rests on changed, upstream changed
@@ -352,6 +354,58 @@ function SkillsSystemView() {
   </div>;
 }
 
+// The operator's import of a skill published outside into this cousin's
+// drafts: the source pinned to a full commit and the draft's own keys. The
+// draft then shows below for review, the dry run and approval.
+function SkillImportForm({ slug, repos, onDone }) {
+  const [open, setOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const first = (repos || []).find(r => r !== "work") || "personal";
+  const [f, setF] = React.useState({ source: "", context: first, side_effect: "read-only", name: "",
+                                     should_trigger: "", must_not_trigger: "", dry_run_task: "" });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  if (!open) return <button className="btn ghost" style={{ alignSelf: "flex-start" }}
+                            onClick={() => setOpen(true)}>import a skill from outside...</button>;
+  const field = (k, label, ph) => <label key={k} style={{ display: "flex", gap: 8, alignItems: "baseline", ...SKILL_MONO }}>
+    <span className="muted" style={{ minWidth: 150 }}>{label}</span>
+    <input className="txt" style={{ flex: 1 }} value={f[k]} placeholder={ph || ""} onChange={set(k)} />
+  </label>;
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const res = await skillPost(`/api/cousins/${skillPath(slug)}/skills/import`, f);
+      setOpen(false);
+      onDone({ ok: true, text: `imported: ${res.text}` });
+    } catch (e) { setErr(String(e.message || e)); }
+    setBusy(false);
+  };
+  return <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingLeft: 12, borderLeft: "2px solid var(--hair)" }}>
+    {field("source", "source", "https://github.com/<owner>/<repo>@<full commit>:<folder>")}
+    <label style={{ display: "flex", gap: 8, alignItems: "baseline", ...SKILL_MONO }}>
+      <span className="muted" style={{ minWidth: 150 }}>repository, side effect</span>
+      <select className="sel" value={f.context} onChange={set("context")}>
+        {["personal", "private"].map(r => <option key={r} value={r}>{r}</option>)}
+      </select>
+      <select className="sel" value={f.side_effect} onChange={set("side_effect")}>
+        {["read-only", "writes-local"].map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
+    </label>
+    {field("name", "draft name", "default: the skill's own")}
+    {field("should_trigger", "should trigger", "a prompt that should make it fire")}
+    {field("must_not_trigger", "must not trigger", "a prompt that must not")}
+    {field("dry_run_task", "dry-run task", "the sample task its dry run does")}
+    <span className="muted" style={SKILL_MONO}>
+      fetched at that commit, byte for byte; an open licence only; never outward, never into work
+    </span>
+    <div style={{ display: "flex", gap: 8 }}>
+      <button className="btn" disabled={busy || !f.source} onClick={submit}>{busy ? "fetching..." : "import"}</button>
+      <button className="btn ghost" onClick={() => setOpen(false)}>cancel</button>
+    </div>
+    {err && <SysNote msg={{ ok: false, text: err }} />}
+  </div>;
+}
+
 function CousinSkillsPanel({ cousin }) {
   const c = cousin;
   const [data, setData] = React.useState(null);
@@ -381,6 +435,7 @@ function CousinSkillsPanel({ cousin }) {
         </SkillRow>;
       })}
       {(data.loaded || []).length === 0 && <span className="muted" style={SKILL_MONO}>no approved skills</span>}
+      {data.lane !== "opencode" && <SkillImportForm slug={c.slug} repos={data.repos} onDone={done} />}
       {(data.drafts || []).map(d => {
         const key = `draft/${d.name}`;
         return <SkillRow key={key} label={`draft: ${d.name}`} item={d} open={open === key}
@@ -398,4 +453,4 @@ registerSlot("inspector.panels", { id: "skills", order: 35,
                                    render: ({ cousin }) => <CousinSkillsPanel cousin={cousin} /> });
 
 Object.assign(window, { SkillsSystemView, CousinSkillsPanel, SkillDraftReview, SkillApproved, SkillOutside,
-                        SkillHealth, SkillsCheckPanel });
+                        SkillHealth, SkillsCheckPanel, SkillImportForm });

@@ -197,6 +197,7 @@ SHIPPED_BEFORE = {
         {'to': '--user'},
     ),
     ('tools.skill', 'description'): (
+        'Your skills (procedures you load when you need them): list what loads at your next start and your drafts, show one, write a draft, import one published outside, diff a draft against what is approved, record the job that ran a dry run, check whether your loaded skills went stale. The operator approves drafts in the console; nothing here approves, rejects or removes a skill.',
         'Your skills (procedures you load when you need them): list what loads at your next start and your drafts, show one, write a draft, import one published outside, diff a draft against what is approved, record the job that ran a dry run. The operator approves drafts in the console; nothing here approves, rejects or removes a skill.',
         'Your skills (procedures you load when you need them): list what loads at your next start and your drafts, show one, write a draft, diff a draft against what is approved. The operator approves drafts in the console; nothing here approves, rejects or removes a skill.',
     ),
@@ -205,71 +206,83 @@ SHIPPED_BEFORE = {
         {'scope': '--scope', 'should_trigger': '--should-trigger', 'must_not_trigger': '--must-not-trigger'},
     ),
     ('tools.skill.properties', 'context'): (
-        {'type': 'string', 'enum': ['personal', 'work', 'private'], 'description': 'the repository it belongs in (draft)'},
+        {'type': 'string', 'enum': ['personal', 'work', 'private'], 'description': 'the repository it belongs in (draft, import)'},
     ),
     ('tools.skill.properties', 'context.description'): (
-        'the repository it belongs in (draft)',
+        'the repository it belongs in (draft, import)',
+    ),
+    ('tools.skill.properties', 'dry_run_task'): (
+        {'type': 'string', 'optional': True, 'description': 'a skill from outside: the sample task its dry run does (import, draft)'},
+    ),
+    ('tools.skill.properties', 'dry_run_task.description'): (
+        'a skill from outside: the sample task its dry run does (import, draft)',
     ),
     ('tools.skill.properties', 'hosts'): (
-        {'type': 'string', 'optional': True, 'description': 'every host it may contact, comma-separated; "" for none (draft)'},
+        {'type': 'string', 'optional': True, 'description': 'every host it may contact, comma-separated; "" for none (draft, import)'},
     ),
     ('tools.skill.properties', 'hosts.description'): (
-        'every host it may contact, comma-separated; "" for none (draft)',
+        'every host it may contact, comma-separated; "" for none (draft, import)',
     ),
     ('tools.skill.properties', 'license'): (
+        {'type': 'string', 'optional': True, 'description': 'an SPDX identifier its licence file reads as; required with source (draft; import finds it)'},
         {'type': 'string', 'optional': True, 'description': 'an SPDX identifier; required with source (draft)'},
     ),
     ('tools.skill.properties', 'license.description'): (
+        'an SPDX identifier its licence file reads as; required with source (draft; import finds it)',
         'an SPDX identifier; required with source (draft)',
     ),
     ('tools.skill.properties', 'must_not_trigger'): (
-        {'type': 'string', 'optional': True, 'description': 'a prompt that must not (draft)'},
+        {'type': 'string', 'optional': True, 'description': 'a prompt that must not (draft, import)'},
     ),
     ('tools.skill.properties', 'must_not_trigger.description'): (
-        'a prompt that must not (draft)',
+        'a prompt that must not (draft, import)',
     ),
     ('tools.skill.properties', 'name'): (
+        {'type': 'string', 'description': "a draft's name, or plugin:name for a loaded skill (show, draft, diff, dry-run, check; check without it covers every loaded skill); another name for the draft (import)"},
         {'type': 'string', 'description': "a draft's name, or plugin:name for a loaded skill (show, draft, diff, dry-run); another name for the draft (import)"},
         {'type': 'string', 'description': "a draft's name, or plugin:name for a loaded skill (show, draft, diff)"},
     ),
     ('tools.skill.properties', 'name.description'): (
+        "a draft's name, or plugin:name for a loaded skill (show, draft, diff, dry-run, check; check without it covers every loaded skill); another name for the draft (import)",
         "a draft's name, or plugin:name for a loaded skill (show, draft, diff, dry-run); another name for the draft (import)",
         "a draft's name, or plugin:name for a loaded skill (show, draft, diff)",
     ),
     ('tools.skill.properties', 'reads'): (
-        {'type': 'string', 'optional': True, 'description': 'what it reads, pinned: repo@commit:path or path#sha256:<hex>, comma-separated (draft)'},
+        {'type': 'string', 'optional': True, 'description': 'what it reads, pinned: repo@commit:path or path#sha256:<hex>, comma-separated (draft, import)'},
     ),
     ('tools.skill.properties', 'reads.description'): (
-        'what it reads, pinned: repo@commit:path or path#sha256:<hex>, comma-separated (draft)',
+        'what it reads, pinned: repo@commit:path or path#sha256:<hex>, comma-separated (draft, import)',
     ),
     ('tools.skill.properties', 'rests_on'): (
-        {'type': 'string', 'optional': True, 'description': 'paths, tool versions and memory topics it depends on, comma-separated (draft)'},
+        {'type': 'string', 'optional': True, 'description': 'paths, tool versions and memory topics it depends on, comma-separated (draft, import)'},
     ),
     ('tools.skill.properties', 'rests_on.description'): (
-        'paths, tool versions and memory topics it depends on, comma-separated (draft)',
+        'paths, tool versions and memory topics it depends on, comma-separated (draft, import)',
     ),
     ('tools.skill.properties', 'scope'): (
-        {'type': 'string', 'optional': True, 'enum': ['own', 'shared'], 'description': 'your own folder (default), or shared/ for a general skill in personal (draft)'},
+        {'type': 'string', 'optional': True, 'enum': ['own', 'shared'], 'description': 'your own folder (default), or shared/ for a general skill in personal (draft, import)'},
     ),
     ('tools.skill.properties', 'scope.description'): (
-        'your own folder (default), or shared/ for a general skill in personal (draft)',
+        'your own folder (default), or shared/ for a general skill in personal (draft, import)',
     ),
     ('tools.skill.properties', 'should_trigger'): (
-        {'type': 'string', 'optional': True, 'description': 'a prompt that should make you use it, for the trigger test (draft)'},
+        {'type': 'string', 'optional': True, 'description': 'a prompt that should make you use it, for the trigger test (draft, import)'},
     ),
     ('tools.skill.properties', 'should_trigger.description'): (
-        'a prompt that should make you use it, for the trigger test (draft)',
+        'a prompt that should make you use it, for the trigger test (draft, import)',
     ),
     ('tools.skill.properties', 'side_effect'): (
-        {'type': 'string', 'enum': ['read-only', 'writes-local', 'outward'], 'description': "what it can change; an outward step stops at the operator's go (draft)"},
+        {'type': 'string', 'enum': ['read-only', 'writes-local', 'outward'], 'description': "what it can change; an outward step stops at the operator's go (draft, import)"},
     ),
     ('tools.skill.properties', 'side_effect.description'): (
-        "what it can change; an outward step stops at the operator's go (draft)",
+        "what it can change; an outward step stops at the operator's go (draft, import)",
     ),
     ('tools.skill.properties', 'source'): (
+        {'type': 'string', 'optional': True, 'description': 'a skill from outside: <https url>@<full commit>:<folder> (import; draft)'},
         {'type': 'string', 'optional': True, 'description': 'a skill from outside: <url>@<full commit> (draft)'},
     ),
     ('tools.skill.properties', 'source.description'): (
+        'a skill from outside: <https url>@<full commit>:<folder> (import; draft)',
         'a skill from outside: <url>@<full commit> (draft)',
     ),
 }

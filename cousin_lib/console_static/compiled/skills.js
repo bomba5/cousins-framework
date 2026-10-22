@@ -328,6 +328,45 @@ function SkillsSystemView() {
     })))
   )));
 }
+function SkillImportForm({ slug, repos, onDone }) {
+  const [open, setOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const first = (repos || []).find((r) => r !== "work") || "personal";
+  const [f, setF] = React.useState({
+    source: "",
+    context: first,
+    side_effect: "read-only",
+    name: "",
+    should_trigger: "",
+    must_not_trigger: "",
+    dry_run_task: ""
+  });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  if (!open) return /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn ghost",
+      style: { alignSelf: "flex-start" },
+      onClick: () => setOpen(true)
+    },
+    "import a skill from outside..."
+  );
+  const field = (k, label, ph) => /* @__PURE__ */ React.createElement("label", { key: k, style: { display: "flex", gap: 8, alignItems: "baseline", ...SKILL_MONO } }, /* @__PURE__ */ React.createElement("span", { className: "muted", style: { minWidth: 150 } }, label), /* @__PURE__ */ React.createElement("input", { className: "txt", style: { flex: 1 }, value: f[k], placeholder: ph || "", onChange: set(k) }));
+  const submit = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await skillPost(`/api/cousins/${skillPath(slug)}/skills/import`, f);
+      setOpen(false);
+      onDone({ ok: true, text: `imported: ${res.text}` });
+    } catch (e) {
+      setErr(String(e.message || e));
+    }
+    setBusy(false);
+  };
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6, paddingLeft: 12, borderLeft: "2px solid var(--hair)" } }, field("source", "source", "https://github.com/<owner>/<repo>@<full commit>:<folder>"), /* @__PURE__ */ React.createElement("label", { style: { display: "flex", gap: 8, alignItems: "baseline", ...SKILL_MONO } }, /* @__PURE__ */ React.createElement("span", { className: "muted", style: { minWidth: 150 } }, "repository, side effect"), /* @__PURE__ */ React.createElement("select", { className: "sel", value: f.context, onChange: set("context") }, ["personal", "private"].map((r) => /* @__PURE__ */ React.createElement("option", { key: r, value: r }, r))), /* @__PURE__ */ React.createElement("select", { className: "sel", value: f.side_effect, onChange: set("side_effect") }, ["read-only", "writes-local"].map((s) => /* @__PURE__ */ React.createElement("option", { key: s, value: s }, s)))), field("name", "draft name", "default: the skill's own"), field("should_trigger", "should trigger", "a prompt that should make it fire"), field("must_not_trigger", "must not trigger", "a prompt that must not"), field("dry_run_task", "dry-run task", "the sample task its dry run does"), /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "fetched at that commit, byte for byte; an open licence only; never outward, never into work"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", disabled: busy || !f.source, onClick: submit }, busy ? "fetching..." : "import"), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setOpen(false) }, "cancel")), err && /* @__PURE__ */ React.createElement(SysNote, { msg: { ok: false, text: err } }));
+}
 function CousinSkillsPanel({ cousin }) {
   const c = cousin;
   const [data, setData] = React.useState(null);
@@ -363,7 +402,7 @@ function CousinSkillsPanel({ cousin }) {
       },
       /* @__PURE__ */ React.createElement(SkillApproved, { showUrl: url, removalUrl: `${url}/removal`, removeUrl: `${url}/remove`, onDone: done })
     );
-  }), (data.loaded || []).length === 0 && /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "no approved skills"), (data.drafts || []).map((d) => {
+  }), (data.loaded || []).length === 0 && /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "no approved skills"), data.lane !== "opencode" && /* @__PURE__ */ React.createElement(SkillImportForm, { slug: c.slug, repos: data.repos, onDone: done }), (data.drafts || []).map((d) => {
     const key = `draft/${d.name}`;
     return /* @__PURE__ */ React.createElement(
       SkillRow,
@@ -396,5 +435,6 @@ Object.assign(window, {
   SkillApproved,
   SkillOutside,
   SkillHealth,
-  SkillsCheckPanel
+  SkillsCheckPanel,
+  SkillImportForm
 });

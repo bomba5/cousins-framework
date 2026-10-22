@@ -86,6 +86,13 @@ DRAFT_MAX_BYTES = 2 * 1024 * 1024
 # other subcommand there is refused (an allowlist, so reset, checkout,
 # rebase and anything new are covered).
 GIT_READ = ("log", "show", "diff", "status", "cat-file", "ls-files")
+# Importing a skill from outside is the operator's act (docs/reference/
+# skills.md, "Who does what"): the console's import form, or cousin-skill
+# import in the operator's own terminal. A cousin suggests one.
+IMPORT_REFUSAL = ("importing a skill from outside is the operator's act: suggest it to them,"
+                  " naming its source <https url>@<full commit>:<folder>; they import it in the"
+                  " console (the cousin's inspector, skills, import) or with"
+                  " `cousin-skill --home <home> import` in their own terminal")
 WRITE_PATH_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 
 
@@ -1566,11 +1573,34 @@ def _command_of(segment, here):
     return args, where
 
 
+def _cli_subcommand(args):
+    """The cousin-skill subcommand of one command's words (`cousin-skill
+    [--home H] <sub>` or `python [-I] -m cousin_lib.skills [--home H]
+    <sub>`), or None for any other command."""
+    words = list(args)
+    head = os.path.basename(words[0]) if words else ""
+    if head == "cousin-skill":
+        rest = words[1:]
+    elif head.startswith("python") and "-m" in words:
+        at = words.index("-m")
+        if at + 1 >= len(words) or words[at + 1] != "cousin_lib.skills":
+            return None
+        rest = words[at + 2:]
+    else:
+        return None
+    while rest and rest[0].startswith("-"):
+        opt = rest[0]
+        rest = rest[2:] if opt == "--home" else rest[1:]
+    return rest[0] if rest else None
+
+
 def guard_tool(tool_name, tool_input, *, root=None, home=None, cwd=None):
     """The refusal for a call that would write the skills repositories,
     the exports or the approval records, or None. Path tools by their
     path; Bash by the targets it writes (perimeter's parse) and by its git
-    commands: under <install>/skills/ only GIT_READ subcommands pass.
+    commands: under <install>/skills/ only GIT_READ subcommands pass. A
+    `cousin-skill import` from a cousin's shell is refused: importing is
+    the operator's act (IMPORT_REFUSAL).
     Best-effort for Bash, like the perimeter: a write hidden behind a
     variable is not seen."""
     if root is None and home is None:
@@ -1596,14 +1626,20 @@ def guard_tool(tool_name, tool_input, *, root=None, home=None, cwd=None):
     for path in perimeter._bash_write_targets(command):
         if _protected(path, root, home, cwd):
             return why % ("Bash", path)
-    if root is None:
-        return None
     here, exported = cwd, None
+    if root is None:
+        for segment in perimeter._segments(perimeter._shell_tokens(command)):
+            args, _where = _command_of(segment, here)
+            if args and _cli_subcommand(args) == "import":
+                return "skills: %s" % IMPORT_REFUSAL
+        return None
     for segment in perimeter._segments(perimeter._shell_tokens(command)):
         args, where = _command_of(segment, exported or here)
         if not args:
             continue
         head = os.path.basename(args[0])
+        if _cli_subcommand(args) == "import":
+            return "skills: %s" % IMPORT_REFUSAL
         if head in ("cd", "pushd") and len(args) > 1:
             here = _absolute(args[1], here)
             continue
@@ -1737,7 +1773,8 @@ def main(argv=None):
     p.add_argument("--body-file", help="the steps (default: stdin)")
     p.add_argument("--dry-run-task", default="",
                    help="a skill from outside: the sample task its dry run does")
-    p = sub.add_parser("import", help="a draft from a skill published outside")
+    p = sub.add_parser("import", help="a draft from a skill published outside: the operator's"
+                                      " act, refused inside a cousin's environment (COUSIN_HOME)")
     p.add_argument("source", help="<https url>@<full commit>:<folder>")
     p.add_argument("--context", required=True, choices=REPOS)
     p.add_argument("--side-effect", required=True, choices=SIDE_EFFECTS)
@@ -1780,6 +1817,8 @@ def main(argv=None):
                                          DRY_RUN_KEY: args.dry_run_task})
             print(draft_written(home, slug, args.name, path))
         elif args.command == "import":
+            if os.environ.get("COUSIN_HOME"):
+                raise SkillError(IMPORT_REFUSAL)
             path, report = import_draft(
                 home, slug, args.source, context=args.context, side_effect=args.side_effect,
                 name=args.name, scope=args.scope, license=args.license,

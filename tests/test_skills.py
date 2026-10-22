@@ -614,22 +614,24 @@ class TestOutsideCli(OutsideCase):
             code = skills.main(["--home", str(self.wren), *args])
         return code, "\n".join(out), "\n".join(err)
 
-    def test_import_and_a_dry_run_through_the_tool_registry_and_the_command(self):
-        """The command lines the opencode and tmux lanes build from the
-        shipped registry, run: the import, then the dry run recorded from
-        a real job row."""
+    def test_the_operator_imports_from_a_terminal_and_the_cousin_records_the_dry_run(self):
+        """The operator's `cousin-skill --home <home> import` (no COUSIN_HOME
+        in their terminal), then the dry run recorded through the command
+        line the opencode and tmux lanes build from the shipped registry,
+        which has no import any more."""
         from cousin_lib import jobs, mcp_server
         registry = mcp_server.load_registry(
             pathlib.Path(skills.__file__).resolve().parents[1] / "config"
             / "mcp-registry.toml.example")
         tool = registry["tools"]["skill"]
-        argv, _ = mcp_server.build_call(tool, "import", {
-            "source": self.source(), "context": "personal", "side_effect": "read-only",
-            "should_trigger": PROMPTS["should-trigger"],
-            "must_not_trigger": PROMPTS["must-not-trigger"],
-            "dry_run_task": "run scripts/check.py", "hosts": ""}, resolve=lambda c: c)
+        self.assertNotIn("import", tool["commands"])
+        os.environ.pop("COUSIN_HOME", None)
         with mock.patch.object(skills, "fetch_folder", self.fetch):
-            code, out, err = self.run_cli(*argv[1:])
+            code, out, err = self.run_cli(
+                "import", self.source(), "--context", "personal", "--side-effect", "read-only",
+                "--should-trigger", PROMPTS["should-trigger"],
+                "--must-not-trigger", PROMPTS["must-not-trigger"],
+                "--dry-run-task", "run scripts/check.py", "--hosts", "")
         self.assertEqual(code, 0, err)
         self.assertIn("licence MIT (LICENSE.txt)", out)
         self.assertIn("upstream's allowed-tools, license, metadata not kept", out)
@@ -643,6 +645,43 @@ class TestOutsideCli(OutsideCase):
         code, out, err = self.run_cli(*argv[1:])
         self.assertEqual(code, 0, err)
         self.assertIn("dry run recorded: job #%d done, exit 0, so a pass" % job_id, out)
+
+
+class TestImportIsTheOperators(OutsideCase):
+    """Importing a skill from outside is the operator's act
+    (docs/reference/skills.md, "Who does what"): a cousin's session cannot."""
+
+    def test_the_command_refuses_inside_a_cousins_environment(self):
+        os.environ["COUSIN_HOME"] = str(self.wren)
+        out, err = [], []
+        with mock.patch.object(skills, "fetch_folder", self.fetch), \
+                mock.patch("builtins.print", lambda *a, **k: (err if k.get("file") else out)
+                           .append(" ".join(str(x) for x in a))):
+            code = skills.main(["--home", str(self.wren), "import", self.source(),
+                                "--context", "personal", "--side-effect", "read-only"])
+        self.assertEqual(code, 2)
+        self.assertIn("importing a skill from outside is the operator's act", "\n".join(err))
+        self.assertEqual(skills.drafts(self.wren, "wren"), [])
+
+    def test_the_guard_refuses_an_import_from_a_cousins_shell(self):
+        refused = ["cousin-skill import %s --context personal --side-effect read-only"
+                   % self.source(),
+                   "cousin-skill --home /x import %s" % self.source(),
+                   "cd /tmp && env FOO=1 cousin-skill import %s" % self.source(),
+                   "python3 -I -m cousin_lib.skills import %s" % self.source()]
+        for command in refused:
+            with self.subTest(command=command):
+                why = skills.guard_tool("Bash", {"command": command}, root=self.root,
+                                        home=self.wren)
+                self.assertIn("operator's act", why or "")
+        for command in ("cousin-skill list", "cousin-skill check", "echo import"):
+            with self.subTest(command=command):
+                self.assertIsNone(skills.guard_tool("Bash", {"command": command},
+                                                    root=self.root, home=self.wren))
+
+    def test_the_tool_has_no_import(self):
+        from cousin_lib.runner import tools
+        self.assertNotIn("import", tools.HANDLERS["skill"])
 
 
 class TestDraftsAndApproval(SkillsCase):

@@ -1004,7 +1004,7 @@ Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", 
 
 ## Skills
 
-A cousin's skills ([the skills reference](skills.md)): what it loads, its drafts, and the three verbs only the console has. Approving, rejecting and removing a skill happen here and nowhere else; the `skill` tool and `cousin-skill` only list, show, draft, diff and check. Approve and remove take the `diff_sha256` of the diff the page showed, and refuse with `409` when the draft or the skill changed since. Each records the console user who acted. The System routes (`/api/skills...`) never show a cousin that loads the `private` repository, nor its drafts: its folder is its name. Its skills show only on its own routes. `400` bad slug or skill name, `404` unknown cousin, draft or skill, `409` a refusal from the skills store (its message says why).
+A cousin's skills ([the skills reference](skills.md)): what it loads, its drafts, and the verbs only the console has. Importing a skill from outside, approving, rejecting and removing one happen here (an import also with `cousin-skill --home <home> import` in the operator's own terminal); the `skill` tool only lists, shows, drafts, diffs, checks and records a dry run. Approve and remove take the `diff_sha256` of the diff the page showed, and refuse with `409` when the draft or the skill changed since. Each records the console user who acted. The System routes (`/api/skills...`) never show a cousin that loads the `private` repository, nor its drafts: its folder is its name. Its skills show only on its own routes. `400` bad slug or skill name, `404` unknown cousin, draft or skill, `409` a refusal from the skills store (its message says why).
 
 ### `GET /api/skills`
 
@@ -1029,6 +1029,10 @@ Body `{"diff_sha256"}`, the removal diff shown. Commits the removal and records 
 ### `GET /api/cousins/<slug>/skills`
 
 `{"repos", "states", "lane", "loaded", "drafts", "unused_days"}`: the repositories the cousin loads (`cousin.toml [skills] repos`), each one's state, its runner kind, the approved skills it loads at its next start (each with `plugin`: `shared`, `personal`, `work` or `private`, and the `check`, `usage`, `approved_at` and `unused` of `GET /api/skills`, its use counted from this cousin only), and its drafts. A `cousin.toml` list that does not parse is `{"error"}` with empty lists.
+
+### `POST /api/cousins/<slug>/skills/import`
+
+The operator imports a skill published outside into the cousin's drafts. Body `{"source", "context", "side_effect", "name"?, "scope"?, "should_trigger"?, "must_not_trigger"?, "dry_run_task"?, "hosts"?, "reads"?, "rests_on"?, "license"?}`: `source` is `<https url>@<full commit>:<folder>`; `hosts`, `reads` and `rests_on`, when given (even empty), are declared. Fetched once, at that commit (60 seconds at most). `{"ok": true, "draft", "by", "text"}`: the draft's name, the console user, and what the import kept and left out. `409` for a refusal (a bad source or path, a licence the repository does not take, `outward`, `work`). The draft then shows in `GET .../drafts/<name>` for review, the dry run and approval.
 
 ### `GET /api/cousins/<slug>/skills/approved/<plugin>/<name>`
 

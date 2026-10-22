@@ -24,7 +24,11 @@ importing a skill from outside is the operator's act.
 
 - **The operator imports in the console:** the cousin's inspector, skills,
   *import a skill from outside* (`POST /api/cousins/<slug>/skills/import`).
-  - The source is pinned to a full commit, with the draft's own keys.
+  - The source is pinned to a full commit, with the draft's own keys:
+    the scope, the trigger prompts, the dry-run task, `hosts`, `reads`,
+    `rests-on` and the licence.
+  - The form offers only the scopes and repositories the import takes for
+    that cousin: `import_targets` in `GET /api/cousins/<slug>/skills`.
   - The draft then goes through the same review, dry run and approval as
     before.
   - `cousin-skill --home <home> import` in the operator's own terminal

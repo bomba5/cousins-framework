@@ -284,7 +284,11 @@ shows for it. Agreed with the operator (2026-10-21).
   terminal. A cousin suggests one, naming its source; it never imports. Its
   `skill` tool has no `import`, the policy guard refuses a `cousin-skill
   import` from a cousin's shell, and the command itself refuses to run
-  where `COUSIN_HOME` is set. `source` names the repository, the full commit
+  where `COUSIN_HOME` is set. Those stop a cousin that follows its tools;
+  they are a policy line, not a boundary, since a shell can get past both.
+  The boundary is the operator's approval: nothing loads before it. The
+  inspector's form offers only the scopes and repositories the import
+  takes for that cousin. `source` names the repository, the full commit
   and the skill's folder, `<https url>@<commit>:<folder>`, and the import
   carries the draft's own keys (`context`, `side-effect`, the trigger
   prompts, `dry-run-task` and the rest). The framework fetches exactly that commit, depth 1, into a

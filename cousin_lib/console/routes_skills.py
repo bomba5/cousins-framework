@@ -202,7 +202,8 @@ def register():
         try:
             repos = skills.cousin_repos(home)
         except SkillError as err:
-            return 200, {"repos": [], "error": str(err), "loaded": [], "drafts": []}
+            return 200, {"repos": [], "error": str(err), "loaded": [], "drafts": [],
+                         "import_targets": skills.import_targets(home)}
         from cousin_lib import skills_check
         loaded = [skills_check.annotate(req.server.root, s, homes=[home])
                   for s in skills.loaded(req.server.root, home, slug)]
@@ -211,7 +212,8 @@ def register():
                      "lane": skills.lane_of(home),
                      "loaded": loaded,
                      "drafts": skills.drafts(home, slug),
-                     "unused_days": skills_check.UNUSED_DAYS}
+                     "unused_days": skills_check.UNUSED_DAYS,
+                     "import_targets": skills.import_targets(home)}
 
     @router.route("GET", "/api/cousins/{slug}/skills/approved/{plugin}/{name}")
     def show_loaded(req, slug, plugin, name):

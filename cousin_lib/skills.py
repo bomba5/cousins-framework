@@ -1187,6 +1187,18 @@ def _split_upstream(text):
     return values, others
 
 
+def import_targets(home):
+    """Where a skill from outside can land for this cousin, per scope:
+    {"own": [repo], "shared": [repo]}, the repositories import_draft takes
+    (OUTSIDE_REPOS the cousin loads, shared only in personal, and a cousin
+    that loads private keeps its own there). The console's import form
+    offers only these."""
+    return {scope: [repo for repo in OUTSIDE_REPOS
+                    if (scope != SHARED or repo == "personal")
+                    and placement_problem(home, repo, scope) is None]
+            for scope in SCOPES}
+
+
 def import_draft(home, slug, source, *, context, side_effect, name=None, scope="own",
                  metadata=None, license=None, fetch=None):
     """Write a draft from a skill published outside (docs/reference/skills.md,

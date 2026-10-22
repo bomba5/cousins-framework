@@ -144,6 +144,9 @@ class TestPrivacy(SkillsRoutesCase):
         self.assertNotIn("kit", json.dumps(overview))
         status, mine = self.get("/api/cousins/kit/skills")
         self.assertEqual([d["name"] for d in mine["drafts"]], ["board-check"])
+        self.assertEqual(mine["import_targets"], {"own": ["private"], "shared": []})
+        self.assertEqual(self.get("/api/cousins/wren/skills")[1]["import_targets"],
+                         {"own": ["personal"], "shared": ["personal"]})
         self.assertEqual(self.approve("kit")[0], 200)
         status, overview = self.get("/api/skills")
         self.assertNotIn("kit", json.dumps(overview))

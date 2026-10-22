@@ -420,6 +420,31 @@ class TestImport(OutsideCase):
                 self.imported()
         self.assertFalse((self.wren / "skill-drafts").exists())
 
+    def test_the_targets_are_where_an_import_lands(self):
+        """The console's form offers import_targets only: each pair in it
+        imports, and each pair outside it is refused."""
+        got = self.fetch(None, self.commit, "skills/board-check")
+        meta = dict(PROMPTS, **{"dry-run-task": "run scripts/check.py"})
+        for slug, repos, want in (
+                ("ivo", None, {"own": ["personal"], "shared": ["personal"]}),
+                ("ada", ["personal", "private"], {"own": ["private"], "shared": ["personal"]}),
+                ("kai", ["private"], {"own": ["private"], "shared": []}),
+                ("max", ["work"], {"own": [], "shared": []})):
+            home = self.home(slug, repos)
+            self.assertEqual(skills.import_targets(home), want, slug)
+            for scope in skills.SCOPES:
+                for repo in skills.REPOS:
+                    with self.subTest(slug=slug, scope=scope, repo=repo):
+                        try:
+                            skills.import_draft(home, slug, self.source(), context=repo,
+                                                side_effect="read-only", scope=scope,
+                                                metadata=meta, fetch=lambda *_a: got)
+                        except SkillError:
+                            took = False
+                        else:
+                            took = True
+                        self.assertEqual(took, repo in want[scope])
+
     def test_what_a_draft_from_outside_needs_before_approval(self):
         self.imported(metadata=PROMPTS)
         found = skills.drafts(self.wren, "wren")[0]["problems"]

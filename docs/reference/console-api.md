@@ -1004,7 +1004,7 @@ Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", 
 
 ## Skills
 
-A cousin's skills ([the skills reference](skills.md)): what it loads, its drafts, and the verbs only the console has. Importing a skill from outside, approving, rejecting and removing one happen here (an import also with `cousin-skill --home <home> import` in the operator's own terminal); the `skill` tool only lists, shows, drafts, diffs, checks and records a dry run. Approve and remove take the `diff_sha256` of the diff the page showed, and refuse with `409` when the draft or the skill changed since. Each records the console user who acted. The System routes (`/api/skills...`) never show a cousin that loads the `private` repository, nor its drafts: its folder is its name. Its skills show only on its own routes. `400` bad slug or skill name, `404` unknown cousin, draft or skill, `409` a refusal from the skills store (its message says why).
+A cousin's skills ([the skills reference](skills.md)): what it loads, its drafts, and the verbs only the console has. Importing a skill from outside, approving, rejecting and removing one happen here (an import also with `cousin-skill --home <home> import` in the operator's own terminal); the `skill` tool only lists, shows, drafts, diffs, checks and records a dry run. Approve and remove take the `diff_sha256` of the diff the page showed, and refuse with `409` when the draft or the skill changed since. Approving, rejecting, removing and allowing a dry run each record the console user who acted. An import only names that user in its reply: the draft it writes loads nowhere until an approval, which is recorded. The System routes (`/api/skills...`) never show a cousin that loads the `private` repository, nor its drafts: its folder is its name. Its skills show only on its own routes. `400` bad slug or skill name, `404` unknown cousin, draft or skill, `409` a refusal from the skills store (its message says why).
 
 ### `GET /api/skills`
 
@@ -1028,7 +1028,7 @@ Body `{"diff_sha256"}`, the removal diff shown. Commits the removal and records 
 
 ### `GET /api/cousins/<slug>/skills`
 
-`{"repos", "states", "lane", "loaded", "drafts", "unused_days"}`: the repositories the cousin loads (`cousin.toml [skills] repos`), each one's state, its runner kind, the approved skills it loads at its next start (each with `plugin`: `shared`, `personal`, `work` or `private`, and the `check`, `usage`, `approved_at` and `unused` of `GET /api/skills`, its use counted from this cousin only), and its drafts. A `cousin.toml` list that does not parse is `{"error"}` with empty lists.
+`{"repos", "states", "lane", "loaded", "drafts", "unused_days", "import_targets"}`: the repositories the cousin loads (`cousin.toml [skills] repos`), each one's state, its runner kind, the approved skills it loads at its next start (each with `plugin`: `shared`, `personal`, `work` or `private`, and the `check`, `usage`, `approved_at` and `unused` of `GET /api/skills`, its use counted from this cousin only), and its drafts. `import_targets` is `{"own": [...], "shared": [...]}`: per scope, the repositories an import from outside can land in for this cousin (`personal` or `private` where it loads them, its own skills in `private` when it loads that, `shared` only in `personal`); the inspector's import form offers only these. A `cousin.toml` list that does not parse is `{"error"}` with empty lists.
 
 ### `POST /api/cousins/<slug>/skills/import`
 

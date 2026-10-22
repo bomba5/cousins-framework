@@ -148,6 +148,15 @@ class TestPerimeterHygiene(unittest.TestCase):
         for rel in ("shared/hive/hive.db", "shared/proposed/x.md"):
             self.assertTrue(self._ignored(self.gitignore, rel), rel)
 
+    def test_the_root_skills_repos_are_ignored(self):
+        # <root>/skills/ holds the skills repositories, each its own git
+        # repository: one install's state, which a root that is also the
+        # checkout listed as untracked. Anchored at the root, so a source
+        # directory named skills deeper in the tree still stages.
+        for rel in ("skills/personal/wren/notes/SKILL.md", "skills/work/.git/HEAD"):
+            self.assertTrue(self._ignored(self.gitignore, rel), rel)
+        self.assertFalse(self._ignored(self.gitignore, "cousin_lib/skills/__init__.py"))
+
     def test_an_example_config_is_NOT_ignored(self):
         # The carve-out that lets safe examples ship: it can only fire
         # if the ignore excludes config's CONTENTS, not the directory -

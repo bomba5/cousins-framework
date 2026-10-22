@@ -34,6 +34,10 @@ cousins/
 # which holds bearer tokens. One install's state, never source.
 /shared/
 
+# The root's skills repositories (personal, work, private): each is its
+# own git repository holding one install's skills, never source.
+/skills/
+
 # A built hive node archive holds a bearer token and is a binary the
 # gate refuses; cousin-spawn-node writes it where --out says, and it
 # must never stage from a checkout.

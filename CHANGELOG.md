@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.60.1 - 2026-10-22
+
+### Fixed
+
+- **The skills repositories no longer show as untracked.** On an install
+  whose root is also the checkout, `git status` listed `skills/` (the
+  personal, work and private skills repositories) as untracked, because
+  `.gitignore` did not name it. It is ignored now, anchored at the root
+  like `data/`, `run/` and `shared/`. Upgrades were never affected: the
+  switch's clean check skips untracked files.
+
 ## 3.60.0 - 2026-10-21
 
 ### Added

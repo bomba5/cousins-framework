@@ -1012,7 +1012,7 @@ A cousin's skills ([the skills reference](skills.md)): what it loads, its drafts
 
 ### `POST /api/skills/check`
 
-Starts a staleness run of every approved skill now, in a child process of its own (read-only; it may fetch for a few minutes). `202 {"ok": true, "pid"}`; `409` when the last run began less than five minutes ago. Its outcome shows as `check_run` in `GET /api/skills`. The loops daemon starts one every 20 hours by itself.
+Starts a staleness run of every approved skill now, in a child process of its own (read-only; it may fetch for a few minutes). `202 {"ok": true, "pid"}`; `409` while a run is in progress, or when the last began less than five minutes ago. Its outcome shows as `check_run` in `GET /api/skills`. The loops daemon starts one every 20 hours by itself.
 
 ### `GET /api/skills/shared/<name>`
 

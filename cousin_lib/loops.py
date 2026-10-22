@@ -1059,7 +1059,7 @@ def schedule_skills_check(now, report, *, root, run=None, background=True):
     thread = state["thread"]
     if thread is not None and thread.is_alive():
         return
-    if not skills_check.due(root, now=now):
+    if not skills_check.due(root, now=now) or skills_check.running(root):
         return
     run = run or (lambda: skills_check.check_all(root))
 

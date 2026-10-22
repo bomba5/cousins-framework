@@ -9,7 +9,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 - **Skills: staleness and use, phase 4** ([reference](docs/reference/skills.md#staleness-and-use)).
   - Each approved skill gets a baseline at approval: the value of every
-    `reads` pin and `rests-on` item it declares.
+    `reads` pin and `rests-on` item it declares, kept until the skill's own
+    folder changes.
   - A check compares them with now, item by item (`same`, `changed`,
     `missing`, `unknown`). A skill whose pin or dependency changed or went
     missing is stale. One imported from outside also shows when its source
@@ -20,7 +21,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
     never stale.
   - The loops daemon runs it every 20 hours (health row `skills-check`).
     System > skills has **check now** (`POST /api/skills/check`, at most
-    every 5 minutes).
+    every 5 minutes). One run at a time.
   - The tool hook records each skill use in the using cousin's own home.
     A skill unused for 30 days is flagged for removal.
   - System > skills and the inspector show each skill's last check, last

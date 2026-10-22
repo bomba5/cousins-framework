@@ -147,6 +147,36 @@ class TestLocalItems(CheckCase):
         self.assertEqual(base["from"], "approval")
         self.assertEqual(base["commit"], skills.state(self.root, "personal")["approved"])
 
+    def test_another_skills_approval_keeps_this_ones_staleness(self):
+        """Review M1: the baseline is the skill's own, so an approval of
+        another skill in the same repository never wipes a change."""
+        self.check()
+        self.script.write_text("print('v2')\n")
+        self.assertTrue(self.check()["stale"])
+        self.install("wren", "other-skill", {})
+        result = self.check()
+        self.assertTrue(result["stale"])
+        self.assertEqual(self.states(result)["scripts/check.py"], "changed")
+
+    def test_an_edit_of_the_skill_itself_takes_a_new_baseline(self):
+        self.check()
+        self.script.write_text("print('v2')\n")
+        self.assertTrue(self.check()["stale"])
+        self.install("wren", "board-check", {"rests-on": "scripts/check.py"})
+        result = self.check()
+        self.assertFalse(result["stale"])
+        self.assertEqual(result["baseline"]["from"], "skill changed")
+
+    def test_a_bare_tool_stays_a_tool_where_path_does_not_find_it(self):
+        """Review S1: a word the baseline read as a tool is not re-read as a
+        memory topic by a process whose PATH lacks it."""
+        self.install("wren", "tooly", {"rests-on": "boardhash"})
+        first = skills_check.check_skill(self.root, "personal", "wren", "tooly")
+        self.assertEqual(first["items"][0]["kind"], "tool")
+        os.environ["PATH"] = os.environ["PATH"].split(":", 1)[1]   # without self.bin
+        row = skills_check.check_skill(self.root, "personal", "wren", "tooly")["items"][0]
+        self.assertEqual((row["kind"], row["state"]), ("tool", "same"))
+
     def test_a_tool_is_checked_at_the_path_its_baseline_found(self):
         self.check()
         other = self.tmp / "elsewhere"
@@ -260,6 +290,15 @@ class TestUse(CheckCase):
         self.assertTrue(skills_check.unused(approved, None, now=now))
         self.assertFalse(skills_check.unused(skills_check._now_iso(now - 86400), None, now=now))
 
+    def test_use_counts_from_the_skills_own_cousin_or_every_cousin_for_shared(self):
+        """Review N1: two cousins' own skills of one name never share a use."""
+        both = self.home("ines", repos=["personal", "private"])
+        self.home("kit", repos=["private"])
+        self.assertEqual(skills_check.usage_homes(self.root, "wren"), [self.wren])
+        self.assertEqual(skills_check.usage_homes(self.root, "shared"), [self.otto, self.wren])
+        self.assertEqual(skills_check.usage_homes(self.root, "shared", include_private=True),
+                         [both, self.otto, self.wren])
+
     def test_annotate_adds_check_use_and_the_flag(self):
         self.install("wren", "board-check", {})
         skills_check.check_skill(self.root, "personal", "wren", "board-check")
@@ -292,6 +331,19 @@ class TestRuns(CheckCase):
         self.assertTrue(skills_check.due(self.root, now=now + skills_check.CHECK_EVERY))
         with self.assertRaisesRegex(SkillError, "the last check ran"):
             skills_check.check_all(self.root, now=now + 10, gap=skills_check.NOW_GAP)
+
+    def test_runs_never_overlap(self):
+        """Review N2: one run at a time; the loops do not start a second."""
+        self.assertFalse(skills_check.running(self.root))
+        with skills_check._run_lock(self.root):
+            self.assertTrue(skills_check.running(self.root))
+            with self.assertRaisesRegex(SkillError, "already in progress"):
+                skills_check.check_all(self.root)
+            ran = []
+            loops.schedule_skills_check(time.time(), {"errors": []}, root=self.root,
+                                        run=lambda: ran.append(1), background=False)
+            self.assertEqual(ran, [])
+        self.assertFalse(skills_check.running(self.root))
 
     def test_the_loops_tick_starts_one_when_due(self):
         ran = []

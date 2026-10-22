@@ -377,9 +377,11 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
 
 - **Baseline.** Each approved skill gets one at approval: the value of
   every item it declares, kept in `data/skills/baselines/`
-  (`data/skills/private/baselines/` for the private repository). A skill
-  approved before 3.61.0 gets its baseline at its first check, and an item
-  with no value yet (one that needs the network, or was unreadable at
+  (`data/skills/private/baselines/` for the private repository). It is the
+  skill's own: a new one is taken only when the skill's folder changes, and
+  an approval of another skill in the repository leaves it as it is. A
+  skill approved before 3.61.0 gets its baseline at its first check, and an
+  item with no value yet (one that needs the network, or was unreadable at
   approval) takes the value its first check reads.
 - **What is checked**, item by item:
 
@@ -391,7 +393,7 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
 | `rests-on` `reference_<name>` | `<install>/shared/<name>.md` |
 | `rests-on` `owner/name:path` | the file at the repository's default branch now with its value at the baseline |
 | `rests-on` a path | the file's sha256 |
-| `rests-on` a word on PATH | the binary's sha256 |
+| `rests-on` a word on PATH | the binary's sha256; a word the baseline read as a tool stays one, whatever a later check's PATH finds |
 | `rests-on` anything else | a memory topic: the id of the newest entry on it in the owning cousin's memory (a shared skill has no owner: unknown) |
 | `source` | the source folder's tree at upstream's default branch with its tree at the pinned commit |
 
@@ -405,10 +407,10 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
   import's hardening (no credential, hook or global git setting) and the
   user agent `cousins-framework/<version> (skills check; read-only)`, into a
   temporary repository it deletes. It never runs a skill, its scripts or an
-  outward step. The loops daemon starts a run once every 20 hours (health
-  row `skills-check`); the console's **check now** starts one at most every
-  5 minutes; a run stops starting fetches after 5 minutes and leaves the
-  rest unknown.
+  outward step. One run at a time (a lock). The loops daemon starts a run
+  once every 20 hours (health row `skills-check`); the console's **check
+  now** starts one at most every 5 minutes, never while one runs; a run
+  stops starting fetches after 5 minutes and leaves the rest unknown.
 - **Use.** The tool hook records each use of the `Skill` tool in the using
   cousin's own `data/skills-usage.json` (last time, count), so a private
   cousin's use never leaves its home. A trigger test is not a use.

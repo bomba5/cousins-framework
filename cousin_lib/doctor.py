@@ -160,9 +160,9 @@ def check_skills(root, cousin=None):
             continue
         if res.get("update"):
             notes.append("%s: its source upstream changed (a new import, by the operator)" % label)
+        homes = skills_check.usage_homes(root, folder, include_private=True)
         if skills_check.unused(skills_check.approved_at(root, repo, folder, name),
-                               skills_check.last_use(repo, folder, name,
-                                                     cousin_homes(root))[0]):
+                               skills_check.last_use(repo, folder, name, homes)[0]):
             notes.append("%s: unused for %d days; consider removing it"
                          % (label, skills_check.UNUSED_DAYS))
     if hidden_stale:

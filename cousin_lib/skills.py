@@ -1653,7 +1653,10 @@ def text_list(root, home, slug, *, lane=None):
     for item in loaded(root, home, slug):
         flag = " (problem: %s)" % "; ".join(item["problems"]) if item["problems"] else ""
         try:
-            seen = skills_check.annotate(root, item, homes=[home])
+            homes = skills_check.usage_homes(root, item["folder"])
+            if Path(home) not in homes:
+                homes.append(Path(home))
+            seen = skills_check.annotate(root, item, homes=homes)
         except Exception:  # noqa: BLE001 - a listing never fails on a check file
             seen = {}
         check = seen.get("check") or {}

@@ -322,6 +322,25 @@ class TestStalenessRoutes(SkillsRoutesCase):
             self.assertEqual(status, 409, d)
             popen.assert_not_called()
 
+    def test_check_now_refuses_while_a_run_holds_the_lock_and_rotates_its_log(self):
+        from unittest import mock
+        from cousin_lib import skills_check
+        log = self.root / "data" / "skills" / "checks.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text("x" * (routes_skills.CHECK_LOG_MAX + 1))
+        with skills_check._run_lock(self.root), \
+                mock.patch.object(routes_skills.subprocess, "Popen") as popen:
+            status, d = self.post("/api/skills/check", {})
+            self.assertEqual(status, 409, d)
+            self.assertIn("already in progress", d["error"])
+            popen.assert_not_called()
+        with mock.patch.object(routes_skills.subprocess, "Popen") as popen:
+            popen.return_value.pid = 7
+            status, d = self.post("/api/skills/check", {})
+        self.assertEqual(status, 202, d)
+        self.assertTrue(log.with_name("checks.log.1").is_file())
+        self.assertLess(log.stat().st_size, 10)
+
     def test_system_never_names_a_private_cousin_in_the_run(self):
         from cousin_lib import skills_check
         self.draft(self.kit, context="private")

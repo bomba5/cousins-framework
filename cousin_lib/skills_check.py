@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+from contextlib import contextmanager
 import json
 import os
 import re
@@ -430,15 +431,20 @@ def _pinned(kind, parts, *, remote):
 # ---------------------------------------------------------------- one skill
 
 def _metadata(root, repo, folder, name):
+    """(metadata, approved commit, the skill's own tree id at it). The tree
+    is what a baseline is kept for: an approval of another skill moves the
+    commit, never this tree."""
     st = skills.state(root, repo)
     if not st["trusted"]:
         raise SkillError("repository %s is not in an approved state" % repo)
-    raw = skills._show(skills.repo_dir(root, repo), st["approved"],
-                       "%s/%s/%s" % (folder, name, skills.SKILL_FILE))
+    path = skills.repo_dir(root, repo)
+    raw = skills._show(path, st["approved"], "%s/%s/%s" % (folder, name, skills.SKILL_FILE))
     if raw is None:
         raise SkillError("no approved skill %s:%s/%s" % (repo, folder, name))
+    tree = skills._git(path, "rev-parse", "--verify", "-q",
+                       "%s:%s/%s" % (st["approved"], folder, name), check=False).strip()
     front, _body = skills.parse(raw.decode("utf-8"))
-    return front.get("metadata") or {}, st["approved"]
+    return front.get("metadata") or {}, st["approved"], tree or None
 
 
 PINNED = ("file-pin", "repo-pin", "upstream")
@@ -450,7 +456,7 @@ def capture_baseline(root, repo, folder, name, *, origin="approval", now=None):
     value now. Offline: an item that needs the network (repo-file) gets
     its value at its first check, and a pin needs none (the pin is its own
     baseline). Never raises for an item it cannot read (kept as None)."""
-    metadata, commit = _metadata(root, repo, folder, name)
+    metadata, commit, tree = _metadata(root, repo, folder, name)
     home = owner_home(root, folder)
     mem = _Memory()
     values = {}
@@ -468,7 +474,7 @@ def capture_baseline(root, repo, folder, name, *, origin="approval", now=None):
         values[item] = {"of": of, "kind": kind, "value": value}
         if kind in ("tool", "tool-version") and value is not None:
             values[item]["path"] = detail
-    data = {"skill": "%s:%s/%s" % (repo, folder, name), "commit": commit,
+    data = {"skill": "%s:%s/%s" % (repo, folder, name), "commit": commit, "tree": tree,
             "at": _now_iso(now), "from": origin, "items": values}
     _write(baseline_path(root, repo, folder, name), data)
     return data
@@ -492,9 +498,11 @@ def check_skill(root, repo, folder, name, *, remote=None, now=None):
     or when the skill changed since it was taken) and keep the result. A
     pin is compared with what it pins; any other item with no baseline value
     yet takes the one it has now."""
-    metadata, commit = _metadata(root, repo, folder, name)
+    metadata, commit, tree = _metadata(root, repo, folder, name)
     base = _read(baseline_path(root, repo, folder, name))
-    if base is None or base.get("commit") != commit:
+    if base is None or base.get("tree") != tree:
+        # only a change to this skill's own folder takes a new baseline: an
+        # approval of another skill moves the commit, not this tree
         base = capture_baseline(root, repo, folder, name, now=now,
                                 origin="first check" if base is None else "skill changed")
     own = remote is None
@@ -508,6 +516,10 @@ def check_skill(root, repo, folder, name, *, remote=None, now=None):
             kind, parts = classify(of, item)
             kept = (base.get("items") or {}).setdefault(item, {"of": of, "kind": kind,
                                                                "value": None})
+            if kind in ("tool", "memory") and kept.get("kind") in ("tool", "memory"):
+                # a bare word is a tool when PATH finds it; this process's
+                # PATH may not, so the baseline's reading stands
+                kind, parts = kept["kind"], (item,)
             then = kept.get("value")
             if kind in PINNED and kind != "file-pin":
                 try:
@@ -535,7 +547,8 @@ def check_skill(root, repo, folder, name, *, remote=None, now=None):
         _write(baseline_path(root, repo, folder, name), base)
     stale = any(r["state"] in ("changed", "missing") for r in rows if r["of"] != "source")
     update = any(r["state"] in ("changed", "missing") for r in rows if r["of"] == "source")
-    result = {"skill": "%s:%s/%s" % (repo, folder, name), "commit": commit, "at": _now_iso(now),
+    result = {"skill": "%s:%s/%s" % (repo, folder, name), "commit": commit, "tree": tree,
+              "at": _now_iso(now),
               "stale": stale, "update": update, "items": rows,
               "baseline": {"at": base.get("at"), "from": base.get("from")}}
     _write(check_path(root, repo, folder, name), result)
@@ -572,6 +585,47 @@ def due(root, *, now=None, every=CHECK_EVERY):
     return last is None or (now or time.time()) - last >= every
 
 
+RUN_LOCK = "run.lock"
+
+
+def _lock_path(root):
+    return _base(root, "personal") / "checks" / RUN_LOCK
+
+
+@contextmanager
+def _run_lock(root):
+    """One staleness run at a time: the loops daemon's and the console's
+    never overlap. SkillError when another holds it."""
+    path = _lock_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise SkillError("a staleness run is already in progress") from None
+        yield
+    finally:
+        os.close(fd)
+
+
+def running(root):
+    """Whether a staleness run holds the lock now."""
+    path = _lock_path(root)
+    if not path.exists():
+        return False
+    fd = os.open(path, os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
 def check_all(root, *, now=None, budget=RUN_BUDGET, fetch=None, gap=None):
     """Check every approved skill, the private repository's too (its results
     stay under data/skills/private/), and keep a run summary of counts
@@ -584,8 +638,8 @@ def check_all(root, *, now=None, budget=RUN_BUDGET, fetch=None, gap=None):
                          % (now - last, gap - (now - last)))
     summary = {"at": _now_iso(now), "checked": 0, "stale": 0, "updates": 0, "unknown": 0,
                "errors": 0, "by": user_agent()}
-    _write(_base(root, "personal") / "checks" / LAST_RUN, dict(summary, running=True))
-    with Remote(budget=budget, fetch=fetch) as remote:
+    with _run_lock(root), Remote(budget=budget, fetch=fetch) as remote:
+        _write(_base(root, "personal") / "checks" / LAST_RUN, dict(summary, running=True))
         for repo, folder, name in approved_skills(root):
             try:
                 result = check_skill(root, repo, folder, name, remote=remote, now=now)
@@ -642,6 +696,30 @@ def approved_at(root, repo, folder, name):
                 and rec.get("skill") == name:
             return rec.get("at")
     return None
+
+
+def usage_homes(root, folder, *, include_private=False):
+    """The homes whose use of a skill in `folder` counts: the folder's own
+    cousin for its own skill, every cousin loading personal for shared/. A
+    cousin that loads private only when `include_private` (its use stays out
+    of what other cousins and System show)."""
+    out = []
+    base = Path(root) / "cousins"
+    for home in sorted(base.iterdir()) if base.is_dir() else []:
+        if not (home / "cousin.toml").is_file():
+            continue
+        try:
+            repos = skills.cousin_repos(home)
+        except SkillError:
+            continue
+        if "private" in repos and not include_private:
+            continue
+        if folder == skills.SHARED:
+            if "personal" in repos:
+                out.append(home)
+        elif home.name == folder:
+            out.append(home)
+    return out
 
 
 def last_use(repo, folder, name, homes):

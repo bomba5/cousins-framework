@@ -31,6 +31,7 @@ from cousin_lib.skills import SkillError
 
 TRIGGER_TIMEOUT = 300
 FETCH_TIMEOUT = 60
+CHECK_LOG_MAX = 1 << 20
 
 
 def _who(req):
@@ -66,27 +67,22 @@ def _cousin(req, slug):
     return home
 
 
-def _usage_homes(cousins, private, folder):
-    """The homes whose use of a skill in `folder` counts in the System view:
-    every non-private cousin loading personal for shared/, else the folder's
-    own cousin when it is not private."""
-    if folder == skills.SHARED:
-        return [home for slug, home, repos in cousins if slug not in private and "personal" in repos]
-    return [home for slug, home, _repos in cousins if slug == folder and slug not in private]
-
-
 def _start_check(root):
     """Start a staleness run of every approved skill in a child process of
     its own (skills_check.main run): a run may fetch for minutes, and a page
     does not wait on it. Refused within skills_check.NOW_GAP of the last."""
-    from cousin_lib import skills_check
-    last = skills_check._when((skills_check.last_run(root) or {}).get("at"))
     import time
+    from cousin_lib import skills_check
+    if skills_check.running(root):
+        raise HttpError(409, "a staleness run is already in progress")
+    last = skills_check._when((skills_check.last_run(root) or {}).get("at"))
     if last is not None and time.time() - last < skills_check.NOW_GAP:
         raise HttpError(409, "the last check began %ds ago; another may start in %ds"
                         % (time.time() - last, skills_check.NOW_GAP - (time.time() - last)))
     log = Path(root) / "data" / "skills" / "checks.log"
     log.parent.mkdir(parents=True, exist_ok=True)
+    if log.exists() and log.stat().st_size > CHECK_LOG_MAX:
+        log.replace(log.with_name(log.name + ".1"))   # one old log kept
     with open(log, "a") as out:
         proc = subprocess.Popen([sys.executable, "-m", "cousin_lib.skills_check", "--root",
                                  str(root), "run", "--gap", str(skills_check.NOW_GAP)],
@@ -159,7 +155,7 @@ def register():
                 for folder in sorted(set(listed) - private):
                     found = skills.approved(req.server.root, repo, folder)
                     if found:
-                        homes = _usage_homes(cousins, private, folder)
+                        homes = skills_check.usage_homes(req.server.root, folder)
                         found = [skills_check.annotate(req.server.root, s, homes=homes)
                                  for s in found]
                         folders.append({"folder": folder, "skills": found})

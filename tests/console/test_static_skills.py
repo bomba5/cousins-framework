@@ -47,6 +47,17 @@ class SkillsJsx(unittest.TestCase):
             self.assertIn('{field("%s", ' % key, self.src)
         self.assertIn("no repository this cousin loads takes a skill from outside", self.src)
 
+    def test_each_skill_is_a_card_of_its_own(self):
+        # a bordered card per skill, the description full width under the
+        # name: side by side, one skill's wrapped text ran into the next
+        row = self.src[self.src.index("function SkillRow("):self.src.index("function SkillsCheckPanel(")]
+        self.assertIn('border: "1px solid var(--hair)"', row)
+        self.assertIn("{item.description && <div style=", row)
+        self.assertNotIn("minWidth: 180", row)
+        self.assertNotIn("{item.description}</span>", row)
+        # the folders in System > skills read as headings, not as one more line
+        self.assertIn('<SectionLabel style={{ marginTop: 6 }}>{f.folder === "shared"', self.src)
+
     def test_no_colour_literals_and_no_em_dash(self):
         self.assertNotRegex(self.src, r"#[0-9a-fA-F]{3,8}\b")
         self.assertNotIn("oklch(", self.src)

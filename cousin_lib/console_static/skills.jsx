@@ -255,7 +255,7 @@ function skillWhen(iso) {
 function SkillHealth({ item, unusedDays }) {
   const check = item.check;
   const use = item.usage || {};
-  return <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", paddingLeft: 18, ...SKILL_MONO }}>
+  return <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", ...SKILL_MONO, fontSize: 11 }}>
     {!check && <span className="pill gray" title="the staleness run has not reached it yet">not checked yet</span>}
     {check && check.stale && <span className="pill red" title={`changed: ${(check.changed || []).join(", ")}`}>stale</span>}
     {check && !check.stale && <span className="pill green" title={`checked ${skillWhen(check.at)}`}>ok</span>}
@@ -269,12 +269,15 @@ function SkillHealth({ item, unusedDays }) {
 
 function SkillRow({ label, item, open, onToggle, children, unusedDays }) {
   const meta = item.metadata || {};
-  return <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-    <div onClick={onToggle} style={{ display: "flex", gap: 10, alignItems: "baseline", cursor: "pointer", ...SKILL_MONO }}>
-      <span style={{ color: "var(--fg-0)", minWidth: 180 }}>{open ? "v" : ">"} {label}</span>
-      <SkillSideEffect value={meta["side-effect"]} />
-      <span className="muted" style={{ flex: 1 }}>{item.description}</span>
-      {(item.problems || []).length > 0 && <span className="pill red" title={item.problems.join("; ")}>problem</span>}
+  return <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "10px 12px",
+                       border: "1px solid var(--hair)", borderRadius: 8, background: "var(--bg-1)" }}>
+    <div onClick={onToggle} style={{ display: "flex", flexDirection: "column", gap: 6, cursor: "pointer" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", ...SKILL_MONO }}>
+        <span style={{ color: "var(--fg-0)", fontWeight: 600 }}>{open ? "v" : ">"} {label}</span>
+        <SkillSideEffect value={meta["side-effect"]} />
+        {(item.problems || []).length > 0 && <span className="pill red" title={item.problems.join("; ")}>problem</span>}
+      </div>
+      {item.description && <div style={{ color: "var(--fg-1)", fontSize: 13, lineHeight: 1.45 }}>{item.description}</div>}
     </div>
     {"check" in item && <SkillHealth item={item} unusedDays={unusedDays} />}
     {open && children}
@@ -334,8 +337,8 @@ function SkillsSystemView() {
                      : "main has moved past its last approval: nothing loads from it"}>
         {repo.exists && repo.folders.length === 0 && <span className="muted" style={SKILL_MONO}>no skills</span>}
         {repo.folders.map(f => (
-          <div key={f.folder} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span className="muted" style={SKILL_MONO}>{f.folder === "shared" ? "shared (every cousin)" : f.folder}</span>
+          <div key={f.folder} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <SectionLabel style={{ marginTop: 6 }}>{f.folder === "shared" ? "shared (every cousin)" : f.folder}</SectionLabel>
             {f.skills.map(sk => {
               const key = `${repo.repo}/${f.folder}/${sk.name}`;
               const urls = f.folder === "shared"

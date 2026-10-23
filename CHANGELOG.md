@@ -20,13 +20,13 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
     the key is copied into that dir's `auth.json` before each turn, and its
     models are `openrouter/<vendor>/<model>`, never one that names Claude.
   - `cousin-account status` and the console's check ask OpenRouter about the
-    key (`GET /api/v1/key`; nothing is billed). The console's key box takes
+    key (`GET /api/v1/key`; no model call). The console's key box takes
     it as it takes an Anthropic key. The `tmux` lane never runs it.
 - **Each account's model list, asked of its own source**
   ([configuration](docs/configuration.md#datamodelsaccountjson)), cached in
   `data/models/<account>.json`:
   - a Claude account: the agent CLI's own list, read off a bare client when
-    it connects (no prompt, nothing billed);
+    it connects (no prompt is sent);
   - `openrouter`: OpenRouter's public list (its `anthropic/` models) for the
     sdk lane, `opencode models openrouter` for the opencode lane;
   - `opencode`: `opencode models <provider>`, or a local endpoint's `/models`.

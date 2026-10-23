@@ -243,6 +243,14 @@ def _row(root, account, users, tables):
             "models": model_catalog.summary(root, account.name)}
 
 
+def _key_saved(req, name):
+    """A key changed: say so, and fetch the account's model list again (what
+    it can run may change with the key)."""
+    _emit(req, name, "key")
+    model_catalog.mark_stale(req.server.root, name)
+    kick_model_lists(req.server, [name])
+
+
 def kick_model_lists(server, names):
     """Start a background fetch of each account's model list in `names`
     that is older than a day (model_catalog.refresh_stale), on a console
@@ -615,19 +623,17 @@ def register():
         child with no Claude variable in its environment) and cache it."""
         _require_user(req)
         account = _account(req, name)
-        running = req.server.state.setdefault("models_refresh_running", set())
-        lock = req.server.state.setdefault("models_refresh_lock", threading.Lock())
-        with lock:
-            if name in running:
-                raise HttpError(409, "the model list of account %s is already being fetched"
-                                % name, busy=True)
-            running.add(name)
+        # one registry with the background fetches (kick_model_lists): one
+        # fetch per account at a time, whichever started it
+        running = req.server.state.setdefault("models.refreshing", {})
+        if not model_catalog.begin(running, account.name):
+            raise HttpError(409, "the model list of account %s is already being fetched"
+                            % name, busy=True)
         try:
             fetch = req.server.state.get("accounts.models_refresh") or model_catalog.refresh
             out = fetch(_root(req), account.name)
         finally:
-            with lock:
-                running.discard(name)
+            model_catalog.end(running, account.name)
         _emit(req, name, "models")
         failed = bool(out.get("error")) and not (out.get("lanes") or {})
         return 200, {"ok": not failed, "error": out.get("error"),
@@ -736,7 +742,7 @@ def register():
             finally:
                 del value
             _audit(req, "key", name, provider=provider)
-            _emit(req, name, "key")
+            _key_saved(req, name)
             return 200, {"ok": True, "name": name, "provider": provider,
                          "status": _status(root, account)}
         if account.kind == "claude-login":
@@ -755,7 +761,7 @@ def register():
         finally:
             del value
         _audit(req, "key", name)
-        _emit(req, name, "key")
+        _key_saved(req, name)
         return 200, {"ok": True, "name": name, "secret": state}
 
     @router.route("POST", "/api/accounts/{name}/login")

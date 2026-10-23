@@ -778,7 +778,7 @@ def _opencode_status(account):
 
 def _openrouter_status(account, *, urlopen=None):
     """An openrouter account's key, asked of OpenRouter: GET /api/v1/key
-    answers with the key's own record (no model call, nothing billed). The
+    answers with the key's own record (no model call). The
     key goes in the request header only; nothing returned repeats any of it."""
     import urllib.error
     import urllib.request

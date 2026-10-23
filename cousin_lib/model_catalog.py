@@ -5,12 +5,13 @@ One list per lane the account runs on:
 - a Claude account (the host's login, claude-login, claude-token,
   anthropic-key), sdk lane: the agent CLI's own model list, from the answer
   it gives when a session connects (runner/sdk.cli_models): no prompt is
-  sent, nothing is billed
+  sent
 - openrouter: on the sdk lane OpenRouter's public model list, its
   anthropic/ models; on the opencode lane opencode's own list for the
   openrouter provider
-- opencode with providers: `opencode models <provider>` in the account's
-  data dir; with an endpoint, the endpoint's /models
+- opencode with providers: `opencode models <provider>` in a throwaway HOME
+  that holds a copy of the account's auth.json; with an endpoint, the
+  endpoint's /models
 The opencode lane refuses a model that names Claude or Anthropic, so its
 lists never hold one.
 
@@ -22,7 +23,9 @@ variable. A failed fetch keeps the last lists and says why.
 """
 import argparse
 import json
+import tempfile
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -34,11 +37,23 @@ from pathlib import Path
 from cousin_lib import accounts, atomic
 
 MAX_AGE = 24 * 3600
+RETRY_AGE = 3600          # a try that fetched nothing is tried again sooner
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 FETCH_TIMEOUT = 60
 CHILD_TIMEOUT = 180
 CLAUDE_KINDS = ("claude-login", "claude-token", "anthropic-key")
 _REFRESH_LOCK = threading.Lock()
+# opencode colours its errors; a message shown in the console never carries
+# the escape codes
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+# opencode lists a provider's models only once it holds a key for it, and the
+# listing never uses the key: an openrouter account is listed under this
+# stand-in, in the listing child's environment only, whether or not its key
+# is saved
+LIST_ONLY_KEY = "list-only"
+# a fetch claimed by the console's refresh route, before any thread runs it
+# (begin/end); a background fetch is its thread (refresh_stale)
+CLAIMED = "claimed"
 
 
 class CatalogError(Exception):
@@ -86,10 +101,24 @@ def summary(root, name):
 
 
 def stale(root, name, now=None):
-    """True when the last try (a good fetch or not) is older than MAX_AGE."""
-    checked = (read(root, name) or {}).get("checked_at")
+    """True when the last try is older than MAX_AGE, or than RETRY_AGE when
+    that try fetched nothing (its error stands and no list came with it)."""
+    data = read(root, name) or {}
+    checked = data.get("checked_at")
     now = time.time() if now is None else now
-    return not isinstance(checked, (int, float)) or now - checked > MAX_AGE
+    if not isinstance(checked, (int, float)):
+        return True
+    failed = bool(data.get("error")) and data.get("fetched_at") != checked
+    return now - checked > (RETRY_AGE if failed else MAX_AGE)
+
+
+def mark_stale(root, name):
+    """The next look fetches again: a key was saved for the account, which
+    may change what it can run. Nothing when it keeps no list yet."""
+    data = read(root, name)
+    if data is not None:
+        data["checked_at"] = None
+        _write(root, name, data)
 
 
 # ---- the sources ----------------------------------------------------------
@@ -155,22 +184,36 @@ def endpoint_ids(data, account):
 
 
 def _opencode_list(root, account, provider, *, run=None):
-    """`opencode models <provider>` with the account's data dir as its HOME
-    and XDG dirs, and nothing else from this environment but what its own
-    login child may inherit: its keys are the ones in that dir's auth.json."""
-    accounts.preflight(account, root)        # an openrouter view's key, copied in
-    env = {k: v for k, v in os.environ.items() if k in accounts.OPENCODE_PASS_ENV}
-    env.update(accounts.account_env(account, root))
-    env.update(accounts.OPENCODE_FLOW_VARS)
-    try:
-        proc = (run or subprocess.run)([accounts.opencode_bin(), "models", provider],
-                                       capture_output=True, text=True,
-                                       timeout=FETCH_TIMEOUT, env=env)
-    except (OSError, subprocess.SubprocessError) as err:
-        raise CatalogError("opencode models %s: %s" % (provider, type(err).__name__))
+    """`opencode models <provider>` in a throwaway HOME (its four XDG dirs
+    inside it), never the account's data dir, which a running cousin's
+    `opencode serve` holds: the listing gets a copy of the account's
+    auth.json (read as strictly as the runner reads it), or for an
+    openrouter account the stand-in key, and from this environment only
+    what opencode's own login child may inherit."""
+    with tempfile.TemporaryDirectory(prefix="cousin-models-") as tmp:
+        home = Path(tmp)
+        env = {k: v for k, v in os.environ.items() if k in accounts.OPENCODE_PASS_ENV}
+        env.update(accounts.OPENCODE_FLOW_VARS)
+        env["HOME"] = str(home)
+        env.update({var: str(home / sub) for var, sub in accounts.XDG_DIRS})
+        if account.via == "openrouter":
+            env["OPENROUTER_API_KEY"] = LIST_ONLY_KEY
+        else:
+            path = account.data_dir.joinpath(*accounts.AUTH_JSON)
+            data = accounts._read_auth_json(path)
+            accounts._entry_types(data, path)
+            if data:
+                accounts._write_private_text(home.joinpath(*accounts.AUTH_JSON), json.dumps(data))
+        try:
+            proc = (run or subprocess.run)([accounts.opencode_bin(), "models", provider],
+                                           capture_output=True, text=True,
+                                           timeout=FETCH_TIMEOUT, env=env)
+        except (OSError, subprocess.SubprocessError) as err:
+            raise CatalogError("opencode models %s: %s" % (provider, type(err).__name__))
     ids = opencode_ids(proc.stdout or "", provider)
     if proc.returncode != 0 and not ids:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-1:] or ["no output"]
+        text = _ANSI.sub("", proc.stderr or proc.stdout or "").strip()
+        tail = text.splitlines()[-1:] or ["no output"]
         raise CatalogError("opencode models %s exited %d: %s"
                            % (provider, proc.returncode, tail[0][:200]))
     return ids
@@ -275,15 +318,37 @@ def refresh(root, name, *, run=subprocess.run):
     return out if isinstance(out, dict) else {"error": "the model list fetch said nothing"}
 
 
+def _busy(running, name):
+    held = running.get(name)
+    return held is CLAIMED or (held is not None and held.is_alive())
+
+
+def begin(running, name):
+    """Claim account `name` for one fetch in `running`, the one registry of
+    fetches in flight (the console's state): False when one already runs,
+    a claimed refresh or a background thread alike."""
+    with _REFRESH_LOCK:
+        if _busy(running, name):
+            return False
+        running[name] = CLAIMED
+        return True
+
+
+def end(running, name):
+    """Release a claim begin() made."""
+    with _REFRESH_LOCK:
+        if running.get(name) is CLAIMED:
+            del running[name]
+
+
 def refresh_stale(root, names, running, *, now=None, start=None):
     """Start a background refresh (a thread running refresh()) for each of
-    `names` whose cache is stale and that has none in `running` (a dict
-    the caller keeps for the life of its process); the names started."""
+    `names` whose cache is stale and that has no fetch in flight in
+    `running` (begin's registry); the names started."""
     started = []
     with _REFRESH_LOCK:
         for name in dict.fromkeys(names):            # each once, in order
-            thread = running.get(name)
-            if (thread is not None and thread.is_alive()) or not stale(root, name, now):
+            if _busy(running, name) or not stale(root, name, now):
                 continue
             thread = threading.Thread(target=refresh, args=(root, name), daemon=True,
                                       name="models-%s" % name)

@@ -231,6 +231,25 @@ class Models(AccountsCase):
         self.post("/api/auth/logout", {})          # a console with users: refused at the door
         self.assertEqual(self.post("/api/accounts/fleet/models/refresh", {})[0], 401)
 
+    def test_a_refresh_is_refused_while_a_background_fetch_of_it_runs(self):
+        from cousin_lib import model_catalog
+        self.server.state["accounts.models_refresh"] = lambda root, name: {}
+        running = self.server.state.setdefault("models.refreshing", {})
+        self.assertTrue(model_catalog.begin(running, "fleet"))       # a fetch in flight
+        status, body = self.post("/api/accounts/fleet/models/refresh", {})
+        self.assertEqual(status, 409, body)
+        model_catalog.end(running, "fleet")
+        self.assertEqual(self.post("/api/accounts/fleet/models/refresh", {})[0], 200)
+
+    def test_a_saved_key_marks_the_accounts_list_stale(self):
+        from cousin_lib import model_catalog
+        account = model_catalog.account_named(self.root, "metered")
+        model_catalog.update(self.root, account, now=1000.0,
+                             cli_models=lambda a, r: [{"resolvedModel": "m-one"}])
+        self.assertEqual(self.post("/api/accounts/metered/key", {"key": KEY})[0], 200)
+        self.assertIsNone(model_catalog.read(self.root, "metered")["checked_at"])
+        self.assertEqual(model_catalog.models_for(self.root, "metered", "sdk"), ["m-one"])
+
     def test_a_console_that_does_not_refresh_on_its_own_starts_nothing(self):
         # a test server never sets models.autorefresh: listing starts no fetch
         self.get("/api/accounts")

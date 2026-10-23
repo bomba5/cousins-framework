@@ -3203,7 +3203,7 @@ BARE_SESSION_ARGS = {"no-session-persistence": None, "strict-mcp-config": None}
 def cli_models(account, root, *, timeout=60.0, client_factory=None):
     """The models the agent CLI offers `account` (its /model list): the
     `models` of the answer a bare, throwaway client gets when it connects,
-    before any prompt, so nothing is billed (model_catalog). A list of
+    before any prompt is sent (model_catalog). A list of
     {"value", "resolvedModel", "displayName", ...} as the CLI gives them."""
     import shutil
     import tempfile

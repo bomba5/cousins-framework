@@ -268,7 +268,7 @@ The `openrouter` kind: one OpenRouter API key that both lanes run on,
 billed by OpenRouter per token (no subscription). Write the key to its
 `secret_file` (the console's key box, or by hand: one line, mode 0600, its
 directory 0700); `cousin-account status <name>` asks OpenRouter about the key
-(`GET /api/v1/key`, the key's own record; nothing is billed). On the `sdk`
+(`GET /api/v1/key`, the key's own record; no model call). On the `sdk`
 lane the agent CLI goes to OpenRouter's Anthropic-compatible endpoint, so the
 cousin keeps everything the SDK lane gives (memory, skills, side sessions,
 the review gate). Name an OpenRouter model there: `anthropic/<model>`, as
@@ -383,10 +383,10 @@ kept by hand:
 
 | account kind | lane | source |
 |---|---|---|
-| `host`, `claude-login`, `claude-token`, `anthropic-key` | `sdk` (the `tmux` pane reads it too) | the agent CLI's own model list, from the answer it gives when a session connects (no prompt is sent, nothing is billed) |
+| `host`, `claude-login`, `claude-token`, `anthropic-key` | `sdk` (the `tmux` pane reads it too) | the agent CLI's own model list, from the answer it gives when a session connects (no prompt is sent) |
 | `openrouter` | `sdk` | OpenRouter's public model list (`GET https://openrouter.ai/api/v1/models`), its `anthropic/<model>` ids without variants such as `:batch` |
-| `openrouter` | `opencode` | `opencode models openrouter` in the account's data dir |
-| `opencode` with `providers` | `opencode` | `opencode models <provider>` for each provider, in the account's data dir |
+| `openrouter` | `opencode` | `opencode models openrouter` in a throwaway HOME, under a stand-in key in the listing's environment only (opencode lists a provider only once it holds a key, and listing never uses it) |
+| `opencode` with `providers` | `opencode` | `opencode models <provider>` for each provider, in a throwaway HOME that holds a copy of the account's `auth.json` (never the data dir a running cousin holds) |
 | `opencode` with an `endpoint` | `opencode` | the endpoint's `/models`, its `endpoint_model` first, as `local/<model>` |
 
 The opencode lane never lists a model whose id names Claude or Anthropic (it
@@ -396,8 +396,10 @@ refuses them). The file is one JSON object, mode 0600: `{"account", "kind",
 no Claude variable in its environment, as `cousin-runner --check-auth` does:
 on the operator's word (the console's accounts tab, `refresh models`, or
 `cousin-account models <name> --refresh`), or when the console finds a list
-whose last fetch is older than a day (in the background, one per account at a
-time). A failed fetch keeps the last lists and records why in `error`. Only
+whose last fetch is older than a day, or an hour when that fetch got nothing
+(in the background; one fetch per account at a time, whoever started it), and
+when a key is saved for the account. A failed fetch keeps the last lists and
+records why in `error`. Only
 `host` and the accounts in this file keep one; an `[agent] api_key_file`
 account belongs to one cousin and falls back to the catalogue. A model that
 is not in the list is said, never refused: a list can lag a new model by a

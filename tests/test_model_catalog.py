@@ -91,17 +91,53 @@ class Sources(CatalogCase):
         self.assertIsNone(err)
         argv, env = fake_run.calls[0]
         self.assertEqual(argv, ["/opt/fake/opencode", "models", "openrouter"])
-        # opencode's HOME is the account's own dir; no Claude variable reaches it
-        self.assertEqual(env["HOME"], str(self.root / ".secrets" / "accounts" / "work.opencode"))
+        # a throwaway HOME, never the data dir a running cousin holds; no
+        # Claude variable reaches it
+        self.assertNotIn("work.opencode", env["HOME"])
+        self.assertEqual(env["XDG_DATA_HOME"], env["HOME"] + "/data")
+        self.assertFalse((self.root / ".secrets" / "accounts" / "work.opencode").exists())
         self.assertFalse(set(env) & set(accounts.AUTH_VARS))
 
-    def test_a_lane_that_fails_is_left_out_and_said(self):
+    def test_a_lane_that_fails_is_left_out_and_said_without_colour_codes(self):
         lanes, err = model_catalog.fetch(
             self.root, self.account("work"),
             http=http({model_catalog.OPENROUTER_MODELS_URL: OPENROUTER}),
-            run=run("", returncode=1, stderr="Error: Provider not found: openrouter"))
+            run=run("", returncode=1, stderr="\x1b[91m\x1b[1mError: \x1b[0mfetch failed"))
         self.assertEqual(list(lanes), ["sdk"])
-        self.assertIn("Provider not found", err)
+        self.assertIn("exited 1: Error: fetch failed", err)
+        self.assertNotIn("\x1b", err)
+
+    def test_openrouter_is_listed_under_a_stand_in_never_its_key(self):
+        key = self.root / ".secrets" / "accounts" / "work"
+        key.parent.mkdir(parents=True, exist_ok=True); os.chmod(key.parent, 0o700)
+        key.write_text("sk-or-v1-FAKEKEYVALUE0123456789abcdef\n"); os.chmod(key, 0o600)
+        seen = {}
+
+        def fake(argv, **kw):
+            home = pathlib.Path(kw["env"]["HOME"])
+            seen["auth"] = home.joinpath(*accounts.AUTH_JSON).exists()
+            seen["key"] = kw["env"].get("OPENROUTER_API_KEY")
+            return SimpleNamespace(returncode=0, stdout=OPENCODE_OUT, stderr="")
+        model_catalog.fetch(self.root, self.account("work"),
+                            http=http({model_catalog.OPENROUTER_MODELS_URL: OPENROUTER}), run=fake)
+        self.assertEqual(seen, {"auth": False, "key": model_catalog.LIST_ONLY_KEY})
+
+    def test_an_opencode_account_is_listed_with_a_copy_of_its_auth_json(self):
+        account = self.account("keyed")
+        accounts.store_api_key(account, "openai", "sk-FAKEKEYVALUE0123456789")
+        seen = {}
+
+        def fake(argv, **kw):
+            home = pathlib.Path(kw["env"]["HOME"])
+            path = home.joinpath(*accounts.AUTH_JSON)
+            seen["copy"] = json.loads(path.read_text())
+            seen["mode"] = os.stat(path).st_mode & 0o777
+            seen["home"] = home
+            return SimpleNamespace(returncode=0, stdout="openai/gpt-x\n", stderr="")
+        model_catalog.fetch(self.root, account, run=fake)
+        self.assertEqual(seen["copy"], {"openai": {"type": "api", "key": "sk-FAKEKEYVALUE0123456789"}})
+        self.assertEqual(seen["mode"], 0o600)
+        self.assertFalse(seen["home"].exists())          # the throwaway HOME is gone
 
     def test_an_opencode_account_lists_each_provider_and_never_a_claude_model(self):
         out = "openai/gpt-x\nopenai/claude-proxy\nmistral/m-large\n"
@@ -142,6 +178,20 @@ class Cache(CatalogCase):
         self.assertEqual((out["fetched_at"], out["checked_at"]), (1000.0, 2000.0))
         self.assertIn("the CLI exited 1", out["error"])
 
+    def test_a_try_that_got_nothing_is_retried_after_an_hour(self):
+        def broken(account, root):
+            raise RuntimeError("no network")
+        model_catalog.update(self.root, self.host, now=1000.0, cli_models=broken)
+        self.assertFalse(model_catalog.stale(self.root, "host", now=1000.0 + 1800))
+        self.assertTrue(model_catalog.stale(self.root, "host", now=1000.0 + 3700))
+
+    def test_a_saved_key_makes_the_list_stale(self):
+        model_catalog.update(self.root, self.host, now=1000.0, cli_models=lambda a, r: CLI_LIST)
+        model_catalog.mark_stale(self.root, "host")
+        self.assertTrue(model_catalog.stale(self.root, "host", now=1001.0))
+        self.assertEqual(model_catalog.models_for(self.root, "host", "sdk"),
+                         ["m-one", "m-two", "m-three"])
+
     def test_stale_after_a_day_since_the_last_try(self):
         self.assertTrue(model_catalog.stale(self.root, "host"))
         model_catalog.update(self.root, self.host, now=1000.0, cli_models=lambda a, r: CLI_LIST)
@@ -168,6 +218,16 @@ class Refresh(CatalogCase):
         out = model_catalog.refresh(self.root, "host", run=lambda argv, **kw: SimpleNamespace(
             returncode=1, stdout="", stderr="Traceback\nImportError: boom"))
         self.assertIn("ImportError: boom", out["error"])
+
+    def test_one_registry_for_a_claimed_refresh_and_a_background_one(self):
+        running = {}
+        self.assertTrue(model_catalog.begin(running, "work"))
+        self.assertFalse(model_catalog.begin(running, "work"))      # a second refresh: refused
+        self.assertEqual(model_catalog.refresh_stale(self.root, ["work"], running,
+                                                     start=lambda t: None), [])
+        model_catalog.end(running, "work")
+        started = model_catalog.refresh_stale(self.root, ["work"], running, start=lambda t: None)
+        self.assertEqual(started, ["work"])
 
     def test_only_stale_accounts_with_no_fetch_running_start(self):
         model_catalog.update(self.root, self.host, cli_models=lambda a, r: CLI_LIST)

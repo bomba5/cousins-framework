@@ -28,6 +28,9 @@ KEY = "sk-or-v1-FAKEKEYVALUE0123456789abcdef"
 class OpenrouterCase(HermeticCase):
     def setUp(self):
         super().setUp()
+        # CI's umask, not this host's 077: the dirs the code makes must be
+        # 0700 whatever the umask
+        self.addCleanup(os.umask, os.umask(0o022))
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         self.root = pathlib.Path(tmp.name)
         (self.root / "config").mkdir()
@@ -106,6 +109,12 @@ class OpencodeLane(OpenrouterCase):
         accounts.preflight(view, self.root)
         st = accounts._opencode_status(view)
         self.assertEqual((st["loggedIn"], st["missing"]), (False, ["openrouter"]))
+
+    def test_the_dirs_it_makes_are_0700_parents_too(self):
+        view = accounts.for_lane(self.account(), "opencode")
+        accounts.preflight(view, self.root)
+        for d in (self.root / ".secrets", self.root / ".secrets" / "accounts", view.data_dir):
+            self.assertEqual(os.stat(d).st_mode & 0o777, 0o700, d)
 
     def test_its_models_are_openrouter_ones_and_never_claude(self):
         view = accounts.for_lane(self.account(), "opencode")

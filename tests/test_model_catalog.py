@@ -2,6 +2,7 @@
 (the agent CLI's list, OpenRouter's, opencode's, an endpoint's /models),
 cached per account, never fetched on a read, refreshed in a child. Fakes
 only: no request leaves the test and no CLI runs."""
+import importlib.util
 import io
 import json
 import os
@@ -9,6 +10,7 @@ import pathlib
 import subprocess
 import tempfile
 import threading
+import unittest
 from types import SimpleNamespace
 
 from cousin_lib import accounts, agent_settings, model_catalog
@@ -317,6 +319,7 @@ class AccountCli(CatalogCase):
         self.assertIn("models work --refresh", err)
 
 
+@unittest.skipUnless(importlib.util.find_spec("claude_agent_sdk"), "needs the sdk extra")
 class CliProbe(HermeticCase):
     def test_the_list_is_read_off_a_bare_client_before_any_prompt(self):
         from cousin_lib.runner import sdk

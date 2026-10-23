@@ -625,11 +625,16 @@ def account_env(account, root):
 
 
 def _private_dir(path, what):
-    """A directory of ours, created 0700, tightened to 0700, never a symlink."""
+    """A directory of ours, created 0700 with every parent it creates (mkdir's
+    mode covers only the last one, and _read_secret refuses a secret file in a
+    directory open to group or others), tightened to 0700, never a symlink."""
     try:
         st = os.lstat(path)
     except FileNotFoundError:
-        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        for p in reversed((path, *path.parents)):
+            if not os.path.lexists(p):
+                p.mkdir(mode=0o700, exist_ok=True)
+                os.chmod(p, 0o700)
         st = os.lstat(path)
     if stat.S_ISLNK(st.st_mode):
         raise AccountsError("%s %s is a symlink; it must be a directory of this user"

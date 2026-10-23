@@ -42,6 +42,14 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   account's own list before the hand-kept catalogue, and say when a typed
   model is not in it; it is never refused.
 
+### Fixed
+
+- An opencode account's data dir is made 0700 with every parent it needs,
+  `.secrets/accounts` included, whatever the umask. Only the last directory
+  was: under umask 022 the key check of an openrouter account on the
+  `opencode` lane failed with "open to group or others" before a key was
+  saved.
+
 ## 4.0.1 - 2026-10-23
 
 ### Fixed

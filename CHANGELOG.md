@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.0.1 - 2026-10-23
+
+### Fixed
+
+- **The skills views are easy to read.** In System > skills and in a
+  cousin's inspector, each skill sat on one line as name, pill and
+  description side by side, so a long description wrapped in a narrow
+  column, and one skill's text ran into the next. In the inspector that
+  column was about 180px wide. Each skill is now a card of its own:
+  the name and pills on top, the description full width under them, and
+  its health on a small line at the bottom. In System > skills the
+  folders are headings.
+
 ## 4.0.0 - 2026-10-22
 
 Skills governance, agreed with the operator ([who does what](docs/reference/skills.md#who-does-what)):

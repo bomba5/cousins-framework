@@ -838,8 +838,15 @@ lanes it runs on and the cousins on it. No secret is ever shown: a key or
 token file reads "set (ends WXYZ)" at most.
 
 - **check**: is the account logged in, with no model call (`claude auth
-  status` under it; an opencode account's auth.json). When it is not, the
-  line that fixes it.
+  status` under it; an opencode account's auth.json; an openrouter account's
+  key, asked of OpenRouter). When it is not, the line that fixes it.
+- **models**: how many models the account can run on each lane, and when
+  the list was fetched from the account's own source (the agent CLI's list
+  for a Claude account, OpenRouter's and opencode's for openrouter,
+  opencode's or the endpoint's for opencode). **refresh models** fetches it
+  now; a list older than a day is fetched again in the background. The spawn
+  dialog, the cousin settings and the agent defaults offer these names, and
+  say when a model you type is not in the list (it is never refused).
 - **add account / edit / remove**: the entry's kind and keys, written by the
   validated writer (every other line of the file kept, checked by the rules
   the runner reads it by). An edit a cousin on the account could not run
@@ -847,8 +854,8 @@ token file reads "set (ends WXYZ)" at most.
   cousin names the account.
 - **log in / keys**: per kind. A claude-login account: "log in" (the host's
   own login asks you to tick that you mean it). A claude-token account:
-  "mint a token", or paste one. An anthropic-key account: paste the key. An
-  opencode account: per provider, paste its API key, or name an OAuth
+  "mint a token", or paste one. An anthropic-key or openrouter account: paste
+  the key. An opencode account: per provider, paste its API key, or name an OAuth
   method by its opencode label and "sign in" (`opencode`'s free models need
   no key). Anthropic and Claude are
   refused on opencode.

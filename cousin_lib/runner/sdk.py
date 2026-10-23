@@ -1178,7 +1178,7 @@ class SdkRunner:
             return ("replace the %s this runner was started with and restart it, or delete %s"
                     " to retry" % (self.account.kind, self.home / auth.LOGIN_FILE))
         action = accounts.login_action(self.account, via=self.tool_context.slug)
-        if self.account.kind != "anthropic-key":
+        if self.account.kind not in ("anthropic-key", "openrouter"):    # a key: written, not run
             action = "run " + action
         if self.account.name == accounts.HOST and not accounts.in_container():
             # in the image the hostname is the container's id, and the
@@ -3082,7 +3082,10 @@ class SdkRunner:
         if isinstance(msg, sdk.SystemMessage):
             if msg.subtype == "init":
                 d = msg.data or {}
-                self._lane = usage.lane_for(d.get("apiKeySource"))
+                # an openrouter account's bearer token reads source "none",
+                # as a login does: its lane is said by the account
+                self._lane = "openrouter" if self.account.kind == "openrouter" \
+                    else usage.lane_for(d.get("apiKeySource"))
                 self.stream.append("session_init", {"apiKeySource": d.get("apiKeySource"),
                                                     "model": d.get("model"),
                                                     "session_id": d.get("session_id"),
@@ -3195,6 +3198,37 @@ class _ScrubbedAuthEnv:
 # given. Without strict-mcp-config the CLI attaches the account's claude.ai
 # connectors whatever mcp_servers says, ~42k tokens read on every call.
 BARE_SESSION_ARGS = {"no-session-persistence": None, "strict-mcp-config": None}
+
+
+def cli_models(account, root, *, timeout=60.0, client_factory=None):
+    """The models the agent CLI offers `account` (its /model list): the
+    `models` of the answer a bare, throwaway client gets when it connects,
+    before any prompt is sent (model_catalog). A list of
+    {"value", "resolvedModel", "displayName", ...} as the CLI gives them."""
+    import shutil
+    import tempfile
+    sdk = _sdk()
+    env = accounts.account_env(account, root)
+    cwd = tempfile.mkdtemp(prefix="cousin-models-")
+    options = sdk.ClaudeAgentOptions(cwd=cwd, env=env, setting_sources=[], tools=[],
+                                     mcp_servers={}, max_turns=1,
+                                     extra_args=dict(BARE_SESSION_ARGS))
+    factory = client_factory or (lambda o: sdk.ClaudeSDKClient(options=o))
+
+    async def ask():
+        client = factory(options)
+        await client.connect()
+        try:
+            info = await client.get_server_info()
+            return list((info or {}).get("models") or [])
+        finally:
+            await client.disconnect()
+
+    try:
+        with _ScrubbedAuthEnv():
+            return asyncio.run(asyncio.wait_for(ask(), timeout))
+    finally:
+        shutil.rmtree(cwd, ignore_errors=True)
 
 
 def skill_trigger_check(account, root, *, prompt, model=None, effort=None, plugin_dirs=(),

@@ -388,9 +388,10 @@ def spawn_lane_options(root):
     else spawn.DEFAULT_RUNNER, the one the dialog preselects), `accounts` (host,
     then config/accounts.toml's by name, each with its kind, the kinds it
     runs on (agent_settings.check_lane, the runner's rule, the tmux kind's
-    refusal of a key or token account included) and, for an opencode
-    account, `models`: the "<provider>/" suggestions it offers; no secret
-    is in that file)
+    refusal of a key or token account included), for an opencode
+    account `models`: the "<provider>/" suggestions it offers, and
+    `models_by_lane`: per kind that takes a model, the list fetched for the
+    account (model_catalog) or those suggestions; no secret is in that file)
     with `accounts_error` when the file cannot be read, `lane_keys`, the
     [agent] keys each kind reads, and `lane_models`, how each kind that
     reads a model takes it (agent_settings.model_rule). `tmux_lane` is the
@@ -415,9 +416,12 @@ def spawn_lane_options(root):
                 continue
             lanes.append(kind)
         row = {"name": account.name, "kind": account.kind, "lanes": lanes}
-        models = agent_settings.account_models(account)
+        models = agent_settings.account_models(account) if account.kind == "opencode" else []
         if models:
             row["models"] = models
+        by_lane = agent_settings.account_lane_models(root, account, lanes)
+        if by_lane:
+            row["models_by_lane"] = by_lane
         rows.append(row)
     return {"runners": kinds, "tmux_lane": agent_settings.TMUX_LEGACY,
             "lane_models": {kind: rule for kind in kinds
@@ -849,6 +853,9 @@ def register():
         except MissingConfigError as err:
             raise HttpError(500, str(err))
         models = defaults["models"]
+        lane = spawn_lane_options(req.server.root)
+        from cousin_lib.console.routes_accounts import kick_model_lists
+        kick_model_lists(req.server, [row["name"] for row in lane["accounts"]])
         return 200, {
             "models": models,
             "default_model": defaults["default_model"] or (
@@ -861,7 +868,7 @@ def register():
             "heartbeat_bounds": [spawn.HEARTBEAT_MIN_SECONDS,
                                  spawn.HEARTBEAT_MAX_SECONDS],
             "operator_max_chars": spawn.OPERATOR_MAX_CHARS,
-            **spawn_lane_options(req.server.root),
+            **lane,
         }
 
     @router.route("POST", "/api/cousins/{slug}/hidden")

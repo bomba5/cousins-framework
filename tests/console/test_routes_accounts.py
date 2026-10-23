@@ -190,6 +190,72 @@ class List(AccountsCase):
         self.assertIn("kind", body["error"])
 
 
+class Models(AccountsCase):
+    """Each account's model list (model_catalog): its summary in the list,
+    and a refresh that fetches it now, in the account's own child."""
+
+    def test_the_list_carries_each_accounts_model_summary(self):
+        from cousin_lib import model_catalog
+        model_catalog.update(self.root, model_catalog.account_named(self.root, "host"),
+                             now=1000.0, cli_models=lambda a, r: [{"resolvedModel": "m-one"}])
+        rows = {r["name"]: r for r in self.get("/api/accounts")[1]["accounts"]}
+        self.assertEqual(rows["host"]["models"], {"lanes": {"sdk": 1}, "fetched_at": 1000.0,
+                                                  "checked_at": 1000.0, "error": None})
+        self.assertIsNone(rows["fleet"]["models"])
+
+    def test_a_refresh_fetches_now_and_says_so(self):
+        calls = []
+
+        def fetch(root, name):
+            calls.append(name)
+            from cousin_lib import model_catalog
+            return model_catalog.update(root, model_catalog.account_named(root, name),
+                                        cli_models=lambda a, r: [{"resolvedModel": "m-two"}])
+        self.server.state["accounts.models_refresh"] = fetch
+        status, body = self.post("/api/accounts/fleet/models/refresh", {})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(calls, ["fleet"])
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["models"]["lanes"], {"sdk": 1})
+        self.assertIn(("accounts-change", {"name": "fleet", "what": "models"}), self.events)
+
+    def test_a_failed_refresh_with_nothing_cached_is_not_ok(self):
+        self.server.state["accounts.models_refresh"] = lambda root, name: {"error": "no network"}
+        status, body = self.post("/api/accounts/fleet/models/refresh", {})
+        self.assertEqual(status, 200, body)
+        self.assertEqual((body["ok"], body["error"]), (False, "no network"))
+
+    def test_a_refresh_wants_a_logged_in_user_and_a_known_account(self):
+        self.server.state["accounts.models_refresh"] = lambda root, name: {}
+        self.assertEqual(self.post("/api/accounts/nobody/models/refresh", {})[0], 404)
+        self.post("/api/auth/logout", {})          # a console with users: refused at the door
+        self.assertEqual(self.post("/api/accounts/fleet/models/refresh", {})[0], 401)
+
+    def test_a_refresh_is_refused_while_a_background_fetch_of_it_runs(self):
+        from cousin_lib import model_catalog
+        self.server.state["accounts.models_refresh"] = lambda root, name: {}
+        running = self.server.state.setdefault("models.refreshing", {})
+        self.assertTrue(model_catalog.begin(running, "fleet"))       # a fetch in flight
+        status, body = self.post("/api/accounts/fleet/models/refresh", {})
+        self.assertEqual(status, 409, body)
+        model_catalog.end(running, "fleet")
+        self.assertEqual(self.post("/api/accounts/fleet/models/refresh", {})[0], 200)
+
+    def test_a_saved_key_marks_the_accounts_list_stale(self):
+        from cousin_lib import model_catalog
+        account = model_catalog.account_named(self.root, "metered")
+        model_catalog.update(self.root, account, now=1000.0,
+                             cli_models=lambda a, r: [{"resolvedModel": "m-one"}])
+        self.assertEqual(self.post("/api/accounts/metered/key", {"key": KEY})[0], 200)
+        self.assertIsNone(model_catalog.read(self.root, "metered")["checked_at"])
+        self.assertEqual(model_catalog.models_for(self.root, "metered", "sdk"), ["m-one"])
+
+    def test_a_console_that_does_not_refresh_on_its_own_starts_nothing(self):
+        # a test server never sets models.autorefresh: listing starts no fetch
+        self.get("/api/accounts")
+        self.assertEqual(self.server.state.get("models.refreshing", {}), {})
+
+
 class Status(AccountsCase):
     def test_a_claude_account_reads_the_cli_status_no_model_call(self):
         with self.status({"loggedIn": True, "authMethod": "claude.ai",

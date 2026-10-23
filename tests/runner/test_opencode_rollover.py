@@ -267,7 +267,7 @@ class TestWiring(OpencodeCase):
         home = self.home()                                # no account: the host's login
         with self.assertRaises(RunnerError) as err:
             runner_main.runner_for(home)
-        self.assertIn('runs on a kind = "opencode" account only', str(err.exception))
+        self.assertIn('runs on a kind = "opencode" or "openrouter" account only', str(err.exception))
         sdk_home = self.home(extra='account = "lab"\n')
         (sdk_home / "cousin.toml").write_text((sdk_home / "cousin.toml").read_text()
                                               .replace('runner = "opencode"', 'runner = "sdk"'))

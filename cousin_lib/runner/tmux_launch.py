@@ -38,7 +38,7 @@ FORBIDDEN = ("-p", "--print", "--output-format", "--input-format", "--strict-mcp
 SWITCHES = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1", "DISABLE_AUTOUPDATER": "1"}
 CONTEXT = ("data", "run", "tmux-context.md")
 SESSION_FLAGS = ("--session-id", "--resume")    # a fresh session's id, or the one to resume
-REFUSED_KINDS = ("claude-token", "anthropic-key")
+REFUSED_KINDS = ("claude-token", "anthropic-key", "openrouter")
 EXIT_NOTE = ("data", "run", "tmux-launch-exit.txt")   # the last refusal, for the runner (its pane dies)
 
 

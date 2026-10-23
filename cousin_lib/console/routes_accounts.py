@@ -38,7 +38,7 @@ import tomllib
 from pathlib import Path
 
 from cousin_lib import jsonl
-from cousin_lib import accounts
+from cousin_lib import accounts, model_catalog
 from cousin_lib.console import longop, router
 from cousin_lib.console.app import HttpError
 
@@ -223,7 +223,8 @@ def _secret(root, account):
     """{set, last4, error} of a secret-file kind; None for the others. The
     tail is shown only for a file under .secrets/: a secret_file set by
     hand elsewhere under the root never has any of its bytes served."""
-    if account.kind not in ("claude-token", "anthropic-key") or account.secret_file is None:
+    if account.kind not in ("claude-token", "anthropic-key", "openrouter") \
+            or account.secret_file is None:
         return None
     from cousin_lib.console import secrets
     state = secrets.secret_state(account.secret_file)
@@ -238,7 +239,26 @@ def _row(root, account, users, tables):
             "where": _where(root, account), "lanes": _lanes(account),
             "cousins": [slug for slug, _lane in users.get(account.name, [])],
             "entry": dict(entry) if isinstance(entry, dict) else None,
-            "secret": _secret(root, account)}
+            "secret": _secret(root, account),
+            "models": model_catalog.summary(root, account.name)}
+
+
+def _key_saved(req, name):
+    """A key changed: say so, and fetch the account's model list again (what
+    it can run may change with the key)."""
+    _emit(req, name, "key")
+    model_catalog.mark_stale(req.server.root, name)
+    kick_model_lists(req.server, [name])
+
+
+def kick_model_lists(server, names):
+    """Start a background fetch of each account's model list in `names`
+    that is older than a day (model_catalog.refresh_stale), on a console
+    that refreshes on its own (console_main says so; a test server does not)."""
+    if not server.state.get("models.autorefresh"):
+        return []
+    return model_catalog.refresh_stale(server.root, names,
+                                       server.state.setdefault("models.refreshing", {}))
 
 
 def _brief_status(st):
@@ -590,11 +610,34 @@ def register():
             known, error = {}, str(err)
         users, tables = _users(root), _raw_tables(root)
         listed = [_host()] + [known[n] for n in sorted(known)]
+        kick_model_lists(req.server, [a.name for a in listed])
         return 200, {"ok": True, "error": error,
                      "accounts": [_row(root, a, users, tables) for a in listed],
                      "kinds": list(accounts.KINDS),
                      "fields": {k: sorted(v - {"kind"}) for k, v in accounts._ALLOWED.items()},
                      "timeout": accounts.CAPTURE_TTL_S}
+
+    @router.route("POST", "/api/accounts/{name}/models/refresh")
+    def refresh_models(req, name):
+        """Fetch the account's model list now (model_catalog.refresh: a
+        child with no Claude variable in its environment) and cache it."""
+        _require_user(req)
+        account = _account(req, name)
+        # one registry with the background fetches (kick_model_lists): one
+        # fetch per account at a time, whichever started it
+        running = req.server.state.setdefault("models.refreshing", {})
+        if not model_catalog.begin(running, account.name):
+            raise HttpError(409, "the model list of account %s is already being fetched"
+                            % name, busy=True)
+        try:
+            fetch = req.server.state.get("accounts.models_refresh") or model_catalog.refresh
+            out = fetch(_root(req), account.name)
+        finally:
+            model_catalog.end(running, account.name)
+        _emit(req, name, "models")
+        failed = bool(out.get("error")) and not (out.get("lanes") or {})
+        return 200, {"ok": not failed, "error": out.get("error"),
+                     "models": model_catalog.summary(_root(req), account.name)}
 
     @router.route("GET", "/api/accounts/{name}/status")
     def account_status(req, name):
@@ -699,7 +742,7 @@ def register():
             finally:
                 del value
             _audit(req, "key", name, provider=provider)
-            _emit(req, name, "key")
+            _key_saved(req, name)
             return 200, {"ok": True, "name": name, "provider": provider,
                          "status": _status(root, account)}
         if account.kind == "claude-login":
@@ -718,7 +761,7 @@ def register():
         finally:
             del value
         _audit(req, "key", name)
-        _emit(req, name, "key")
+        _key_saved(req, name)
         return 200, {"ok": True, "name": name, "secret": state}
 
     @router.route("POST", "/api/accounts/{name}/login")

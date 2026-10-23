@@ -120,13 +120,20 @@ with no model call, and exits 0 when it is, 4 when it is not (the line names
 what to run). For an `opencode` account it runs nothing: it reads whether
 the account's `auth.json` holds every provider it names, except `opencode`,
 whose free models need no key (an `endpoint`
-account is logged in by its configuration). `host` is the host's default login. `--root R` picks the
+account is logged in by its configuration). For an `openrouter` account it
+asks OpenRouter about the key (`GET /api/v1/key`; no model call).
+`models <name>` prints the models the account can run, per lane, from its
+cached list ([configuration](configuration.md#datamodelsaccountjson)), and
+exits 1 when none is cached yet; `--refresh` fetches the list from the
+account's own source first (the agent CLI's list, OpenRouter's, opencode's
+or the endpoint's), `--lane sdk|opencode` prints one lane. `host` is the host's default login. `--root R` picks the
 install; without it the root comes from `FRAMEWORK_ROOT`, then the checkout
 you are in.
 
 ```
 cousin-account list
 cousin-account status fleet
+cousin-account models host --refresh
 ```
 
 `cousin-account login <name> [--via <slug>]` logs a `claude-login` account in

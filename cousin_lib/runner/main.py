@@ -300,7 +300,7 @@ def runner_for(home, *, kind=None):
         if side:
             raise RunnerError("[agent.sessions] maps %s to \"own\", but side sessions need"
                               " runner = \"sdk\"" % ", ".join(side))
-        if account.kind in ("claude-token", "anthropic-key"):
+        if account.kind in ("claude-token", "anthropic-key", "openrouter"):
             raise RunnerError("the tmux kind runs on a subscription login (host or a"
                               " claude-login account); %s accounts are refused until a"
                               " login-free config dir is shown to start with no menu"

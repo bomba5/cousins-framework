@@ -1324,11 +1324,18 @@ function SpawnModal({ onClose, onSpawn }) {
   // the harness catalogue is a valid suggestion there (never on a lane
   // that refuses those models)
   const laneModelRule = (runner && (options?.lane_models || {})[runner]) || null;
-  // what the chosen account offers (an opencode account's "<provider>/"), else
-  // the harness catalogue where the lane takes it
-  const accountModels = (laneAccounts.find(a => a.name === account) || {}).models || [];
+  // what the chosen account offers on this lane (the list fetched for it, or
+  // an opencode account's "<provider>/"), else the harness catalogue where the
+  // lane takes it
+  const chosen = laneAccounts.find(a => a.name === account) || {};
+  const fetched = (chosen.models_by_lane || {})[runner] || [];
+  const accountModels = fetched.length ? fetched : (chosen.models || []);
   const laneSuggestions = accountModels.length ? accountModels
     : (laneModelRule && laneModelRule.catalogue ? models : []);
+  // a name the account's own list does not hold: said, never refused (a list
+  // can lag a new model by a day)
+  const unlisted = fetched.length > 0 && !!laneModel && !fetched.includes(laneModel)
+    && !fetched.some(m => m.endsWith("/") && laneModel.startsWith(m));
   React.useEffect(() => {
     // a lane change keeps the account only when it still runs there
     setAccount(a => laneAccounts.some(x => x.name === a) ? a : (laneAccounts[0]?.name || ""));
@@ -1475,6 +1482,7 @@ function SpawnModal({ onClose, onSpawn }) {
                 {laneSuggestions.length > 0 && (
                   <datalist id="spawn-lane-models">{laneSuggestions.map(m => <option key={m} value={m} />)}</datalist>
                 )}
+                {unlisted && <span className="muted" style={{ fontSize: 11 }}>not in {account}'s model list</span>}
               </FormField>
             ) : (
               <FormField label="model" hint="This lane reads no model."><span className="muted">-</span></FormField>

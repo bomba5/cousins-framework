@@ -18,13 +18,13 @@ import sys
 import threading
 import time
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from cousin_lib.trace import traced_cli
 
-KINDS = ("claude-login", "claude-token", "anthropic-key", "opencode")
+KINDS = ("claude-login", "claude-token", "anthropic-key", "opencode", "openrouter")
 RESERVED_KINDS = ()
 HOST = "host"
 # "1" in the framework's image (the Dockerfile's ENV): there, `host` has no
@@ -65,7 +65,17 @@ _ALLOWED = {"claude-login": {"kind", "config_dir"},
             "claude-token": {"kind", "secret_file"},
             "anthropic-key": {"kind", "secret_file"},
             "opencode": {"kind", "data_dir", "providers", "endpoint", "endpoint_model",
-                         "endpoint_context", "endpoint_output"}}
+                         "endpoint_context", "endpoint_output"},
+            "openrouter": {"kind", "secret_file"}}
+# kind = "openrouter": one OpenRouter API key for both lanes. On the SDK
+# lane the CLI goes to OpenRouter's Anthropic-compatible endpoint with the
+# key as its bearer token; on the opencode lane the account is an opencode
+# account with the one provider openrouter (for_lane), its data dir
+# .secrets/accounts/<name>.opencode, and preflight copies the key into that
+# dir's auth.json.
+OPENROUTER_URL = "https://openrouter.ai/api"
+OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
+OPENROUTER_PROVIDER = "openrouter"
 # An opencode account: opencode's HOME and its four XDG
 # directories live in the account's data dir, so its auth.json (the
 # provider keys, 0600, written by opencode itself) never leaves it.
@@ -80,8 +90,10 @@ AUTH_JSON = ("data", "opencode", "auth.json")
 # account's providers, it counts as logged in without a key; a key stored
 # for it is still used (its paid models).
 KEYLESS_PROVIDERS = ("opencode",)
+# A bearer token (openrouter's ANTHROPIC_AUTH_TOKEN) reads source "none",
+# as a login does (measured 2026-10-23 on the SDK's bundled CLI).
 EXPECTED_SOURCE = {"claude-login": "none", "claude-token": "none",
-                   "anthropic-key": "ANTHROPIC_API_KEY"}
+                   "anthropic-key": "ANTHROPIC_API_KEY", "openrouter": "none"}
 # What `claude auth status --json` reads for each kind (a fake key reads
 # api_key and a fake CLAUDE_CODE_OAUTH_TOKEN reads oauth_token).
 # The CLI's word for a key is joined, not spelled: it happens to equal the
@@ -90,7 +102,8 @@ EXPECTED_SOURCE = {"claude-login": "none", "claude-token": "none",
 # must be free to diverge.
 _CLI_KEY_METHOD = "_".join(("api", "key"))
 WANTED_METHOD = {"claude-login": "claude.ai", "claude-token": "oauth_token",
-                 "anthropic-key": _CLI_KEY_METHOD, "opencode": "opencode"}
+                 "anthropic-key": _CLI_KEY_METHOD, "opencode": "opencode",
+                 "openrouter": "openrouter"}
 
 
 class AccountsError(Exception):
@@ -120,6 +133,9 @@ class Account:
     # rendered as its `limit`, so context pressure works for it
     endpoint_context: int | None = None
     endpoint_output: int | None = None
+    # the kind an opencode-lane view was made from (for_lane): "openrouter"
+    # on such a view, None on every account as loaded
+    via: str | None = None
 
 
 def root_of(home):
@@ -193,6 +209,11 @@ def _parse(root, text, path):
             out[name] = Account(name, kind, cfg, None)
         elif kind == "opencode":
             out[name] = _load_opencode(root, name, table, where)
+        elif kind == "openrouter":
+            secret = _under(root, table.get("secret_file", "%s/%s" % (SECRETS_DIR, name)),
+                            "secret_file", where)
+            data_dir = _under(root, "%s/%s.opencode" % (SECRETS_DIR, name), "data_dir", where)
+            out[name] = Account(name, kind, None, secret, data_dir=data_dir)
         else:
             secret = _under(root, table.get("secret_file", "%s/%s" % (SECRETS_DIR, name)),
                             "secret_file", where)
@@ -286,16 +307,17 @@ def refuse_claude_name(what, text):
 
 
 def check_lane(account, runner_kind):
-    """An opencode runner runs on an opencode account only, and an
-    opencode account on an opencode runner only. The Claude kinds (a login,
-    a token, an Anthropic key, the host's login) never reach the opencode
-    lane; opencode's data dir never reaches the SDK."""
+    """An opencode runner runs on an opencode or openrouter account only,
+    and an opencode account on an opencode runner only. The Claude kinds (a
+    login, a token, an Anthropic key, the host's login) never reach the
+    opencode lane; opencode's data dir never reaches the SDK. An openrouter
+    account runs on both (for_lane)."""
     if runner_kind == "opencode":
-        if account.kind != "opencode":
+        if account.kind not in ("opencode", "openrouter"):
             raise AccountsError(
-                "runner = \"opencode\" runs on a kind = \"opencode\" account only (its"
-                " providers' keys or a local endpoint); account %s is %s: name an opencode"
-                " account in [agent] account" % (account.name, account.kind))
+                "runner = \"opencode\" runs on a kind = \"opencode\" or \"openrouter\" account"
+                " only (its providers' keys or a local endpoint); account %s is %s: name such"
+                " an account in [agent] account" % (account.name, account.kind))
         for provider in account.providers or ():
             refuse_claude_name("account %s's provider" % account.name, provider)
         refuse_claude_name("account %s's endpoint_model" % account.name, account.endpoint_model)
@@ -303,6 +325,17 @@ def check_lane(account, runner_kind):
         raise AccountsError(
             "account %s is kind opencode: it runs with runner = \"opencode\" only, not"
             " runner = \"%s\"" % (account.name, runner_kind))
+
+
+def for_lane(account, runner_kind):
+    """The account as `runner_kind` runs it: on the opencode lane an
+    openrouter account is an opencode account with the one provider
+    openrouter (via = "openrouter": preflight copies its key into the data
+    dir's auth.json). Any other account, on any lane, as it is."""
+    if runner_kind == "opencode" and account.kind == "openrouter":
+        return replace(account, kind="opencode", providers=(OPENROUTER_PROVIDER,),
+                       via="openrouter")
+    return account
 
 
 # ------------------------------------------------------------ the accounts.toml writer
@@ -548,11 +581,27 @@ def preflight(account, root):
         return
     if account.kind == "opencode":
         _opencode_dir(account)
+        if account.via == "openrouter":
+            _sync_openrouter_key(account)
         _auth_entries(account)
         return
     _login_free_dir(root, account)
     if account.secret_value is None:
         _read_secret(account)
+
+
+def _sync_openrouter_key(account):
+    """An openrouter account on the opencode lane: its key (the secret
+    file) written into the data dir's auth.json as the openrouter
+    provider's when it is not there or differs. A missing secret file is
+    left to the login check, which then finds the provider missing."""
+    try:
+        key = _read_secret(account)
+    except SecretMissing:
+        return
+    entry = _read_auth_json(account.data_dir.joinpath(*AUTH_JSON)).get(OPENROUTER_PROVIDER)
+    if not (isinstance(entry, dict) and entry.get("type") == "api" and entry.get("key") == key):
+        store_api_key(account, OPENROUTER_PROVIDER, key)
 
 
 def account_env(account, root):
@@ -564,17 +613,31 @@ def account_env(account, root):
         return {"HOME": str(d), **{var: str(d / sub) for var, sub in XDG_DIRS}}
     if account.kind == "claude-login":
         return {} if account.config_dir is None else {"CLAUDE_CONFIG_DIR": str(account.config_dir)}
+    if account.kind == "openrouter":
+        # OpenRouter's Anthropic-compatible endpoint, the key as the bearer
+        # token, and an empty Anthropic key so the CLI never reaches for one
+        secret = account.secret_value or _read_secret(account)
+        return {"ANTHROPIC_BASE_URL": OPENROUTER_URL, "ANTHROPIC_AUTH_TOKEN": secret,
+                "ANTHROPIC_API_KEY": "", "CLAUDE_CONFIG_DIR": str(_login_free_dir(root, account))}
     secret = account.secret_value or _read_secret(account)
     var = "CLAUDE_CODE_OAUTH_TOKEN" if account.kind == "claude-token" else "ANTHROPIC_API_KEY"
     return {var: secret, "CLAUDE_CONFIG_DIR": str(_login_free_dir(root, account))}
 
 
 def _private_dir(path, what):
-    """A directory of ours, created 0700, tightened to 0700, never a symlink."""
+    """A directory of ours, created 0700 with every parent it creates (mkdir's
+    mode covers only the last one, and _read_secret refuses a secret file in a
+    directory open to group or others), tightened to 0700, never a symlink."""
     try:
         st = os.lstat(path)
     except FileNotFoundError:
-        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        for p in reversed((path, *path.parents)):
+            if not os.path.lexists(p):
+                try:
+                    p.mkdir(mode=0o700)
+                except FileExistsError:
+                    continue        # made meanwhile, not by us: left as it is
+                os.chmod(p, 0o700)
         st = os.lstat(path)
     if stat.S_ISLNK(st.st_mode):
         raise AccountsError("%s %s is a symlink; it must be a directory of this user"
@@ -688,9 +751,12 @@ def _cli():
 
 def status(account, root, *, run=subprocess.run):
     """`claude auth status --json` under the account: presence, no model call.
-    opencode: presence only, no process (_opencode_status)."""
+    opencode: presence only, no process (_opencode_status). openrouter: the
+    key, asked of OpenRouter (_openrouter_status)."""
     if account.kind == "opencode":
         return _opencode_status(account)
+    if account.kind == "openrouter":
+        return _openrouter_status(account)
     try:
         env = {**scrub(os.environ), **account_env(account, root)}
         proc = run([_cli(), "auth", "status", "--json"], capture_output=True, text=True,
@@ -716,6 +782,33 @@ def _opencode_status(account):
     missing = [p for p in account.providers if p not in entries and p not in KEYLESS_PROVIDERS]
     return {"loggedIn": not missing, "authMethod": "opencode",
             "providers": [p for p in account.providers if p not in missing], "missing": missing}
+
+
+def _openrouter_status(account, *, urlopen=None):
+    """An openrouter account's key, asked of OpenRouter: GET /api/v1/key
+    answers with the key's own record (no model call). The
+    key goes in the request header only; nothing returned repeats any of it."""
+    import urllib.error
+    import urllib.request
+    try:
+        key = account.secret_value or _read_secret(account)
+    except SecretMissing:
+        return {"loggedIn": False, "authMethod": "openrouter"}
+    except AccountsError as err:
+        return {"error": str(err)}
+    req = urllib.request.Request(OPENROUTER_KEY_URL, headers={"Authorization": "Bearer " + key})
+    try:
+        with (urlopen or urllib.request.urlopen)(req, timeout=20) as resp:
+            json.loads(resp.read(1 << 20) or b"{}")
+    except urllib.error.HTTPError as err:
+        if err.code in (401, 403):
+            return {"loggedIn": False, "authMethod": "openrouter",
+                    "error": "OpenRouter refused the key (HTTP %d): write a valid key to %s"
+                             % (err.code, account.secret_file)}
+        return {"error": "OpenRouter answered HTTP %d" % err.code}
+    except (OSError, ValueError) as err:
+        return {"error": "cannot reach OpenRouter (%s)" % type(err).__name__}
+    return {"loggedIn": True, "authMethod": "openrouter"}
 
 
 def _missing_hint(account):
@@ -1596,11 +1689,38 @@ def _opencode_login_cmd(args, account, root):
     return 0 if out["ok"] else 4
 
 
+def _models_cmd(args, account, root):
+    """`cousin-account models`: the cached lists, fetched first with
+    --refresh; a list older than a day says so."""
+    from cousin_lib import model_catalog
+    if args.refresh:
+        out = model_catalog.refresh(root, account.name)
+        if out.get("error"):
+            print("cousin-account: %s" % out["error"], file=sys.stderr)
+    data = model_catalog.read(root, account.name)
+    if not data or not data.get("lanes"):
+        print("cousin-account: no model list for %s yet: run `cousin-account models %s"
+              " --refresh`" % (account.name, account.name), file=sys.stderr)
+        return 1
+    at = data.get("fetched_at")
+    when = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(at)) if at is not None else "never"
+    print("# account %s (%s), fetched %s%s" % (
+        account.name, account.kind, when,
+        ", older than a day" if model_catalog.stale(root, account.name) else ""))
+    for lane, ids in sorted(data["lanes"].items()):
+        if args.lane and lane != args.lane:
+            continue
+        for model in ids:
+            print("%-9s %s" % (lane, model))
+    return 0
+
+
 @traced_cli("cousin-account")
 def account_main(argv=None):
-    """cousin-account list | status <name> | login|token <name> [--via <slug>].
+    """cousin-account list | status <name> | models <name> [--refresh]
+    [--lane sdk|opencode] | login|token <name> [--via <slug>].
     Operator-run. Exit 0 ok, 4 not logged in (or a flow that
-    failed), 2 usage, configuration or a refusal."""
+    failed), 1 no model list to show, 2 usage, configuration or a refusal."""
     from cousin_lib.config import FrameworkConfig, MissingConfigError
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--root", help="the framework root; falls back to FRAMEWORK_ROOT,"
@@ -1612,6 +1732,13 @@ def account_main(argv=None):
     st = sub.add_parser("status", parents=[common],
                         help="is the account logged in (no model call)")
     st.add_argument("name")
+    md = sub.add_parser("models", parents=[common],
+                        help="the models the account can run, per lane (model_catalog)")
+    md.add_argument("name")
+    md.add_argument("--refresh", action="store_true",
+                    help="fetch the list from the account's source now, then show it")
+    md.add_argument("--lane", choices=("sdk", "opencode"),
+                    help="one lane's list only (sdk: the agent CLI's; opencode: opencode's)")
     for cmd in ("login", "token"):
         c = sub.add_parser(cmd, parents=[common],
                            help=("log an account in" if cmd == "login"
@@ -1678,6 +1805,8 @@ def account_main(argv=None):
         return 2
     if args.cmd in ("login", "token"):
         return _login_cmd(args, account, root)
+    if args.cmd == "models":
+        return _models_cmd(args, account, root)
     rc, line = _check_account(account, root)
     print(line)
     return rc

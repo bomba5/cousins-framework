@@ -308,7 +308,7 @@ class TestConfig(OpencodeCase):
             OpencodeRunner(home, server_factory=Factory(),
                            account=accounts.Account(accounts.HOST, "claude-login", None, None,
                                                     implicit=True))
-        self.assertIn('runs on a kind = "opencode" account only', str(err.exception))
+        self.assertIn('runs on a kind = "opencode" or "openrouter" account only', str(err.exception))
 
     def test_side_sessions_on_the_opencode_runner_are_refused(self):
         """[agent.sessions] mapping a kind to "own" is an SDK-lane feature:

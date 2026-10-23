@@ -97,9 +97,22 @@ class AccountsJsx(unittest.TestCase):
         self.assertNotIn("\u2014", self.src)
         self.assertIsNone(re.search(r"#[0-9a-fA-F]{3,6}\b|rgb\(|oklch\(", self.src))
 
+    def test_an_openrouter_key_is_saved_like_an_anthropic_one(self):
+        login = _component(self.src, "AccountLogin")
+        self.assertIn('account.kind === "anthropic-key" || account.kind === "openrouter"', login)
+
+    def test_each_account_shows_its_model_lists_and_refreshes_them(self):
+        cell = _component(self.src, "AccountModelsCell")
+        self.assertIn("/models/refresh`", cell)
+        self.assertIn("m.lanes", cell)
+        self.assertIn("m.fetched_at", cell)
+        self.assertIn("<AccountModelsCell account={a} onChanged={load} />",
+                      _component(self.src, "AccountsView"))
+
     def test_every_route_is_documented(self):
         api = (_ROOT / "docs" / "reference" / "console-api.md").read_text(encoding="utf-8")
         for route in ("GET /api/accounts`", "GET /api/accounts/<name>/status",
+                      "POST /api/accounts/<name>/models/refresh",
                       "POST /api/accounts`", "POST /api/accounts/<name>`",
                       "POST /api/accounts/<name>/remove", "POST /api/accounts/<name>/key",
                       "POST /api/accounts/<name>/login", "POST /api/accounts/<name>/token",

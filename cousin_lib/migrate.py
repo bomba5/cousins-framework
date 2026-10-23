@@ -573,7 +573,7 @@ def switch_plan(home, *, root, to, supervisor_up, **_unused):
     account, err = _account(home, root)
     if account is None:
         checks.append(_check("account", False, err))
-    elif to == "tmux" and account.kind in ("claude-token", "anthropic-key"):
+    elif to == "tmux" and account.kind in ("claude-token", "anthropic-key", "openrouter"):
         checks.append(_check("account", False, "the tmux kind runs on a subscription login;"
                              " %s accounts are refused until a login-free config dir is shown"
                              " to start with no menu (onboarding is skippable by"

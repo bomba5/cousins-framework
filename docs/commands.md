@@ -121,7 +121,7 @@ what to run). For an `opencode` account it runs nothing: it reads whether
 the account's `auth.json` holds every provider it names, except `opencode`,
 whose free models need no key (an `endpoint`
 account is logged in by its configuration). For an `openrouter` account it
-asks OpenRouter about the key (`GET /api/v1/key`; nothing is billed).
+asks OpenRouter about the key (`GET /api/v1/key`; no model call).
 `models <name>` prints the models the account can run, per lane, from its
 cached list ([configuration](configuration.md#datamodelsaccountjson)), and
 exits 1 when none is cached yet; `--refresh` fetches the list from the

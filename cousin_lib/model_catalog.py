@@ -112,13 +112,14 @@ def stale(root, name, now=None):
     return now - checked > (RETRY_AGE if failed else MAX_AGE)
 
 
-def mark_stale(root, name):
+def mark_stale(root, name, now=None):
     """The next look fetches again: a key was saved for the account, which
-    may change what it can run. Nothing when it keeps no list yet."""
-    data = read(root, name)
-    if data is not None:
-        data["checked_at"] = None
-        _write(root, name, data)
+    may change what it can run. A fetch already in flight, begun before this,
+    leaves the list stale when it ends (update reads `stale_since`)."""
+    data = read(root, name) or {"account": name, "lanes": {}}
+    data["checked_at"] = None
+    data["stale_since"] = time.time() if now is None else now
+    _write(root, name, data)
 
 
 # ---- the sources ----------------------------------------------------------
@@ -269,7 +270,8 @@ def _write(root, name, data):
 def update(root, account, *, now=None, **sources):
     """Fetch `account`'s lists and write the cache; the summary. A failed
     fetch keeps the last lists and records the error."""
-    now = time.time() if now is None else now
+    begun = time.time()
+    now = begun if now is None else now
     old = read(root, account.name) or {}
     data = {"account": account.name, "kind": account.kind, "checked_at": now}
     try:
@@ -278,6 +280,10 @@ def update(root, account, *, now=None, **sources):
     except (CatalogError, accounts.AccountsError) as err:
         data.update(lanes=old.get("lanes") or {}, fetched_at=old.get("fetched_at"),
                     error=str(err))
+    # a key saved while this fetch ran: what it fetched may be the old key's
+    since = (read(root, account.name) or {}).get("stale_since")
+    if isinstance(since, (int, float)) and since >= begun:
+        data.update(checked_at=None, stale_since=since)
     _write(root, account.name, data)
     return summary(root, account.name)
 

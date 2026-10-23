@@ -192,6 +192,22 @@ class Cache(CatalogCase):
         self.assertEqual(model_catalog.models_for(self.root, "host", "sdk"),
                          ["m-one", "m-two", "m-three"])
 
+    def test_a_key_saved_while_a_fetch_runs_leaves_the_list_stale(self):
+        def during(account, root):
+            model_catalog.mark_stale(self.root, "host")    # the key is saved mid-fetch
+            return CLI_LIST
+        model_catalog.update(self.root, self.host, cli_models=during)
+        self.assertTrue(model_catalog.stale(self.root, "host"))
+        self.assertEqual(model_catalog.models_for(self.root, "host", "sdk"),
+                         ["m-one", "m-two", "m-three"])
+        model_catalog.update(self.root, self.host, cli_models=lambda a, r: CLI_LIST)
+        self.assertFalse(model_catalog.stale(self.root, "host"))   # a later fetch: fresh
+
+    def test_a_key_saved_before_any_fetch_still_counts(self):
+        model_catalog.mark_stale(self.root, "work")
+        self.assertTrue(model_catalog.stale(self.root, "work"))
+        self.assertEqual(model_catalog.models_for(self.root, "work", "sdk"), [])
+
     def test_stale_after_a_day_since_the_last_try(self):
         self.assertTrue(model_catalog.stale(self.root, "host"))
         model_catalog.update(self.root, self.host, now=1000.0, cli_models=lambda a, r: CLI_LIST)

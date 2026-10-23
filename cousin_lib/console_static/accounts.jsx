@@ -246,7 +246,7 @@ function AccountLogin({ account, onChanged }) {
                      submitLabel="save token" />
       </div>
     );
-  } else if (account.kind === "anthropic-key") {
+  } else if (account.kind === "anthropic-key" || account.kind === "openrouter") {
     body = <SecretField status={secret} onSubmit={v => saveKey(v)} placeholder="paste the API key" submitLabel="save key" />;
   } else if (account.kind === "opencode" && account.entry && account.entry.endpoint) {
     body = <span style={ACCOUNT_HINT}>a local endpoint: nothing to log in</span>;
@@ -341,7 +341,7 @@ function AccountForm({ initial, kinds, fields, onClose, onSaved }) {
               <input className="txt" value={name} disabled={editing} autoFocus={!editing}
                      onChange={e => setName(e.target.value.toLowerCase())} placeholder="fleet" />
             </FormField>
-            <FormField label="kind" hint="claude kinds run on sdk and fake, opencode on opencode">
+            <FormField label="kind" hint="claude kinds run on sdk and fake, opencode on opencode, openrouter on both (one OpenRouter key)">
               <select className="sel" value={kind} onChange={e => setKind(e.target.value)}>
                 {kinds.map(k => <option key={k} value={k}>{k}</option>)}
               </select>
@@ -403,6 +403,35 @@ function AccountRemove({ account, onRemoved }) {
   );
 }
 
+// An account's model lists (model_catalog): how many per lane, when they
+// were fetched, why the last fetch failed, and a refresh that asks the
+// account's own source now.
+function AccountModelsCell({ account, onChanged }) {
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const m = account.models;
+  const refresh = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const d = await accountPost(`/api/accounts/${encodeURIComponent(account.name)}/models/refresh`);
+      if (!d.ok) setErr(d.error || "the fetch failed");
+      if (onChanged) onChanged();
+    } catch (e) { setErr(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
+  const counts = m && m.lanes ? Object.entries(m.lanes).map(([lane, n]) => `${lane} ${n}`).join(" · ") : "";
+  const problem = err || (m && m.error);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }} data-account-models={account.name}>
+      <span className="mono">{counts || <span className="muted">not fetched</span>}</span>
+      {m && m.fetched_at && <span className="mono muted">{fmtAgo(Date.now() / 1000 - m.fetched_at)}</span>}
+      {problem && <span style={{ ...ACCOUNT_HINT, color: "var(--amber)" }}>{problem}</span>}
+      <button className="btn ghost" style={ACCOUNT_SMALL} disabled={busy} onClick={refresh}
+              title="ask the account's own source for the models it can run">{busy ? "fetching..." : "refresh models"}</button>
+    </div>
+  );
+}
+
 function AccountsView() {
   const [data, setData] = React.useState(null);
   const [loadErr, setLoadErr] = React.useState(false);
@@ -448,6 +477,7 @@ function AccountsView() {
               <th>lanes</th>
               <th>cousins</th>
               <th>status</th>
+              <th>models</th>
               <th></th>
             </tr>
           </thead>
@@ -464,6 +494,7 @@ function AccountsView() {
                   <td className="mono" data-label="lanes">{(a.lanes || []).join(", ") || "-"}</td>
                   <td className="mono" data-label="cousins">{(a.cousins || []).map(s => "@" + s).join(" ") || <span className="muted">none</span>}</td>
                   <td data-label="status"><AccountStatusCell name={a.name} /></td>
+                  <td data-label="models"><AccountModelsCell account={a} onChanged={load} /></td>
                   <td data-label="">
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button className="btn" style={ACCOUNT_SMALL} onClick={() => setOpen(open === a.name ? null : a.name)}>
@@ -475,7 +506,7 @@ function AccountsView() {
                 </tr>
                 {open === a.name && (
                   <tr>
-                    <td colSpan={7}>
+                    <td colSpan={8}>
                       <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "6px 0" }}>
                         <AccountLogin account={a} onChanged={load} />
                         <AccountRemove account={a} onRemoved={() => { setOpen(null); load(); }} />

@@ -199,9 +199,9 @@ restart line, with no list of calls; the `opencode` kind gives no line.
 
 | kind | agent loop | account kinds | what it is for |
 |---|---|---|---|
-| `sdk` | the Claude Agent SDK (its bundled Claude Code CLI), in-process tools and hooks | `claude-login` (and `host`), `claude-token`, `anthropic-key` | the default lane: Claude models, on a login or an API key. Side sessions (`[agent.sessions]`) are this kind only |
+| `sdk` | the Claude Agent SDK (its bundled Claude Code CLI), in-process tools and hooks | `claude-login` (and `host`), `claude-token`, `anthropic-key`, `openrouter` | the default lane: Claude models, on a login or an API key (an `openrouter` key goes through OpenRouter's Anthropic-compatible endpoint). Side sessions (`[agent.sessions]`) are this kind only |
 | `fake` | none: a scripted turn that answers at once | none needed | tests, demos and the Docker exit checks: the whole lane (inbox, stream, [supervisor](../glossary.md#supervisor)) with no model |
-| `opencode` | `opencode serve`, driven over HTTP and its event stream (`OpencodeRunner`) | `opencode` only | another provider's models on its own API key, or a local OpenAI-compatible model. Never a Claude subscription |
+| `opencode` | `opencode serve`, driven over HTTP and its event stream (`OpencodeRunner`) | `opencode`, `openrouter` (as the one provider `openrouter`) | another provider's models on its own API key, or a local OpenAI-compatible model. Never a Claude subscription |
 | `tmux` | the host's interactive Claude Code CLI in a tmux pane on the framework's own socket (`run/tmux.sock`), driven by `TmuxRunner`; the CLI's transcript is the source of truth, its hooks only wake the runner | `claude-login` (and `host`) only | the fallback if Agent SDK usage moves off subscription limits. It cannot fold a message into a running turn (`midturn_fold`) |
 
 `sdk` and `tmux` on a `claude-login` or `claude-token` account run on a Claude

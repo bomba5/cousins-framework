@@ -92,6 +92,11 @@ class SpawnDialogLane(unittest.TestCase):
         self.assertNotIn('"tmux-legacy"', self.src)
         self.assertNotIn("tmux_lane", self.src)
 
+    def test_the_accounts_fetched_list_for_the_lane_goes_first(self):
+        self.assertIn("(chosen.models_by_lane || {})[runner]", self.src)
+        self.assertIn("fetched.length ? fetched : (chosen.models || [])", self.src)
+        self.assertIn("{unlisted && ", self.src)
+
     def test_the_model_rule_is_the_lanes(self):
         self.assertIn("lane_models", self.src)
         self.assertIn("laneModelRule.catalogue", self.src)

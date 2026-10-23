@@ -481,7 +481,12 @@ def register():
     @router.route("GET", "/api/cousins/{slug}/agent")
     def get_agent(req, slug):
         home = cousin_home(req.server, slug)
-        return 200, {"ok": True, "slug": slug, **describe_agent(home, req.server.root)}
+        out = describe_agent(home, req.server.root)
+        row = out["settings"].get("account")
+        if row is not None:
+            from cousin_lib.console.routes_accounts import kick_model_lists
+            kick_model_lists(req.server, [row.get("value") or "host"])
+        return 200, {"ok": True, "slug": slug, **out}
 
     @router.route("POST", "/api/cousins/{slug}/agent")
     def set_agent(req, slug):

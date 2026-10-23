@@ -135,6 +135,10 @@ endpoint = "http://127.0.0.1:11434/v1"
 endpoint_model = "qwen3-coder"
 # endpoint_context = 65536       # the model's context window, in tokens (optional)
 # endpoint_output = 8192         # its output bound (default: a quarter of the context)
+
+[accounts.work]
+kind = "openrouter"              # one OpenRouter API key, for both lanes: metered
+# secret_file = ".secrets/accounts/work"   (the default: git-ignored)
 ```
 
 | kind | credentials live in | keys |
@@ -143,14 +147,16 @@ endpoint_model = "qwen3-coder"
 | `claude-token` | one line in `secret_file` (default `.secrets/accounts/<name>`) | `secret_file` |
 | `anthropic-key` | one line in `secret_file` (default `.secrets/accounts/<name>`) | `secret_file` |
 | `opencode` | opencode's own `auth.json` in `data_dir` (default `.secrets/accounts/<name>.opencode`), or none for a local endpoint | `data_dir`, and `providers` or `endpoint` plus `endpoint_model` (and optionally `endpoint_context`, `endpoint_output`) |
+| `openrouter` | one line in `secret_file` (default `.secrets/accounts/<name>`); on the opencode lane also copied into `.secrets/accounts/<name>.opencode`'s `auth.json` | `secret_file` |
 
 The rules, all checked when the file is read, and a broken entry is an error
 that names the key, never a secret:
 
 - A name matches `^[a-z0-9][a-z0-9_-]{0,31}$` and is not `host`.
-- `kind` is one of the four above.
-- `claude-login` takes `config_dir` and nothing else; the two secret kinds
-  take `secret_file` and nothing else; `opencode` takes `data_dir`,
+- `kind` is one of the five above.
+- `claude-login` takes `config_dir` and nothing else; the three secret kinds
+  (`claude-token`, `anthropic-key`, `openrouter`) take `secret_file` and
+  nothing else; `opencode` takes `data_dir`,
   `providers`, `endpoint`, `endpoint_model`, `endpoint_context` and
   `endpoint_output` and nothing else. An unknown key is refused.
 - Every path is relative to the framework root. An absolute path, or one
@@ -217,6 +223,8 @@ and `CLAUDE_CODE_USE_FOUNDRY`.
 | `claude-token` | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR=<root>/data/accounts/<name>` | the token and a config dir that holds no login (so a login cannot win over the token) |
 | `anthropic-key` | `ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR=<root>/data/accounts/<name>` | the key and the same no-login dir (a CLI that finds a login and a key may bill the login) |
 | `opencode` | `HOME=<data_dir>`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` = `<data_dir>/config`, `/data`, `/cache`, `/state` | everything opencode writes (its config, its session database, its `auth.json`) stays in the account's data dir; no key is ever put in the environment |
+| `openrouter` (sdk) | `ANTHROPIC_BASE_URL=https://openrouter.ai/api`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY=` (empty), `CLAUDE_CONFIG_DIR=<root>/data/accounts/<name>` | the CLI goes to OpenRouter's Anthropic-compatible endpoint with the key as its bearer token, never to an Anthropic key, and the no-login dir keeps a login out |
+| `openrouter` (opencode) | as `opencode`, the data dir `.secrets/accounts/<name>.opencode` | the account runs as an `opencode` account with the one provider `openrouter` |
 
 A no-login directory that holds a login (a `.credentials.json` carrying one)
 refuses the start: remove the file.
@@ -250,10 +258,30 @@ start (exit 2). `cousin-account status <name>`
 reads presence only, with no process run: a `providers` account is logged
 in when `auth.json` holds every provider it names, an `endpoint` account
 by its configuration. The [lanes](glossary.md#lane) do not mix: an opencode cousin (`[agent]
-runner = "opencode"`) runs on an `opencode` account only, never on `host`,
+runner = "opencode"`) runs on an `opencode` account (or an `openrouter` one,
+below) only, never on `host`,
 a `claude-login`, `claude-token` or `anthropic-key` account or an `[agent]
 api_key_file`, and an `sdk` or `fake` cousin never runs on an `opencode`
 account. Either mismatch refuses the start (exit 2).
+
+The `openrouter` kind: one OpenRouter API key that both lanes run on,
+billed by OpenRouter per token (no subscription). Write the key to its
+`secret_file` (the console's key box, or by hand: one line, mode 0600, its
+directory 0700); `cousin-account status <name>` asks OpenRouter about the key
+(`GET /api/v1/key`, the key's own record; nothing is billed). On the `sdk`
+lane the agent CLI goes to OpenRouter's Anthropic-compatible endpoint, so the
+cousin keeps everything the SDK lane gives (memory, skills, side sessions,
+the review gate). Name an OpenRouter model there: `anthropic/<model>`, as
+[the account's model list](#datamodelsaccountjson) shows them; the CLI
+reports the bearer token as source `none` (as a login reads), and the
+cousin's usage is recorded on lane `openrouter`, as estimates. A non-Claude
+model through that endpoint is untested: the CLI is built around Claude's
+tool use, thinking and caching. On the `opencode` lane the account is an
+`opencode` account with the one provider `openrouter`: its data dir is
+`.secrets/accounts/<name>.opencode`, the runner copies the key into that
+dir's `auth.json` before each turn (when it is not there or differs), and its
+models are `openrouter/<vendor>/<model>`, never one that names Claude or
+Anthropic. The `tmux` lane never runs it.
 
 One opencode account serves one cousin. Its data dir holds that cousin's
 rendered config (with its MCP token), its policy files and opencode's own
@@ -264,8 +292,8 @@ cousin its own account; two accounts may name the same provider keys.
 
 Resume per kind: a `claude-login` account refreshes its own token, so a
 restarted runner resumes its session through the CLI's own `--resume`; a
-`claude-token` or `anthropic-key` account never refreshes, so it resumes from
-the runner's session store.
+`claude-token`, `anthropic-key` or `openrouter` account never refreshes, so it
+resumes from the runner's session store.
 
 `cousin-account list` shows every account (name, kind, where its credentials
 live, never a secret); `cousin-account status <name>` says whether it is
@@ -345,6 +373,35 @@ When the stop came from the connect (a missing secret, a connect the login
 refused) no row was put back, so the file stays until the next row the
 cousin runs; `cousin-chat list` keeps saying LOGIN REQUIRED meanwhile, which
 is accurate: nothing has proven the login yet.
+
+### data/models/<account>.json
+
+The models an account can run, per lane, asked of the account's own source
+and cached here (`cousin_lib/model_catalog.py`), so the spawn dialog, the
+cousin settings and the agent defaults offer real names instead of a list
+kept by hand:
+
+| account kind | lane | source |
+|---|---|---|
+| `host`, `claude-login`, `claude-token`, `anthropic-key` | `sdk` (the `tmux` pane reads it too) | the agent CLI's own model list, from the answer it gives when a session connects (no prompt is sent, nothing is billed) |
+| `openrouter` | `sdk` | OpenRouter's public model list (`GET https://openrouter.ai/api/v1/models`), its `anthropic/<model>` ids without variants such as `:batch` |
+| `openrouter` | `opencode` | `opencode models openrouter` in the account's data dir |
+| `opencode` with `providers` | `opencode` | `opencode models <provider>` for each provider, in the account's data dir |
+| `opencode` with an `endpoint` | `opencode` | the endpoint's `/models`, its `endpoint_model` first, as `local/<model>` |
+
+The opencode lane never lists a model whose id names Claude or Anthropic (it
+refuses them). The file is one JSON object, mode 0600: `{"account", "kind",
+"lanes": {"<lane>": [model ids]}, "fetched_at", "checked_at", "error"}`
+(epoch seconds). A read never fetches. A fetch runs in a child process with
+no Claude variable in its environment, as `cousin-runner --check-auth` does:
+on the operator's word (the console's accounts tab, `refresh models`, or
+`cousin-account models <name> --refresh`), or when the console finds a list
+whose last fetch is older than a day (in the background, one per account at a
+time). A failed fetch keeps the last lists and records why in `error`. Only
+`host` and the accounts in this file keep one; an `[agent] api_key_file`
+account belongs to one cousin and falls back to the catalogue. A model that
+is not in the list is said, never refused: a list can lag a new model by a
+day.
 
 ## harness.toml
 

@@ -917,6 +917,12 @@ def _harness_values(server):
             fwconfig.commit_attribution(server.root)
         except fwconfig.MissingConfigError as err:
             error = str(err)
+    # the host login's own list, when one is fetched (model_catalog): what a
+    # cousin with no account can run, newer than any catalogue
+    from cousin_lib import accounts, model_catalog
+    from cousin_lib.console.routes_accounts import kick_model_lists
+    catalogue = model_catalog.models_for(server.root, accounts.HOST, "sdk") or catalogue
+    kick_model_lists(server, [accounts.HOST])
     return {"ok": True, "path": "config/harness.toml", "exists": exists, "error": error,
             "values": values, "choices": {"effort": list(fwconfig.EFFORT_LEVELS),
                                           "models": catalogue},

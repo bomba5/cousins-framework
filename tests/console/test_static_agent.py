@@ -177,6 +177,17 @@ console.log(JSON.stringify([agentModelProblem({provider_model: true}, "gpt-5"),
         self.assertEqual(got[1:3], [None, None])
         self.assertIsNotNone(got[3])
 
+    def test_a_model_off_the_accounts_own_list_is_said_never_refused(self):
+        got = self.run_node("""
+const row = {suggestions: ["m-one", "m-two"], suggestions_from: "account"};
+console.log(JSON.stringify([agentModelProblem(null, "m-one", row),
+  agentModelProblem(null, "m-new", row),
+  agentModelProblem(null, "m-new", {suggestions: ["m-one"], suggestions_from: "catalogue"})]));
+""")
+        self.assertIsNone(got[0])
+        self.assertEqual(got[1], "not in the account's model list")
+        self.assertIsNone(got[2])
+
     def test_env_names_and_the_hard_deny(self):
         got = self.run_node("""
 const deny = ["CLAUDE", "ANTHROPIC"];

@@ -76,9 +76,12 @@ RULES = ("lane", "billing", "peer", "tool", "dropped")
 # What an account kind is billed as. claude-token is a subscription's
 # OAuth token; the opencode lane never carries subscription traffic
 # (accounts.py refuses it), and its own provider keys are its business.
+# An openrouter account is an OpenRouter key on either lane: metered,
+# never a subscription.
 SUBSCRIPTION_KINDS = ("claude-login", "claude-token")
 KEY_KIND = "anthropic-key"
 OPENCODE_KIND = "opencode"
+OPENROUTER_KIND = "openrouter"
 
 _MAX_SHOWN = 200
 
@@ -117,9 +120,9 @@ _ON = r"\b(?:on|via|through|under|billed to|paid by|paid for by)\s+" + _DET
 # (pattern, what the line claims, the account kinds it contradicts, side)
 BILLING_CLAIMS = (
     (re.compile(_ON + r"(?:(?:personal|private|claude|max|pro|own)\s+)*subscription\b", re.I),
-     "it runs on a subscription", (KEY_KIND, OPENCODE_KIND), "subscription"),
+     "it runs on a subscription", (KEY_KIND, OPENCODE_KIND, OPENROUTER_KIND), "subscription"),
     (re.compile(r"\bsubscription[ -](?:login|billing)\b", re.I),
-     "it runs on a subscription", (KEY_KIND, OPENCODE_KIND), "subscription"),
+     "it runs on a subscription", (KEY_KIND, OPENCODE_KIND, OPENROUTER_KIND), "subscription"),
     (re.compile(r"\bno\s+(?:(?:company|business|work|anthropic|api)\s+)+key\b", re.I),
      "it uses no API key", (KEY_KIND,), "subscription"),
     (re.compile(_ON + r"(?:(?:company|business|work|anthropic|api|paid|metered)\s+)+(?:api\s+)?key\b",
@@ -519,6 +522,8 @@ def _billing_of(account):
         return "a subscription login"
     if account.kind == KEY_KIND:
         return "an API key"
+    if account.kind == OPENROUTER_KIND:
+        return "an OpenRouter API key"
     return "the opencode lane, which never carries subscription traffic"
 
 

@@ -688,7 +688,9 @@ class OpencodeRunner:
             accounts.check_lane(account, LANE)
         except accounts.AccountsError as err:
             raise RunnerError(str(err))
-        self.account = account
+        # an openrouter account runs here as an opencode account with the
+        # one provider openrouter (accounts.for_lane)
+        self.account = accounts.for_lane(account, LANE)
         # the model is named, never defaulted
         self.model = model or agent.get("model")
         if not self.model:

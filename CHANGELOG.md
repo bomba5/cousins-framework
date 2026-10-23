@@ -3,6 +3,45 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.1.0 - 2026-10-23
+
+### Added
+
+- **An `openrouter` account kind: one OpenRouter API key for both lanes**
+  ([configuration](docs/configuration.md#accountstoml)).
+  - On the `sdk` lane the agent CLI goes to OpenRouter's
+    Anthropic-compatible endpoint: `ANTHROPIC_BASE_URL=https://openrouter.ai/api`,
+    the key as `ANTHROPIC_AUTH_TOKEN`, an empty `ANTHROPIC_API_KEY` and the
+    no-login config dir. The cousin keeps everything the SDK lane gives
+    (memory, skills, side sessions, the review gate). Its usage is recorded
+    on lane `openrouter`, as estimates.
+  - On the `opencode` lane it runs as an `opencode` account with the one
+    provider `openrouter`: its data dir is `.secrets/accounts/<name>.opencode`,
+    the key is copied into that dir's `auth.json` before each turn, and its
+    models are `openrouter/<vendor>/<model>`, never one that names Claude.
+  - `cousin-account status` and the console's check ask OpenRouter about the
+    key (`GET /api/v1/key`; nothing is billed). The console's key box takes
+    it as it takes an Anthropic key. The `tmux` lane never runs it.
+- **Each account's model list, asked of its own source**
+  ([configuration](docs/configuration.md#datamodelsaccountjson)), cached in
+  `data/models/<account>.json`:
+  - a Claude account: the agent CLI's own list, read off a bare client when
+    it connects (no prompt, nothing billed);
+  - `openrouter`: OpenRouter's public list (its `anthropic/` models) for the
+    sdk lane, `opencode models openrouter` for the opencode lane;
+  - `opencode`: `opencode models <provider>`, or a local endpoint's `/models`.
+
+  A read never fetches. The console's accounts tab shows each account's
+  lists (models per lane, age, the last error) with **refresh models**
+  (`POST /api/accounts/<name>/models/refresh`), and the console fetches a
+  list older than a day in the background. `cousin-account models <name>
+  [--refresh] [--lane sdk|opencode]` prints one. A fetch runs in a child
+  with no Claude variable in its environment; a failed one keeps the last
+  lists. The spawn dialog (`models_by_lane` in `GET /api/spawn/options`),
+  the cousin settings (`suggestions_from`) and the agent defaults offer the
+  account's own list before the hand-kept catalogue, and say when a typed
+  model is not in it; it is never refused.
+
 ## 4.0.1 - 2026-10-23
 
 ### Fixed

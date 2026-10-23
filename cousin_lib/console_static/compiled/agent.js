@@ -37,10 +37,12 @@ function agentEnvProblem(name, denyPrefixes) {
   if (hit) return name + ": " + hit + "* never reaches the pane (the hard deny)";
   return null;
 }
-function agentModelProblem(rule, value) {
+function agentModelProblem(rule, value, row) {
   if (!value) return null;
   if (/\s/.test(value)) return "one word, no spaces";
   if (rule && rule.provider_model && !/^[^/]+\/.+/.test(value)) return '"<provider>/<model>"';
+  const listed = row && row.suggestions_from === "account" && row.suggestions || [];
+  if (listed.length && !listed.includes(value)) return "not in the account's model list";
   return null;
 }
 function agentOpSettled(op, id) {
@@ -203,7 +205,7 @@ function AgentField({ name, row, rule, value, onChange, disabled }) {
       return /* @__PURE__ */ React.createElement("select", { className: "sel", value: value ?? "", disabled, onChange: (e) => onChange(e.target.value) }, value != null && !choices.includes(value) && /* @__PURE__ */ React.createElement("option", { value }, value, " (not on this lane)"), value == null && /* @__PURE__ */ React.createElement("option", { value: "" }, row.type === "effort" ? "the runner's default" : "-"), choices.map((ch) => /* @__PURE__ */ React.createElement("option", { key: ch, value: ch }, ch)));
     }
     case "model": {
-      const problem = agentModelProblem(rule, value || "");
+      const problem = agentModelProblem(rule, value || "", row);
       return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 2 } }, /* @__PURE__ */ React.createElement(
         "input",
         {

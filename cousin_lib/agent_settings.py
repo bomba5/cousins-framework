@@ -161,13 +161,33 @@ def check_lane(account, lane):
 
 def account_models(account):
     """The model suggestions an opencode account offers ("<provider>/" per
-    provider, or its endpoint's model), [] for any other kind."""
+    provider, or its endpoint's model), an openrouter account's on the
+    opencode lane ("openrouter/"), [] for any other kind. A fetched list
+    (model_catalog) goes before these where one is cached."""
+    account = accounts.for_lane(account, "opencode")
     if account.kind != "opencode":
         return []
     if account.endpoint_model:
         from cousin_lib.runner.opencode import ENDPOINT_PROVIDER
         return ["%s/%s" % (ENDPOINT_PROVIDER, account.endpoint_model)]
     return ["%s/" % p for p in account.providers]
+
+
+def account_lane_models(root, account, lanes):
+    """{lane: model suggestions} for `account` on each of `lanes` that
+    takes a model: the list fetched for it when one is cached
+    (model_catalog), else on opencode its "<provider>/" (account_models);
+    a lane with neither is left out."""
+    from cousin_lib import model_catalog
+    out = {}
+    for lane in lanes:
+        if not model_rule(lane):
+            continue
+        found = model_catalog.models_for(root, account.name, model_catalog.catalogue_lane(lane)) \
+            or (account_models(account) if lane == "opencode" else [])
+        if found:
+            out[lane] = found
+    return out
 
 
 def _read_agent(home):
@@ -320,7 +340,7 @@ def _cross(root, agent, home=None):
             except ValueError as err:
                 errors[key] = str(err)
     try:
-        account = _account(root, agent, home)
+        account = accounts.for_lane(_account(root, agent, home), lane)
         _check_lane(account, lane)
         # the runner's preflight before its lock (runner/main.account_for): a
         # secret open to others, not ours, a symlink or malformed is exit 2;
@@ -394,21 +414,29 @@ def _choices(key, lane, root):
 
 
 def _suggestions(key, lane, root, agent):
-    if key != "model":
-        return None
-    if lane in ("sdk", "tmux"):
-        from cousin_lib.config import DEFAULT_MODELS, MissingConfigError, agent_config
-        try:
-            return list(agent_config(root)["models"])
-        except MissingConfigError:
-            return list(DEFAULT_MODELS)
+    """(suggestions, their source) for [agent] `key` on `lane`: the model
+    list fetched for the cousin's account when one is cached ("account",
+    model_catalog), else the harness catalogue on sdk and tmux
+    ("catalogue") or the account's "<provider>/" on opencode ("providers").
+    (None, None) for any key but model."""
+    if key != "model" or lane not in ("sdk", "tmux", "opencode"):
+        return None, None
+    try:
+        account = _account(root, agent, None)
+    except accounts.AccountsError:
+        account = None
+    if account is not None:
+        from cousin_lib import model_catalog
+        found = model_catalog.models_for(root, account.name, model_catalog.catalogue_lane(lane))
+        if found:
+            return found, "account"
     if lane == "opencode":
-        try:
-            account = _account(root, agent, None)
-        except accounts.AccountsError:
-            return []
-        return account_models(account)
-    return None
+        return (account_models(account) if account is not None else []), "providers"
+    from cousin_lib.config import DEFAULT_MODELS, MissingConfigError, agent_config
+    try:
+        return list(agent_config(root)["models"]), "catalogue"
+    except MissingConfigError:
+        return list(DEFAULT_MODELS), "catalogue"
 
 
 def model_rule(lane):
@@ -472,9 +500,10 @@ def describe(home, root):
         choices = _choices(key, lane, root)
         if choices is not None:
             row["choices"] = choices
-        suggestions = _suggestions(key, lane, root, agent)
+        suggestions, source = _suggestions(key, lane, root, agent)
         if suggestions is not None:
             row["suggestions"] = suggestions
+            row["suggestions_from"] = source
         if key == "sessions":
             from cousin_lib.delivery import THREAD_KINDS
             from cousin_lib.runner.sessions import ALWAYS_PRIMARY, OWN, PRIMARY

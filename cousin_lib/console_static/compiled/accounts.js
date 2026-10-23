@@ -197,7 +197,7 @@ function AccountLogin({ account, onChanged }) {
         submitLabel: "save token"
       }
     ));
-  } else if (account.kind === "anthropic-key") {
+  } else if (account.kind === "anthropic-key" || account.kind === "openrouter") {
     body = /* @__PURE__ */ React.createElement(SecretField, { status: secret, onSubmit: (v) => saveKey(v), placeholder: "paste the API key", submitLabel: "save key" });
   } else if (account.kind === "opencode" && account.entry && account.entry.endpoint) {
     body = /* @__PURE__ */ React.createElement("span", { style: ACCOUNT_HINT }, "a local endpoint: nothing to log in");
@@ -284,7 +284,7 @@ function AccountForm({ initial, kinds, fields, onClose, onSaved }) {
       onChange: (e) => setName(e.target.value.toLowerCase()),
       placeholder: "fleet"
     }
-  )), /* @__PURE__ */ React.createElement(FormField, { label: "kind", hint: "claude kinds run on sdk and fake, opencode on opencode" }, /* @__PURE__ */ React.createElement("select", { className: "sel", value: kind, onChange: (e) => setKind(e.target.value) }, kinds.map((k) => /* @__PURE__ */ React.createElement("option", { key: k, value: k }, k))))), keys.map((k) => /* @__PURE__ */ React.createElement("div", { key: k, style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement(FormField, { label: k, hint: ACCOUNT_FIELD_HINTS[k] || "" }, /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement(FormField, { label: "kind", hint: "claude kinds run on sdk and fake, opencode on opencode, openrouter on both (one OpenRouter key)" }, /* @__PURE__ */ React.createElement("select", { className: "sel", value: kind, onChange: (e) => setKind(e.target.value) }, kinds.map((k) => /* @__PURE__ */ React.createElement("option", { key: k, value: k }, k))))), keys.map((k) => /* @__PURE__ */ React.createElement("div", { key: k, style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement(FormField, { label: k, hint: ACCOUNT_FIELD_HINTS[k] || "" }, /* @__PURE__ */ React.createElement(
     "input",
     {
       className: "txt",
@@ -327,6 +327,37 @@ function AccountRemove({ account, onRemoved }) {
     setErr(null);
   } }, "keep"), err && /* @__PURE__ */ React.createElement("span", { style: { ...ACCOUNT_MONO, color: "var(--red)" } }, err));
 }
+function AccountModelsCell({ account, onChanged }) {
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const m = account.models;
+  const refresh = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const d = await accountPost(`/api/accounts/${encodeURIComponent(account.name)}/models/refresh`);
+      if (!d.ok) setErr(d.error || "the fetch failed");
+      if (onChanged) onChanged();
+    } catch (e) {
+      setErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const counts = m && m.lanes ? Object.entries(m.lanes).map(([lane, n]) => `${lane} ${n}`).join(" · ") : "";
+  const problem = err || m && m.error;
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }, "data-account-models": account.name }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, counts || /* @__PURE__ */ React.createElement("span", { className: "muted" }, "not fetched")), m && m.fetched_at && /* @__PURE__ */ React.createElement("span", { className: "mono muted" }, fmtAgo(Date.now() / 1e3 - m.fetched_at)), problem && /* @__PURE__ */ React.createElement("span", { style: { ...ACCOUNT_HINT, color: "var(--amber)" } }, problem), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn ghost",
+      style: ACCOUNT_SMALL,
+      disabled: busy,
+      onClick: refresh,
+      title: "ask the account's own source for the models it can run"
+    },
+    busy ? "fetching..." : "refresh models"
+  ));
+}
 function AccountsView() {
   const [data, setData] = React.useState(null);
   const [loadErr, setLoadErr] = React.useState(false);
@@ -349,7 +380,7 @@ function AccountsView() {
     return /* @__PURE__ */ React.createElement("div", { className: "wrap-pad", style: ACCOUNT_MONO }, loadErr ? "accounts unavailable" : "loading...");
   }
   const rows = data.accounts || [];
-  return /* @__PURE__ */ React.createElement("div", { className: "wrap-pad", "data-accounts-view": true }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", { style: { ...ACCOUNT_MONO, color: "var(--fg-3)" } }, rows.length, " accounts · the credentials runner cousins run on; no secret is ever shown"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setForm({}) }, I.plus, " add account")), data.error && /* @__PURE__ */ React.createElement("div", { className: "panel", style: { ...ACCOUNT_MONO, color: "var(--amber)", padding: 10, marginBottom: 12 } }, "config/accounts.toml: ", data.error), /* @__PURE__ */ React.createElement("div", { className: "panel table-scroll" }, /* @__PURE__ */ React.createElement("table", { className: "data accounts-table" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "name"), /* @__PURE__ */ React.createElement("th", null, "kind"), /* @__PURE__ */ React.createElement("th", null, "where"), /* @__PURE__ */ React.createElement("th", null, "lanes"), /* @__PURE__ */ React.createElement("th", null, "cousins"), /* @__PURE__ */ React.createElement("th", null, "status"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((a) => /* @__PURE__ */ React.createElement(React.Fragment, { key: a.name }, /* @__PURE__ */ React.createElement("tr", { "data-account-row": a.name }, /* @__PURE__ */ React.createElement("td", { className: "mono", "data-label": "name", style: { color: "var(--fg-0)" } }, a.name), /* @__PURE__ */ React.createElement("td", { className: "mono", "data-label": "kind" }, a.kind), /* @__PURE__ */ React.createElement("td", { className: "mono muted", "data-label": "where" }, a.where, a.secret && /* @__PURE__ */ React.createElement("div", null, secretStateText(a.secret), a.secret.error ? ` · ${a.secret.error}` : "")), /* @__PURE__ */ React.createElement("td", { className: "mono", "data-label": "lanes" }, (a.lanes || []).join(", ") || "-"), /* @__PURE__ */ React.createElement("td", { className: "mono", "data-label": "cousins" }, (a.cousins || []).map((s) => "@" + s).join(" ") || /* @__PURE__ */ React.createElement("span", { className: "muted" }, "none")), /* @__PURE__ */ React.createElement("td", { "data-label": "status" }, /* @__PURE__ */ React.createElement(AccountStatusCell, { name: a.name })), /* @__PURE__ */ React.createElement("td", { "data-label": "" }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("button", { className: "btn", style: ACCOUNT_SMALL, onClick: () => setOpen(open === a.name ? null : a.name) }, open === a.name ? "close" : "log in / keys"), !a.implicit && /* @__PURE__ */ React.createElement("button", { className: "btn ghost", style: ACCOUNT_SMALL, onClick: () => setForm({ initial: a }) }, "edit")))), open === a.name && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7 }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: "6px 0" } }, /* @__PURE__ */ React.createElement(AccountLogin, { account: a, onChanged: load }), /* @__PURE__ */ React.createElement(AccountRemove, { account: a, onRemoved: () => {
+  return /* @__PURE__ */ React.createElement("div", { className: "wrap-pad", "data-accounts-view": true }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", { style: { ...ACCOUNT_MONO, color: "var(--fg-3)" } }, rows.length, " accounts · the credentials runner cousins run on; no secret is ever shown"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setForm({}) }, I.plus, " add account")), data.error && /* @__PURE__ */ React.createElement("div", { className: "panel", style: { ...ACCOUNT_MONO, color: "var(--amber)", padding: 10, marginBottom: 12 } }, "config/accounts.toml: ", data.error), /* @__PURE__ */ React.createElement("div", { className: "panel table-scroll" }, /* @__PURE__ */ React.createElement("table", { className: "data accounts-table" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "name"), /* @__PURE__ */ React.createElement("th", null, "kind"), /* @__PURE__ */ React.createElement("th", null, "where"), /* @__PURE__ */ React.createElement("th", null, "lanes"), /* @__PURE__ */ React.createElement("th", null, "cousins"), /* @__PURE__ */ React.createElement("th", null, "status"), /* @__PURE__ */ React.createElement("th", null, "models"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((a) => /* @__PURE__ */ React.createElement(React.Fragment, { key: a.name }, /* @__PURE__ */ React.createElement("tr", { "data-account-row": a.name }, /* @__PURE__ */ React.createElement("td", { className: "mono", "data-label": "name", style: { color: "var(--fg-0)" } }, a.name), /* @__PURE__ */ React.createElement("td", { className: "mono", "data-label": "kind" }, a.kind), /* @__PURE__ */ React.createElement("td", { className: "mono muted", "data-label": "where" }, a.where, a.secret && /* @__PURE__ */ React.createElement("div", null, secretStateText(a.secret), a.secret.error ? ` · ${a.secret.error}` : "")), /* @__PURE__ */ React.createElement("td", { className: "mono", "data-label": "lanes" }, (a.lanes || []).join(", ") || "-"), /* @__PURE__ */ React.createElement("td", { className: "mono", "data-label": "cousins" }, (a.cousins || []).map((s) => "@" + s).join(" ") || /* @__PURE__ */ React.createElement("span", { className: "muted" }, "none")), /* @__PURE__ */ React.createElement("td", { "data-label": "status" }, /* @__PURE__ */ React.createElement(AccountStatusCell, { name: a.name })), /* @__PURE__ */ React.createElement("td", { "data-label": "models" }, /* @__PURE__ */ React.createElement(AccountModelsCell, { account: a, onChanged: load })), /* @__PURE__ */ React.createElement("td", { "data-label": "" }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("button", { className: "btn", style: ACCOUNT_SMALL, onClick: () => setOpen(open === a.name ? null : a.name) }, open === a.name ? "close" : "log in / keys"), !a.implicit && /* @__PURE__ */ React.createElement("button", { className: "btn ghost", style: ACCOUNT_SMALL, onClick: () => setForm({ initial: a }) }, "edit")))), open === a.name && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 8 }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: "6px 0" } }, /* @__PURE__ */ React.createElement(AccountLogin, { account: a, onChanged: load }), /* @__PURE__ */ React.createElement(AccountRemove, { account: a, onRemoved: () => {
     setOpen(null);
     load();
   } }))))))))), form && /* @__PURE__ */ React.createElement(

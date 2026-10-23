@@ -70,11 +70,14 @@ function agentEnvProblem(name, denyPrefixes) {
 }
 
 // A client-side hint for a model under the lane's model_rule (describe()'s;
-// the server stays the authority).
-function agentModelProblem(rule, value) {
+// the server stays the authority), and for one the account's own fetched
+// list does not hold (said, never refused: a list can lag a new model).
+function agentModelProblem(rule, value, row) {
   if (!value) return null;
   if (/\s/.test(value)) return "one word, no spaces";
   if (rule && rule.provider_model && !/^[^/]+\/.+/.test(value)) return "\"<provider>/<model>\"";
+  const listed = (row && row.suggestions_from === "account" && row.suggestions) || [];
+  if (listed.length && !listed.includes(value)) return "not in the account's model list";
   return null;
 }
 
@@ -236,7 +239,7 @@ function AgentField({ name, row, rule, value, onChange, disabled }) {
       );
     }
     case "model": {
-      const problem = agentModelProblem(rule, value || "");
+      const problem = agentModelProblem(rule, value || "", row);
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <input className="txt" value={value ?? ""} disabled={disabled} list={listId}

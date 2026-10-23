@@ -613,6 +613,9 @@ def console_main(argv=None):
                            tmux_bin=args.tmux_bin,
                            tmux_socket=args.tmux_socket,
                            secure_cookie=args.secure_cookie)
+    # the console refreshes an account's stale model list on its own
+    # (model_catalog); a server built anywhere else, as in a test, never does
+    server.state["models.autorefresh"] = True
     print("cousin-console: serving %s on %s:%d%s"
           % (server.root, server.httpd.server_address[0], server.port,
              auth_banner(server.users)),

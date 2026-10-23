@@ -633,7 +633,10 @@ def _private_dir(path, what):
     except FileNotFoundError:
         for p in reversed((path, *path.parents)):
             if not os.path.lexists(p):
-                p.mkdir(mode=0o700, exist_ok=True)
+                try:
+                    p.mkdir(mode=0o700)
+                except FileExistsError:
+                    continue        # made meanwhile, not by us: left as it is
                 os.chmod(p, 0o700)
         st = os.lstat(path)
     if stat.S_ISLNK(st.st_mode):

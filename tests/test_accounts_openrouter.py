@@ -116,6 +116,17 @@ class OpencodeLane(OpenrouterCase):
         for d in (self.root / ".secrets", self.root / ".secrets" / "accounts", view.data_dir):
             self.assertEqual(os.stat(d).st_mode & 0o777, 0o700, d)
 
+    def test_a_dir_made_meanwhile_keeps_its_mode(self):
+        # the window between the check and the mkdir, opened by hand:
+        # .secrets is there already, made by someone else at 0750
+        secrets = self.root / ".secrets"
+        secrets.mkdir(); os.chmod(secrets, 0o750)
+        real = os.path.lexists
+        with mock.patch("os.path.lexists", lambda p: p != secrets and real(p)):
+            accounts._private_dir(secrets / "accounts" / "work.opencode", "the data dir")
+        self.assertEqual(os.stat(secrets).st_mode & 0o777, 0o750)
+        self.assertEqual(os.stat(secrets / "accounts").st_mode & 0o777, 0o700)
+
     def test_its_models_are_openrouter_ones_and_never_claude(self):
         view = accounts.for_lane(self.account(), "opencode")
         opencode.check_model(view, "openrouter/openai/gpt-5")

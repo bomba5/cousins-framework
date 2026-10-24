@@ -3,6 +3,27 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.1.1 - 2026-10-24
+
+### Fixed
+
+- **The SDK runner no longer stalls on a row the CLI replays its own way.**
+  A row is closed by the first result after its echo, and the echo was
+  matched byte for byte. The CLI trims a replayed text, so a photo with no
+  caption (its envelope ends in a blank line) never matched; and it
+  replays rows queued back to back in one message, so only the first was
+  matched. The turn then waited on an echo that had already come, hit
+  the 600 s idle bound, went `errored` and failed the rows: their
+  messages got no answer. Now a row matches when its trimmed text is one
+  of the message's trimmed text blocks, or, for a row with a body, when
+  it stands as whole lines in the message; every row one message carries
+  is closed, and the `user` event lists them in `echoes`.
+- **A carried row the CLI never takes up goes back to the queue.** When
+  the CLI is quiet for `carry_idle_s` (60 s) with rows written and their
+  echo not come, the turn requeues them on a fresh client resuming the
+  session (as a dropped carried row after an interrupt already did),
+  instead of failing them on the 600 s idle bound.
+
 ## 4.1.0 - 2026-10-23
 
 ### Added

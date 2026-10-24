@@ -166,13 +166,18 @@ class ScriptedClient:
         for message in messages:
             self.queries.append(message)
             if self._generating():
-                self.stream.insert(0, echo(message))
+                self._queue_echo(message)
                 continue
             turn = self.turns.pop(0) if self.turns else [assistant(text="ok"), result()]
             for el in turn:
                 if isinstance(el, _Marker) and el.kind in ("WAIT_FOR_INTERRUPT", "SLOW"):
                     el.baseline = self.interrupts
             self.stream.extend([echo(message), *turn])
+
+    def _queue_echo(self, message):
+        """A query() while the model generates: its echo goes ahead of the
+        rest of the turn."""
+        self.stream.insert(0, echo(message))
 
     async def interrupt(self):
         if not self.connected or self.ended:
@@ -1977,6 +1982,141 @@ class TestTaskEvents(HermeticCase):
                           "usage": {}})
         self.assertEqual(_task_payload("task_updated", {"task_id": "t", "patch": None}),
                          {"subtype": "task_updated", "task_id": "t"})
+
+
+class ReplayingClient(ScriptedClient):
+    """ScriptedClient with the real CLI's replay quirks, as a live runner
+    met them on 2026-10-24: a row queued while the model generates comes
+    back trimmed, and rows queued back to back come back in ONE
+    UserMessage, as separate text blocks (each but the last ending in a
+    line break) or, with `run_together`, as one block. With `garble` a
+    queued row comes back in a form nothing can match. Queued echoes are
+    held while the stream is PAUSEd and land at resume(), so a script
+    needs a PAUSE for its folds."""
+
+    def __init__(self, options, scripts, delay=0.0, run_together=False, garble=False):
+        super().__init__(options, scripts, delay=delay)
+        self.run_together, self.garble = run_together, garble
+        self._held = None
+
+    def _queue_echo(self, message):
+        texts = [b.text.strip() for b in echo(message).content]
+        if self.garble:
+            texts = ["(a queued message, replayed some other way)"]
+        if self._held is None:
+            self._held = UserMessage(content=[TextBlock(text=t) for t in texts])
+        elif self.run_together:
+            joined = "\n\n".join([self._held.content[0].text, *texts])
+            self._held = UserMessage(content=[TextBlock(text=joined)])
+        else:
+            *rest, last = self._held.content
+            self._held = UserMessage(content=[*rest, TextBlock(text=last.text + "\n"),
+                                              *[TextBlock(text=t) for t in texts]])
+
+    def resume(self):
+        if self._held is not None:
+            self.stream.insert(0, self._held)
+            self._held = None
+        super().resume()
+
+
+class TestCliReplayQuirks(HermeticCase):
+    """Each row the CLI replays trimmed, or bundled with others, is still
+    closed by the turn's result (seen live on 2026-10-24: a photo with no
+    caption and messages sent back to back held the turn open for
+    idle_timeout_s, then failed the rows)."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = temp_home(self)
+
+    def _runner(self, quirks=None, **kw):
+        made = {"clients": []}
+        quirks = dict(quirks or {})
+
+        def factory(options):
+            # a reconnect gets a client that replays plainly and answers at once
+            scripts = [] if made["clients"] else [[init_msg(), "PAUSE", assistant(text="answer"),
+                                                   result()]]
+            made["client"] = ReplayingClient(options, scripts, **quirks)
+            made["clients"].append(made["client"])
+            quirks.clear()
+            return made["client"]
+        r = SdkRunner(self.home, client_factory=factory, **kw)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        return r, made
+
+    def _op(self, body):
+        return Item("operator:priya", "chat", body, sender="Priya")
+
+    def _photo(self):
+        path = self.home / "photo.png"
+        path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+        return Item("operator:priya", "chat", "", sender="Priya", attachments=(str(path),))
+
+    def _fold(self, r, made, *items):
+        first = r.enqueue(self._op("first"))
+        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
+        rows = [r.enqueue(item) for item in items]
+        self.assertTrue(_wait(lambda: len(made["client"].queries) == 1 + len(items)))
+        made["client"].resume()
+        return [first, *rows]
+
+    def _states(self, r):
+        return [e["payload"]["to"] for e in r.events() if e["kind"] == "state"]
+
+    def _closed(self, r, rows, timeout=3.0):
+        return _wait(lambda: all(r.inbox.get(x.inbox_id)["state"] == "done" for x in rows),
+                     timeout=timeout)
+
+    def test_a_photo_with_no_caption_replayed_trimmed_is_closed_by_the_result(self):
+        r, made = self._runner(idle_timeout_s=8.0)
+        r.start()
+        rows = self._fold(r, made, self._photo())
+        self.assertTrue(self._closed(r, rows), "the trimmed echo held the turn open")
+        for x in rows:
+            self.assertEqual(r.inbox.get(x.inbox_id)["outcome"], "delivered")
+        self.assertEqual(sorted(_results(r)[0]["inbox_ids"]), sorted(x.inbox_id for x in rows))
+        self.assertNotIn("errored", self._states(r))
+
+    def test_rows_replayed_in_one_message_as_separate_blocks_all_close(self):
+        r, made = self._runner(idle_timeout_s=8.0)
+        r.start()
+        rows = self._fold(r, made, self._op("second"), self._op("third"))
+        self.assertTrue(self._closed(r, rows), "a bundled echo closed only its first row")
+        for x in rows:
+            self.assertEqual(r.inbox.get(x.inbox_id)["outcome"], "delivered")
+        bundled = [e["payload"] for e in r.events()
+                   if e["kind"] == "user" and e["payload"].get("echoes")]
+        self.assertEqual([u["echoes"] for u in bundled], [[rows[1].inbox_id, rows[2].inbox_id]])
+        self.assertNotIn("errored", self._states(r))
+
+    def test_rows_replayed_run_together_in_one_block_all_close(self):
+        r, made = self._runner({"run_together": True}, idle_timeout_s=8.0)
+        r.start()
+        rows = self._fold(r, made, self._op("second"), self._photo(), self._op("third"))
+        # the photo's header line alone is matched as a whole block only: run
+        # together with the rows around it, it is not taken for one of them
+        closed = [rows[0], rows[1], rows[3]]
+        self.assertTrue(self._closed(r, closed), "a run-together echo closed nothing")
+        for x in closed:
+            self.assertEqual(r.inbox.get(x.inbox_id)["outcome"], "delivered")
+
+    def test_a_row_replayed_beyond_recognition_goes_back_to_the_queue_not_failed(self):
+        r, made = self._runner({"garble": True}, idle_timeout_s=30.0)
+        r.carry_idle_s = 0.5
+        r.start()
+        first, second = self._fold(r, made, self._op("second"))
+        # the turn's result closes the first; the second is carried, then goes
+        # back after carry_idle_s on a fresh client, which answers it
+        self.assertTrue(self._closed(r, [first, second], timeout=10.0))
+        for x in (first, second):
+            self.assertEqual(r.inbox.get(x.inbox_id)["outcome"], "delivered")
+        self.assertEqual(len(made["clients"]), 2, "the carried row went to a fresh client")
+        carried = [x for x in _results(r) if x.get("carried")]
+        self.assertEqual([x["requeued"] for x in carried], [[second.inbox_id]])
+        self.assertIn("went quiet", carried[0]["carried"])
+        self.assertNotIn("errored", self._states(r))
 
 
 if __name__ == "__main__":

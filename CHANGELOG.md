@@ -3,6 +3,41 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.1.1 - 2026-10-24
+
+### Fixed
+
+- **The SDK runner no longer stalls on a row the CLI replays its own way.**
+  A row is closed by the first result after its echo, and the echo was
+  matched byte for byte. The CLI trims a replayed text, so a photo with no
+  caption (its envelope ends in a blank line) never matched; and it
+  replays rows queued back to back in one message, so only the first was
+  matched. The turn then waited on an echo that had already come, hit
+  the 600 s idle bound, went `errored` and failed the rows: their
+  messages got no answer. Now a row matches when its trimmed text is one
+  of the message's trimmed text blocks, or, for a row with a body, when
+  it stands as whole lines in the message. One block closes one row (two
+  rows that render alike need two), and as the CLI takes rows up in the
+  order written, a row written before a matched one is closed too, except
+  in a turn an interrupt reached (it may make the CLI drop a queued row).
+  Every row one message carries is closed, and the `user` event lists
+  them in `echoes`.
+- **A carried row is never failed on the idle bound.** A row written whose
+  echo had not come by the result is closed by the result of the CLI turn
+  the CLI then runs on a row's replay nothing matched (it took the row up,
+  so it is not answered twice); a prompt the CLI writes itself, such as a
+  stop hook's feedback or a background task's notification, never counts
+  as one. When the CLI says nothing at all for
+  `carry_idle_s` (60 s), the rows go back to the queue on a fresh client
+  resuming the session, as a dropped carried row after an interrupt
+  already did. Once the CLI is at work again, the usual 600 s bound
+  applies, so a long think is never cut.
+- **`tomorrow HH:MM` keeps its wall time across a clock change.**
+  `parse_when` (the `schedule` tool's `when`) built tomorrow's time at
+  today's UTC offset, so on the eve of a clock change a one-shot set for
+  `tomorrow 06:30` fired at 05:30. It now takes tomorrow's date at that
+  day's own offset.
+
 ## 4.1.0 - 2026-10-23
 
 ### Added

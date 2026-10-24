@@ -942,7 +942,9 @@ key to an account. `account` and `api_key_file` together is refused.
 The runner waits at most 10 minutes for the next message of a turn (a stream
 gone silent fails the turn) and puts no limit on a whole turn. These are
 constructor defaults of the SDK runner (`idle_timeout_s`, `turn_timeout_s`),
-not cousin.toml keys.
+not cousin.toml keys. After a result, a row written whose echo has not come
+waits at most a minute (`carry_idle_s`, a class default): then it goes back
+to the queue on a fresh client resuming the session, instead of failing.
 
 `commit_attribution` overrides `config/harness.toml [agent]
 commit_attribution` for this cousin alone (see the table

@@ -6,6 +6,7 @@ model knows whom it answers (spec, "Threads"); with side sessions off
 every thread shares one session, so the name is the only routing cue.
 """
 import base64
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -41,6 +42,18 @@ def _header(item, now):
     return "[%s] %s from %s at %s" % (
         item.thread_id, item.source, item.sender or "unknown",
         now.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
+
+
+# _header's shape: what every row's text, and so its replay, starts with
+_HEADER = re.compile(r"\[[^\]\n]+\] \S+ from [^\n]* at \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC")
+
+
+def is_envelope(text):
+    """Whether `text` starts with an envelope's header line, as a row's
+    replay does and none of the prompts the CLI writes itself (a stop
+    hook's feedback, a task notification, an interrupt note)."""
+    first = (text or "").lstrip().split("\n", 1)[0].strip()
+    return bool(_HEADER.fullmatch(first))
 
 
 def _text(item, now):

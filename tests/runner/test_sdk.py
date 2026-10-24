@@ -2012,13 +2012,16 @@ class ReplayingClient(ScriptedClient):
         if self.drop_on_interrupt and self._held:
             self._held.pop(0)       # the interrupt made it drop the first queued row
 
-    def _garbled(self):
-        return UserMessage(content=[TextBlock(text="(a message, replayed some other way)")])
+    def _garbled(self, message):
+        """The row's replay in a form no match recognises: its header line,
+        then not its text."""
+        head = echo(message).content[0].text.split("\n", 1)[0]
+        return UserMessage(content=[TextBlock(text=head + "\n\n(the row, replayed some other way)")])
 
     def _queue_echo(self, message):
         texts = [b.text.strip() for b in echo(message).content]
         if self.garble is True:
-            texts = [self._garbled().content[0].text]
+            texts = [self._garbled(message).content[0].text]
         if not self._held or not self.bundle:
             self._held.append(UserMessage(content=[TextBlock(text=t) for t in texts]))
         elif self.run_together:
@@ -2031,7 +2034,7 @@ class ReplayingClient(ScriptedClient):
 
     def _turn_echo(self, message):
         later = len(self.queries) > 1     # the test's own first row replays plainly
-        return self._garbled() if self.garble and later else echo(message)
+        return self._garbled(message) if self.garble and later else echo(message)
 
     def resume(self):
         self.stream[0:0], self._held = self._held, []
@@ -2185,6 +2188,31 @@ class TestCliReplayQuirks(HermeticCase):
         self.assertEqual([x["requeued"] for x in res if x.get("carried")], [[a.inbox_id]])
         self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "delivered")
         self.assertEqual(len(made["clients"]), 2, "the dropped row went to a fresh client")
+
+    def test_a_prompt_the_cli_writes_itself_does_not_close_a_carried_row(self):
+        # a row carried past a result; a background task finishes and the
+        # CLI runs a turn on its notification first, then takes the row up:
+        # the row is closed by its own result, not by the notification's
+        r, made = self._runner(idle_timeout_s=30.0, scripts=[
+            [init_msg(), assistant(text="one"), "PAUSE", result(num_turns=1)],
+            [assistant(text="two"), result(num_turns=2)]])
+        r.carry_idle_s = 5.0
+        r.start()
+        first = r.enqueue(self._op("first"))
+        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
+        second = r.enqueue(self._op("second, while only the result is left"))
+        self.assertTrue(_wait(lambda: len(made["client"].queries) == 2))
+        client = made["client"]
+        at = next(i for i, el in enumerate(client.stream) if isinstance(el, ResultMessage)) + 1
+        client.stream[at:at] = [
+            UserMessage(content="<task-notification>\n<task-id>t1</task-id>\n</task-notification>"),
+            assistant(text="noted"), result(num_turns=7)]
+        client.resume()
+        self.assertTrue(self._closed(r, [first, second], timeout=10.0))
+        closed_by = {i: x["num_turns"] for x in _results(r) for i in x["inbox_ids"]}
+        self.assertEqual(closed_by, {first.inbox_id: 1, second.inbox_id: 2})
+        self.assertEqual(len(made["clients"]), 1)
+        self.assertNotIn("errored", self._states(r))
 
 
 if __name__ == "__main__":

@@ -178,14 +178,17 @@ def _find_lines(text, part, start=0):
     return -1
 
 
-def _is_prompt(sdk, msg):
-    """Whether a UserMessage is a prompt the CLI took up (text, and no
-    tool result in it), not a tool's answer."""
+def _is_replay(sdk, msg):
+    """Whether a UserMessage reads as the replay of a row: text that
+    starts with an envelope header, and no tool result in it. The prompts
+    the CLI writes itself (a stop hook's feedback, a task notification, an
+    interrupt note) and a tool's answer are none."""
     if isinstance(msg.content, str):
-        return bool(msg.content.strip())
+        return envelope.is_envelope(msg.content)
     blocks = msg.content or []
-    return (any(isinstance(b, sdk.TextBlock) for b in blocks)
-            and not any(isinstance(b, sdk.ToolResultBlock) for b in blocks))
+    return (not any(isinstance(b, sdk.ToolResultBlock) for b in blocks)
+            and any(isinstance(b, sdk.TextBlock) and envelope.is_envelope(b.text)
+                    for b in blocks))
 
 
 def _user_event(text, echo_of, echoes):
@@ -496,8 +499,8 @@ class SdkRunner:
         self._carrying = False
         self._carry_until = None
         # a carried read heard the CLI at work (any user or assistant
-        # message), and took a prompt no row matched: rows went in the
-        # order written, so those carried are what it took up
+        # message), and took a row's replay no row's text matched: rows
+        # went in the order written, so those carried are what it took up
         self._carry_seen = False
         self._carry_taken = False
         self._carry_stop_at = None    # a stop's grace for the echo (CARRY_STOP_GRACE_S)
@@ -2441,7 +2444,7 @@ class SdkRunner:
                         if self._carrying and isinstance(msg, (sdk.UserMessage, sdk.AssistantMessage)):
                             # the CLI is at work: the normal bound from here on
                             self._carry_seen = True
-                            if isinstance(msg, sdk.UserMessage) and _is_prompt(sdk, msg) \
+                            if isinstance(msg, sdk.UserMessage) and _is_replay(sdk, msg) \
                                     and not self._interrupted_turn:
                                 self._carry_taken = True
                         # a message means the permission was settled; a hook's

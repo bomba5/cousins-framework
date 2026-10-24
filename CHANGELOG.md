@@ -24,8 +24,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   them in `echoes`.
 - **A carried row is never failed on the idle bound.** A row written whose
   echo had not come by the result is closed by the result of the CLI turn
-  the CLI then runs on a prompt nothing matched (it took the row up, so it
-  is not answered twice). When the CLI says nothing at all for
+  the CLI then runs on a row's replay nothing matched (it took the row up,
+  so it is not answered twice); a prompt the CLI writes itself, such as a
+  stop hook's feedback or a background task's notification, never counts
+  as one. When the CLI says nothing at all for
   `carry_idle_s` (60 s), the rows go back to the queue on a fresh client
   resuming the session, as a dropped carried row after an interrupt
   already did. Once the CLI is at work again, the usual 600 s bound

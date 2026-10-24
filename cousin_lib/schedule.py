@@ -65,10 +65,12 @@ def parse_when(when, *, now=None):
         return int((now + delta).timestamp())
     m = re.match(r"^tomorrow\s+(\d{1,2}):(\d{2})$", when, re.I)
     if m:
-        target = (now + timedelta(days=1)).replace(
-            hour=int(m.group(1)), minute=int(m.group(2)),
-            second=0, microsecond=0,
-        )
+        # the wall time on tomorrow's date, at tomorrow's own offset: now's
+        # is a fixed one, an hour off across a clock change. An hour that
+        # comes twice (the fall-back) takes its first reading (fold 0).
+        day = (now + timedelta(days=1)).date()
+        target = datetime(day.year, day.month, day.day,
+                          int(m.group(1)), int(m.group(2))).astimezone()
         return int(target.timestamp())
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M",
                 "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):

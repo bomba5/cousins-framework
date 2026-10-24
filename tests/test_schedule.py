@@ -7,8 +7,9 @@ has its own module and tests.
 import os
 import pathlib
 import tempfile
+import time
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from cousin_lib.schedule import parse_when, schedule_main, tick
@@ -56,6 +57,25 @@ class TestParseWhen(unittest.TestCase):
         target = datetime.fromtimestamp(ts).astimezone()
         self.assertEqual((target.hour, target.minute), (6, 30))
         self.assertEqual(target.date(), (now + timedelta(days=1)).date())
+
+    def test_tomorrow_keeps_its_wall_time_across_a_clock_change(self):
+        # central European rules as a POSIX TZ (no tzdata needed): summer
+        # time ends at 03:00 on 2026-10-25, so 06:30 that day is 05:30 UTC,
+        # not the 04:30 the evening's +02:00 would give
+        old = os.environ.get("TZ")
+        os.environ["TZ"] = "CET-1CEST,M3.5.0,M10.5.0/3"
+        time.tzset()
+        try:
+            now = datetime(2026, 10, 24, 21, 0).astimezone()
+            ts = parse_when("tomorrow 06:30", now=now)
+            self.assertEqual(datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d %H:%M"),
+                             "2026-10-25 05:30")
+        finally:
+            if old is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = old
+            time.tzset()
 
     def test_iso_forms(self):
         ts = parse_when("2030-01-02T03:04")

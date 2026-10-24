@@ -30,6 +30,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   resuming the session, as a dropped carried row after an interrupt
   already did. Once the CLI is at work again, the usual 600 s bound
   applies, so a long think is never cut.
+- **`tomorrow HH:MM` keeps its wall time across a clock change.**
+  `parse_when` (the `schedule` tool's `when`) built tomorrow's time at
+  today's UTC offset, so on the eve of a clock change a one-shot set for
+  `tomorrow 06:30` fired at 05:30. It now takes tomorrow's date at that
+  day's own offset.
 
 ## 4.1.0 - 2026-10-23
 

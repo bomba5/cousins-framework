@@ -25,9 +25,11 @@ runner reads on to that turn's result and closes the row with it. So a
 runner turn can emit more than one `result` event, and none is left in
 the stream for the next turn to misread. The echo is not byte for byte:
 the CLI trims it and replays rows queued back to back in one message, so
-_match_echoes compares trimmed texts and closes every row a message
-carries; a carried row the CLI stays quiet on for carry_idle_s goes back
-to the queue on a fresh client.
+_match_echoes compares trimmed texts, closes every row a message carries,
+and, as the CLI takes rows up in the order written, every row written
+before one it matched. A carried row is closed by the result of a CLI turn
+run on a prompt no row matched (the CLI took it up); one the CLI says
+nothing about for carry_idle_s goes back to the queue on a fresh client.
 """
 import asyncio
 import collections
@@ -174,6 +176,16 @@ def _find_lines(text, part, start=0):
             return at
         at = text.find(part, at + 1)
     return -1
+
+
+def _is_prompt(sdk, msg):
+    """Whether a UserMessage is a prompt the CLI took up (text, and no
+    tool result in it), not a tool's answer."""
+    if isinstance(msg.content, str):
+        return bool(msg.content.strip())
+    blocks = msg.content or []
+    return (any(isinstance(b, sdk.TextBlock) for b in blocks)
+            and not any(isinstance(b, sdk.ToolResultBlock) for b in blocks))
 
 
 def _user_event(text, echo_of, echoes):
@@ -474,12 +486,20 @@ class SdkRunner:
         self._client = None
         self._interrupt_requested = False
         self._interrupt_sent = False    # an interrupt reached the client this turn (_close)
+        # one did in this runner turn at all: kept past the result, unlike
+        # _interrupt_sent, so no row is taken as echoed by order after one
+        self._interrupted_turn = False
         self._live = False       # the CLI is generating for this turn (see _interrupt_turn)
         # The turn waits on a carried row (written, its echo not come when
         # the CLI's result did); interrupts are taken, and stop and an
         # interrupt bound the wait (_carried_wait)
         self._carrying = False
         self._carry_until = None
+        # a carried read heard the CLI at work (any user or assistant
+        # message), and took a prompt no row matched: rows went in the
+        # order written, so those carried are what it took up
+        self._carry_seen = False
+        self._carry_taken = False
         self._carry_stop_at = None    # a stop's grace for the echo (CARRY_STOP_GRACE_S)
         # an interrupt written while the CLI was between turns: it may
         # have cut nothing, so the echo sends it again to the live turn;
@@ -1048,7 +1068,7 @@ class SdkRunner:
             return False
         self._interrupt_requested = True
         if self._writer is None:
-            self._interrupt_sent = True
+            self._interrupt_sent = self._interrupted_turn = True
             await self._client.interrupt()
             return True
         # in line behind any fold already handed over (_Writer)
@@ -1061,6 +1081,7 @@ class SdkRunner:
         if not self._interrupt_may_go(seq):
             return False
         self._interrupt_sent = True     # what _close reads: an interrupt that reached the client
+        self._interrupted_turn = True
         # written while the CLI is between turns (a carried read) it may
         # cut nothing: the echo sends it again. One to the live turn clears it.
         self._interrupt_idle = not self._live
@@ -1950,7 +1971,7 @@ class SdkRunner:
         # a tool call open is silent while it runs: its own bound
         idle_s = self.tool_idle_timeout_s if self._open_tools else self.idle_timeout_s
         # a carried read waits on a CLI between turns: its own, shorter bound
-        carry_idle = self._carrying and not self._open_tools
+        carry_idle = self._carrying and not self._open_tools and not self._carry_seen
         if carry_idle:
             idle_s = min(idle_s, self.carry_idle_s)
         idle_deadline = time.monotonic() + idle_s
@@ -2127,28 +2148,40 @@ class SdkRunner:
         when its trimmed text is one of the message's trimmed text blocks,
         or, for a row with a body, when that text stands as whole lines in
         the message after the previous such match (the CLI keeps the order
-        rows were written in). An image-only row's text is its header line
-        alone, which a row from the same sender in the same minute starts
-        with, so it is matched as a whole block only."""
+        rows were written in). A block echoes one row: two rows that render
+        the same text (the header has minute granularity) need two blocks.
+        An image-only row's text is its header line alone, which a row from
+        the same sender in the same minute starts with, so it is matched as
+        a whole block only. And the CLI takes rows up in the order written:
+        a row written before one this message echoes was taken up too, in a
+        form nothing matched, so it is echoed as well."""
         if isinstance(msg.content, str):
             texts = [msg.content]
         else:
             texts = [b.text for b in msg.content if isinstance(b, sdk.TextBlock)]
-        blocks = {t.strip() for t in texts}
+        blocks = collections.Counter(t.strip() for t in texts)
         joined = "\n".join(t.strip() for t in texts)
-        rows, cursor = [], 0
+        found, cursor = set(), 0
         for row, text in open_rows:
             want = text.strip()
             if row["id"] in echoed or not want:
                 continue
-            if want in blocks:
-                rows.append(row)
+            if blocks[want] > 0:
+                blocks[want] -= 1
+                found.add(row["id"])
             elif (row.get("body") or "").strip():
                 at = _find_lines(joined, want, cursor)
                 if at >= 0:
-                    rows.append(row)
+                    found.add(row["id"])
                     cursor = at + len(want)
-        return rows
+        if not found or self._interrupted_turn:
+            # An interrupt may make the CLI drop a queued row (_carry_until):
+            # past one, only a row its own text matched is echoed. In a turn,
+            # every row is written before any interrupt (nothing is folded
+            # once one is requested), so this costs only that turn.
+            return [row for row, _ in open_rows if row["id"] in found]
+        last = max(i for i, (row, _) in enumerate(open_rows) if row["id"] in found)
+        return [row for row, _ in open_rows[:last + 1] if row["id"] not in echoed]
 
     def _fail_turn(self, consumed, exc, *, recover=True, requeued=()):
         """FakeRunner._fail_turn's rules: `consumed` is only rows this call
@@ -2334,6 +2367,7 @@ class SdkRunner:
         the turn is live, and read until every written row is closed.
         Returns False when the turn failed or a result was an error."""
         self._interrupt_requested = self._interrupt_sent = False
+        self._interrupted_turn = False
         self._interrupt_idle = self._reinterrupting = False
         self._auth_turn = None
         self._sent = []
@@ -2404,6 +2438,12 @@ class SdkRunner:
                                 echoed.add(row["id"])
                                 if row["id"] != first["id"]:
                                     self.turn.add(row)
+                        if self._carrying and isinstance(msg, (sdk.UserMessage, sdk.AssistantMessage)):
+                            # the CLI is at work: the normal bound from here on
+                            self._carry_seen = True
+                            if isinstance(msg, sdk.UserMessage) and _is_prompt(sdk, msg) \
+                                    and not self._interrupted_turn:
+                                self._carry_taken = True
                         # a message means the permission was settled; a hook's
                         # own event is not one
                         if not isinstance(msg, getattr(sdk, "HookEventMessage", ())):
@@ -2423,7 +2463,12 @@ class SdkRunner:
                         if isinstance(msg, sdk.ResultMessage):
                             results += 1
                             self._live = False
+                            if self._carrying and self._carry_taken:
+                                # the CLI ran a turn on a prompt no row matched
+                                # while rows were carried: it took them up
+                                echoed.update(row["id"] for row, _ in open_rows)
                             self._carrying, self._carry_until = False, None
+                            self._carry_seen = self._carry_taken = False
                             cut = self._interrupt_sent      # _close clears it
                             ok = self._close(msg, open_rows, echoed, closing) and ok
                             self._interrupt_idle = self._reinterrupting = False
@@ -2488,6 +2533,7 @@ class SdkRunner:
             return False
         finally:
             self._carrying, self._carry_until, self._carry_stop_at = False, None, None
+            self._carry_seen = self._carry_taken = False
             await self._close_writer()   # no writer task outlives its turn
         self.turn.end()
         with self._lock:

@@ -172,12 +172,16 @@ class ScriptedClient:
             for el in turn:
                 if isinstance(el, _Marker) and el.kind in ("WAIT_FOR_INTERRUPT", "SLOW"):
                     el.baseline = self.interrupts
-            self.stream.extend([echo(message), *turn])
+            self.stream.extend([self._turn_echo(message), *turn])
 
     def _queue_echo(self, message):
         """A query() while the model generates: its echo goes ahead of the
         rest of the turn."""
         self.stream.insert(0, echo(message))
+
+    def _turn_echo(self, message):
+        """The echo of a row that starts a CLI turn of its own."""
+        return echo(message)
 
     async def interrupt(self):
         if not self.connected or self.ended:
@@ -1989,34 +1993,48 @@ class ReplayingClient(ScriptedClient):
     met them on 2026-10-24: a row queued while the model generates comes
     back trimmed, and rows queued back to back come back in ONE
     UserMessage, as separate text blocks (each but the last ending in a
-    line break) or, with `run_together`, as one block. With `garble` a
-    queued row comes back in a form nothing can match. Queued echoes are
-    held while the stream is PAUSEd and land at resume(), so a script
-    needs a PAUSE for its folds."""
+    line break) or, with `run_together`, as one block; with `bundle`
+    off, each in a message of its own; `drop_on_interrupt` drops the first
+    queued row at an interrupt. With `garble` a row comes back in a
+    form nothing can match (`garble="turn"`: only a row that starts a CLI
+    turn of its own). Queued echoes are held while the stream is PAUSEd
+    and land at resume(), so a script needs a PAUSE for its folds."""
 
-    def __init__(self, options, scripts, delay=0.0, run_together=False, garble=False):
+    def __init__(self, options, scripts, delay=0.0, run_together=False, garble=False,
+                 bundle=True, drop_on_interrupt=False):
         super().__init__(options, scripts, delay=delay)
-        self.run_together, self.garble = run_together, garble
-        self._held = None
+        self.run_together, self.garble, self.bundle = run_together, garble, bundle
+        self.drop_on_interrupt = drop_on_interrupt
+        self._held = []
+
+    async def interrupt(self):
+        await super().interrupt()
+        if self.drop_on_interrupt and self._held:
+            self._held.pop(0)       # the interrupt made it drop the first queued row
+
+    def _garbled(self):
+        return UserMessage(content=[TextBlock(text="(a message, replayed some other way)")])
 
     def _queue_echo(self, message):
         texts = [b.text.strip() for b in echo(message).content]
-        if self.garble:
-            texts = ["(a queued message, replayed some other way)"]
-        if self._held is None:
-            self._held = UserMessage(content=[TextBlock(text=t) for t in texts])
+        if self.garble is True:
+            texts = [self._garbled().content[0].text]
+        if not self._held or not self.bundle:
+            self._held.append(UserMessage(content=[TextBlock(text=t) for t in texts]))
         elif self.run_together:
-            joined = "\n\n".join([self._held.content[0].text, *texts])
-            self._held = UserMessage(content=[TextBlock(text=joined)])
+            joined = "\n\n".join([self._held[-1].content[0].text, *texts])
+            self._held[-1] = UserMessage(content=[TextBlock(text=joined)])
         else:
-            *rest, last = self._held.content
-            self._held = UserMessage(content=[*rest, TextBlock(text=last.text + "\n"),
-                                              *[TextBlock(text=t) for t in texts]])
+            *rest, last = self._held[-1].content
+            self._held[-1] = UserMessage(content=[*rest, TextBlock(text=last.text + "\n"),
+                                                  *[TextBlock(text=t) for t in texts]])
+
+    def _turn_echo(self, message):
+        later = len(self.queries) > 1     # the test's own first row replays plainly
+        return self._garbled() if self.garble and later else echo(message)
 
     def resume(self):
-        if self._held is not None:
-            self.stream.insert(0, self._held)
-            self._held = None
+        self.stream[0:0], self._held = self._held, []
         super().resume()
 
 
@@ -2030,14 +2048,14 @@ class TestCliReplayQuirks(HermeticCase):
         super().setUp()
         self.home = temp_home(self)
 
-    def _runner(self, quirks=None, **kw):
+    def _runner(self, quirks=None, scripts=None, **kw):
         made = {"clients": []}
         quirks = dict(quirks or {})
+        first = scripts or [[init_msg(), "PAUSE", assistant(text="answer"), result()]]
 
         def factory(options):
             # a reconnect gets a client that replays plainly and answers at once
-            scripts = [] if made["clients"] else [[init_msg(), "PAUSE", assistant(text="answer"),
-                                                   result()]]
+            scripts = [] if made["clients"] else first
             made["client"] = ReplayingClient(options, scripts, **quirks)
             made["clients"].append(made["client"])
             quirks.clear()
@@ -2095,12 +2113,12 @@ class TestCliReplayQuirks(HermeticCase):
         r, made = self._runner({"run_together": True}, idle_timeout_s=8.0)
         r.start()
         rows = self._fold(r, made, self._op("second"), self._photo(), self._op("third"))
-        # the photo's header line alone is matched as a whole block only: run
-        # together with the rows around it, it is not taken for one of them
-        closed = [rows[0], rows[1], rows[3]]
-        self.assertTrue(self._closed(r, closed), "a run-together echo closed nothing")
-        for x in closed:
+        # the photo's header line alone matches no run-together text, but the
+        # row written after it does: the CLI takes rows in order, so it is in
+        self.assertTrue(self._closed(r, rows), "a run-together echo left a row open")
+        for x in rows:
             self.assertEqual(r.inbox.get(x.inbox_id)["outcome"], "delivered")
+        self.assertFalse([x for x in _results(r) if x.get("carried")])
 
     def test_a_row_replayed_beyond_recognition_goes_back_to_the_queue_not_failed(self):
         r, made = self._runner({"garble": True}, idle_timeout_s=30.0)
@@ -2117,6 +2135,56 @@ class TestCliReplayQuirks(HermeticCase):
         self.assertEqual([x["requeued"] for x in carried], [[second.inbox_id]])
         self.assertIn("went quiet", carried[0]["carried"])
         self.assertNotIn("errored", self._states(r))
+
+    def test_two_photos_that_render_alike_each_need_their_own_echo(self):
+        # same sender, same minute: the same header line, the same text
+        r, made = self._runner({"bundle": False}, idle_timeout_s=8.0)
+        r.start()
+        rows = self._fold(r, made, self._photo(), self._photo())
+        self.assertTrue(self._closed(r, rows))
+        users = [e["payload"] for e in r.events() if e["kind"] == "user"]
+        self.assertEqual([u["echo_of"] for u in users], [x.inbox_id for x in rows])
+        self.assertFalse([u for u in users if u.get("echoes")])
+
+    def test_a_carried_row_taken_up_unrecognised_is_closed_by_its_turn_not_answered_twice(self):
+        # the row lands when only the result is left: the CLI runs a turn of
+        # its own on it, replaying it beyond recognition, and thinks for
+        # longer than carry_idle_s before its result
+        r, made = self._runner({"garble": "turn"}, idle_timeout_s=30.0, scripts=[
+            [init_msg(), assistant(text="one"), "PAUSE", result(num_turns=1)],
+            [assistant(text="two"), ("SLOW", 1.0), result(num_turns=2)]])
+        r.carry_idle_s = 0.3
+        r.start()
+        first, second = self._fold(r, made, self._op("second, while only the result is left"))
+        self.assertTrue(self._closed(r, [first, second], timeout=10.0))
+        for x in (first, second):
+            self.assertEqual(r.inbox.get(x.inbox_id)["outcome"], "delivered")
+        self.assertEqual(len(made["clients"]), 1, "nothing was requeued on a fresh client")
+        self.assertEqual([(x["inbox_ids"], x["num_turns"]) for x in _results(r)],
+                         [([first.inbox_id], 1), ([second.inbox_id], 2)])
+        self.assertNotIn("errored", self._states(r))
+
+    def test_past_an_interrupt_a_row_is_echoed_only_by_its_own_text(self):
+        # two rows queued, then an interrupt: the CLI drops the first and
+        # replays the second, and write order must not close the dropped one
+        r, made = self._runner({"bundle": False, "drop_on_interrupt": True},
+                               idle_timeout_s=30.0, drain_timeout_s=0.5)
+        r.start()
+        first = r.enqueue(self._op("first"))
+        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
+        a, b = r.enqueue(self._op("second")), r.enqueue(self._op("third"))
+        self.assertTrue(_wait(lambda: len(made["client"].queries) == 3))
+        r.enqueue(Item("system", "interrupt", "stop", sender="Priya"))
+        self.assertTrue(_wait(lambda: made["client"].interrupts == 1))
+        made["client"].resume()
+        self.assertTrue(self._closed(r, [first, a, b], timeout=10.0))
+        res = _results(r)
+        closing = [x for x in res if b.inbox_id in x["inbox_ids"]]
+        self.assertEqual(len(closing), 1)
+        self.assertNotIn(a.inbox_id, closing[0]["inbox_ids"])
+        self.assertEqual([x["requeued"] for x in res if x.get("carried")], [[a.inbox_id]])
+        self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "delivered")
+        self.assertEqual(len(made["clients"]), 2, "the dropped row went to a fresh client")
 
 
 if __name__ == "__main__":

@@ -16,13 +16,20 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   the 600 s idle bound, went `errored` and failed the rows: their
   messages got no answer. Now a row matches when its trimmed text is one
   of the message's trimmed text blocks, or, for a row with a body, when
-  it stands as whole lines in the message; every row one message carries
-  is closed, and the `user` event lists them in `echoes`.
-- **A carried row the CLI never takes up goes back to the queue.** When
-  the CLI is quiet for `carry_idle_s` (60 s) with rows written and their
-  echo not come, the turn requeues them on a fresh client resuming the
-  session (as a dropped carried row after an interrupt already did),
-  instead of failing them on the 600 s idle bound.
+  it stands as whole lines in the message. One block closes one row (two
+  rows that render alike need two), and as the CLI takes rows up in the
+  order written, a row written before a matched one is closed too, except
+  in a turn an interrupt reached (it may make the CLI drop a queued row).
+  Every row one message carries is closed, and the `user` event lists
+  them in `echoes`.
+- **A carried row is never failed on the idle bound.** A row written whose
+  echo had not come by the result is closed by the result of the CLI turn
+  the CLI then runs on a prompt nothing matched (it took the row up, so it
+  is not answered twice). When the CLI says nothing at all for
+  `carry_idle_s` (60 s), the rows go back to the queue on a fresh client
+  resuming the session, as a dropped carried row after an interrupt
+  already did. Once the CLI is at work again, the usual 600 s bound
+  applies, so a long think is never cut.
 
 ## 4.1.0 - 2026-10-23
 

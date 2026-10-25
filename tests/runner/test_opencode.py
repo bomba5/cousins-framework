@@ -772,6 +772,7 @@ class TestTurns(OpencodeCase):
         self.assertIn("hi there", body["parts"][0]["text"])
         self.assertIn("`cousin_reply`", body["system"])
         self.assertNotIn("mcp__cousin__", body["system"])
+        self.assertNotIn("[fw-skills]", body["system"])     # this lane loads no skills
 
     def test_an_operator_message_mid_turn_is_folded_into_the_run(self):
         r = self.started(self.runner([[("SLOW", 1.0), ("text", "first")], [("text", "second")]]))

@@ -3,6 +3,70 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.2.0 - 2026-10-25
+
+### Added
+
+- **The operator can review a stale skill as still fine.** A stale skill
+  stayed stale until it was edited and approved again, so a change the
+  operator had looked at and found harmless kept showing. Opened in
+  System > skills or the inspector, a stale skill now offers **reviewed,
+  still fine...**: the page shows what its last check found changed or
+  missing, then and now, and the confirm makes that its baseline (an item
+  that changed takes the value the check read; one that went missing has
+  none, and takes the value found if it comes back; a pin is compared
+  with the reviewed value from then on). The review is recorded like an
+  approval, in the same file: `action` `rebaseline`, the console user,
+  the items, and the sha256 of the staleness shown, which the route
+  takes back and refuses when the check changed since, while a check of
+  the skill runs, or when the repository's approval moved meanwhile. A
+  check and a review of one skill never overlap (a lock per skill, which
+  every check takes). New routes: `GET
+  .../staleness` and `POST .../rebaseline`, for a shared skill and for one
+  a cousin loads. An edit of the skill takes a new baseline, as before.
+- **A rests-on item can be marked read live.** A skill that reads its
+  facts afresh each time it runs (a host-facts memory topic, a living
+  note) went stale on every new entry or edit, though nothing it does had
+  changed. `live:` before a `rests-on` item (`live:build host facts`,
+  `live:notes/watch-plan.md`) now says so: the check looks only at
+  whether the item is there, so a change never makes the skill stale and
+  its going missing still does (the skill would find nothing to read).
+  The mark works on every `rests-on` form; a pin in `reads` is never
+  live. Check rows of a live item carry `"live": true`.
+
+- **Each chat message names the skills that match it.** A loaded skill
+  is used only when the agent thinks of it: a cousin did a release check
+  from memory with the skill for it loaded, and 17 of 32 approved skills
+  had never been used. On the `sdk` lane, after recall,
+  the runner now adds one `[fw-skills]` line naming up to three skills the
+  cousin loads whose name and description are near the message (the
+  recall embedding service, cosine 0.62 or more, best first; no model
+  call), and the contract says to use the one that fits instead of
+  working from memory. It reads the skills exported for this connect at
+  every message (a rollover or a reconnect exports afresh) and keeps each
+  skill's vector once taken; it runs side by side with recall, waits at
+  most 4 seconds, and a failure only drops it. The reasoning
+  pane shows it (event `skills_hint`). `opencode` and the `tmux` kind get
+  no line, and their contract bytes do not move; the SDK lane's contract
+  gains the one paragraph, so its prompt cache starts over once.
+
+### Changed
+
+- **A draft names only memory topics its check can find.** A `rests-on`
+  item with no other form is a memory topic, and 71 of the 97 items the
+  staleness check could never check were topics no memory had: a
+  `memory:` or `memory topic:` put before the name, a topic cut at its
+  comma (the list splits there), a tool written another way. Writing a
+  draft (the `draft` tool, `cousin-skill draft`) or importing one now
+  refuses a topic the cousin's memory lacks, naming each with the topics
+  it likely meant (itself without the prefix, the whole topic a part
+  before a comma belongs to, a close spelling), and refuses any memory
+  topic in a shared skill, which has no owner whose memory is read. An
+  item that holds a comma goes in double quotes (`"rule: plans, then
+  reports"`); a quote inside it is doubled; any other list splits as
+  before. Approved skills keep loading as they are: an old one with such
+  an item is refused only when its next edit is written.
+
 ## 4.1.1 - 2026-10-24
 
 ### Fixed

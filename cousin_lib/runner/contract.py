@@ -121,6 +121,16 @@ is sent. To answer a person, call the `{reply}` tool with `text`, and
 with `thread` too when two threads are live."""
 
 
+# The skills hint, for the lane that gives it (render's `skill_hint`): one
+# paragraph after the envelope's, in "How messages reach you". The SDK
+# lane gives it (cousin_lib/skills_hint.py); opencode loads no skills and
+# the tmux kind has no per-turn context hook, so they pass False and keep
+# their bytes.
+SKILL_HINT = """A `[fw-skills]` line beside a message names the skills you load that
+match it: use the one that fits, through the `Skill` tool, instead of
+working from memory."""
+
+
 # One fixed sentence, never the servers themselves: a home's .mcp.json
 # changes with the home, and this text must not (byte-stable prompt).
 OTHER_SERVERS = """Other MCP servers, from your home's .mcp.json, may be present beside
@@ -218,7 +228,7 @@ PANE_RUNNER = "an interactive Claude Code pane"
 
 
 def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHER_SERVERS,
-           call_form=False):
+           call_form=False, skill_hint=True):
     """The contract for this registry at this release. Same inputs, same bytes.
     Its prose names only the tools tool_definitions(registry) serves.
 
@@ -236,6 +246,10 @@ def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHE
     `call_form` adds CALL_FORM after the "How you answer" paragraph: a
     tool is called, never written out as text. The opencode lane passes
     True; False (the SDK lane) leaves the bytes as they were.
+
+    `skill_hint` adds SKILL_HINT after the envelope's paragraph: the
+    lane's turns carry the skills hint. True is the SDK lane's; a lane
+    without the hint passes False.
     """
     from cousin_lib.runner.tools import tool_definitions
     tool_name = tool_name or sdk_tool_name
@@ -243,6 +257,11 @@ def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHE
     named = {n: tool_name(n) for n in ("reply", "send", "memory")}
     static = doctrine({d["name"] for d in definitions},
                       runner=runner or "the SDK runner", **named)
+    if skill_hint:
+        paragraphs = static.split("\n\n")
+        at = next(i for i, p in enumerate(paragraphs) if p.startswith("## How messages reach you"))
+        paragraphs.insert(at + 2, SKILL_HINT)
+        static = "\n\n".join(paragraphs)
     if call_form:
         paragraphs = static.split("\n\n")
         at = next(i for i, p in enumerate(paragraphs) if p.startswith("## How you answer"))

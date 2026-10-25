@@ -42,7 +42,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import accounts, boot, handover, review_gate, session, skills, usage
+from cousin_lib import accounts, boot, handover, review_gate, session, skills, skills_hint, usage
 from cousin_lib.crashpoint import crashpoint
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
 from cousin_lib.runner import (auth, config_watch, cost_cap, envelope, extract, hooks,
@@ -589,6 +589,9 @@ class SdkRunner:
         # policy (config_watch), never fall back to the start's.
         self.config_watch = config_watch.ConfigWatch(self.home, self.root)
         self.memory_watch = memory_watch.MemoryWatch(self.home)
+        # the skills hint: one per runner, so a skill's vector outlives a
+        # reconnect; it reads each connect's export at every message
+        self.skill_hint = skills_hint.Hinter(self.home, self.root)
         from cousin_lib.runner.session_store import SqliteSessionStore
         self.session_store = SqliteSessionStore(self.home)
         # The rollover (rollover.py): the handoff tool hands its summary to
@@ -671,7 +674,8 @@ class SdkRunner:
                                        peer_gate=bool(self._agent_value("peer_gate", True)),
                                        watch=self.config_watch,
                                        policy_changed=self._policy_tightened,
-                                       memory_watch=self.memory_watch)
+                                       memory_watch=self.memory_watch,
+                                       skill_hint=self.skill_hint.hint)
         # The composed prompt (prompt.py): byte-stable across generations,
         # so a rollover and a restart keep the cache.
         # With snapshot=True a resumed session keeps the prompt it first

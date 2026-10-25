@@ -2020,6 +2020,15 @@ function rpModel(events) {
           text: "memory review · " + (p.kept || 0) + " kept, " + (p.dropped || 0) + " dropped" + (p.pending ? ", " + p.pending + " pending" : "") + (p.error ? " · " + p.error : "")
         });
         return;
+      case "skills_hint":
+        rows.push({
+          t: "line",
+          key,
+          ev,
+          cls: "rp-dim",
+          text: p.timed_out ? "skills hint · timed out" : "skills hint · " + (p.skills || []).join(", ")
+        });
+        return;
       case "tool": {
         const row = { t: p.name === "mcp__cousin__reply" ? "reply" : "tool", key, ev, result: null, ms: null };
         if (p.id) tools[p.id] = row;

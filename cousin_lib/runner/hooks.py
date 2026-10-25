@@ -49,6 +49,9 @@ PRE_MATCHER = "Agent|Task|Bash"
 # The recall budget: past it the prompt goes on
 # without recall and the search finishes on its thread, index warm.
 RECALL_BUDGET_S = 4.0
+# The skills hint's, the same way: a first message that has to take every
+# skill's vector goes on without a hint, and the vectors are kept.
+HINT_BUDGET_S = 4.0
 # The recorder writes <root>/data/jobs.db, which every cousin on the host
 # shares (sqlite waits up to 5 s per connect, and a call connects more than
 # once), and the CLI holds the tool until the hook answers: past this
@@ -262,7 +265,7 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
               checkpoints=None, body_for_prompt=None, lock=None, policy=None,
               request_rollover=None, live_threads=None, reply_gate=True,
               peer_gate=True, watch=None, policy_changed=None, thread_for_prompt=None,
-              memory_watch=None):
+              memory_watch=None, skill_hint=None):
     """The callbacks by hook event name, plain `async def cb(input,
     tool_use_id, context)` functions: no SDK types, so tests drive them
     directly. `build_hooks` wraps them in HookMatchers.
@@ -300,6 +303,11 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     checks it, and memory written from outside the session (the console,
     the review gate, dreaming) reaches the model as a runner note after
     the config note and before recall. Per runner, like `watch`.
+    skill_hint: `f(body) -> (line, hits)`, a blocking callable run on a
+    worker thread (skills_hint.Hinter.hint, one per runner, so the skills'
+    vectors are taken once): the line, naming the skills the cousin loads
+    that match the body, follows recall in the additionalContext, and
+    the `skills_hint` event carries the hits. None: no hint.
     thread_for_prompt: `f(prompt) -> thread id or None`; a submitted
     prompt resets the answered state of its own thread only, so a peer's
     message folded into an operator turn does not undo the operator's
@@ -481,6 +489,25 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
         stream.append("recall", event)
         return text or ""
 
+    async def hint_text(prompt):
+        """The skills hint for a prompt, or "": the same body recall
+        searches for, so a peer, loop or schedule row gets none."""
+        if skill_hint is None:
+            return ""
+        body = body_for_prompt(prompt) or ""
+        if not body.strip():
+            return ""
+        try:
+            text, hits = await asyncio.wait_for(asyncio.to_thread(skill_hint, body),
+                                                HINT_BUDGET_S)
+        except asyncio.TimeoutError:
+            stream.append("skills_hint", {"skills": [], "timed_out": True})
+            return ""
+        if hits:
+            stream.append("skills_hint", {"skills": [name for name, _ in hits],
+                                          "scores": [score for _, score in hits]})
+        return text or ""
+
     async def on_prompt(payload):
         # a new prompt (a turn's first row or one folded in) is answered
         # afresh: a reply sent before it does not cover its thread; the
@@ -500,7 +527,17 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
             written = ""
             stream.append("hook", {"event": "UserPromptSubmit",
                                    "error": "memory check: %s: %s" % (type(err).__name__, err)})
-        text = "\n\n".join(t for t in (changed, written, await recall_text(prompt)) if t)
+        async def hinted_or_nothing():
+            try:
+                return await hint_text(prompt)
+            except Exception as err:  # noqa: BLE001 - a broken hint must not cost the turn
+                stream.append("hook", {"event": "UserPromptSubmit",
+                                       "error": "skills hint: %s: %s" % (type(err).__name__, err)})
+                return ""
+        # side by side: a slow embedding service holds the prompt for one
+        # budget, not two
+        recalled, hinted = await asyncio.gather(recall_text(prompt), hinted_or_nothing())
+        text = "\n\n".join(t for t in (changed, written, recalled, hinted) if t)
         if not text:
             return {}
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",

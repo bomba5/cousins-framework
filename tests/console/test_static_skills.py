@@ -34,6 +34,14 @@ class SkillsJsx(unittest.TestCase):
         self.assertIn('{"check" in item && <SkillHealth item={item}', self.src)
         self.assertIn("upstream changed", self.src)
 
+    def test_a_stale_skill_is_reviewed_for_the_staleness_shown(self):
+        self.assertIn("skillPost(rebaselineUrl, { staleness_sha256: review.staleness_sha256 })",
+                      self.src)
+        self.assertIn("reviewed, still fine...", self.src)
+        # in System > skills and in the inspector, only for a stale skill
+        self.assertEqual(self.src.count("stale={!!(sk.check && sk.check.stale)}"), 2)
+        self.assertEqual(self.src.count("rebaselineUrl={`${"), 2)
+
     def test_the_operator_imports_from_the_inspector(self):
         self.assertIn("skillPost(`/api/cousins/${skillPath(slug)}/skills/import`, body)", self.src)
         self.assertIn('<SkillImportForm slug={c.slug} targets={data.import_targets} onDone={done} />',

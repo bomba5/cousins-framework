@@ -222,8 +222,98 @@ def problems(folder_name, front):
     return out
 
 
+_QUOTED_ITEM = re.compile(r'"((?:[^"]|"")*)"\s*(?:,|\Z)')
+
+
 def _items(value):
-    return [item.strip() for item in str(value).split(",") if item.strip()]
+    """The items of a comma-separated metadata list. An item that starts
+    with a double quote and ends with one before the next comma may hold
+    commas (a memory topic such as "rule: plans, then reports"), and a
+    quote inside it is doubled; anything else splits at every comma."""
+    out, rest = [], str(value)
+    while rest.strip():
+        rest = rest.lstrip()
+        m = _QUOTED_ITEM.match(rest)
+        if m:
+            item, rest = m.group(1).replace('""', '"').strip(), rest[m.end():]
+        else:
+            item, _, rest = rest.partition(",")
+            item = item.strip()
+        if item:
+            out.append(item)
+    return out
+
+
+def _joined(items):
+    """A list key's value from its items, which _items reads back: joined
+    by ", ", an item with a comma or a leading quote in double quotes."""
+    return ", ".join('"%s"' % i.replace('"', '""') if ("," in i or i.startswith('"')) else i
+                     for i in items)
+
+
+def _said(item):
+    """An item as a list names it, in double quotes: the form to paste."""
+    return '"%s"' % item.replace('"', '""')
+
+
+# what a draft puts before a memory topic that is not part of its name
+TOPIC_PREFIXES = ("memory topic:", "memory:", "topic:")
+NEAR_TOPICS = 2
+
+
+def _near_topics(name, topics):
+    """Up to NEAR_TOPICS of the cousin's own topics a misnamed one most
+    likely means: itself without a prefix such as `memory:`, a topic it is
+    the part of before a comma, else the closest by spelling."""
+    import difflib
+    low = name.lower()
+    for prefix in TOPIC_PREFIXES:
+        if low.startswith(prefix):
+            name = name[len(prefix):].strip()
+            if name in topics:
+                return [name]
+            break
+    cut = sorted(t for t in topics if t.startswith(name + ","))
+    if cut:
+        return cut[:NEAR_TOPICS]
+    return difflib.get_close_matches(name, sorted(topics), n=NEAR_TOPICS, cutoff=0.8)
+
+
+def topic_problems(home, front):
+    """The memory topics a draft's rests-on names that its staleness check
+    could never find, as sentences (docs/reference/skills.md, "What is
+    checked"): for the cousin's own skill, a topic that is not in its
+    memory, with the ones it likely means; for a shared skill, any topic,
+    since no one's memory is read for it. An item is a memory topic when it
+    has no other form (skills_check.classify), marked `live:` or not."""
+    from cousin_lib import skills_check
+    meta = front.get("metadata") or {}
+    named, out = [], []
+    for item in _items(meta.get("rests-on") or ""):
+        read_live, bare = skills_check.live("rests-on", item)
+        if read_live and not bare:
+            out.append("rests-on has %s with nothing after the mark" % skills_check.LIVE)
+        elif skills_check.classify("rests-on", item)[0] == "memory":
+            named.append(bare)
+    if not named:
+        return out
+    if meta.get("scope", "own") == SHARED:
+        return out + ["a shared skill has no owner whose memory a check reads, so its rests-on"
+                      " names no memory topic, not %s" % ", ".join(_said(t) for t in named)]
+    topics = skills_check._Memory().topics(home)
+    missing = [t for t in named if t not in topics]
+    if not missing:
+        return out
+    said = []
+    for name in missing:
+        near = _near_topics(name, topics)
+        said.append(_said(name) + (" (yours: %s)" % " or ".join(_said(t) for t in near)
+                                   if near else ""))
+    return out + ["rests-on names %s, which %s no memory topic of yours: name a topic exactly"
+                  " as it is in memory, in double quotes when it holds a comma; anything else"
+                  " takes its own form (`<tool> --version` or a tool's name on PATH, a path,"
+                  " reference_<name>, owner/name:path)"
+                  % ("; ".join(said), "is" if len(missing) == 1 else "are")]
 
 
 def declared_problems(front):
@@ -255,7 +345,7 @@ def declared_problems(front):
 def _normal(key, value):
     """A metadata value as written: a list key's items joined by ", "."""
     value = str(value)
-    return ", ".join(_items(value)) if key in LIST_KEYS else value.strip()
+    return _joined(_items(value)) if key in LIST_KEYS else value.strip()
 
 
 # ---------------------------------------------------------------- repositories
@@ -287,13 +377,14 @@ def _records_path(root, repo):
 
 
 def record(root, repo, *, user, action, commit, skill=None, folder=None, diff_sha=None,
-           trigger=None, source=None, dry_run=None):
+           trigger=None, source=None, dry_run=None, items=None):
     """Append one approval record: who did it in the console, to which
     repository, the commit it produced, the sha256 of the diff shown and,
     for an approval, whether its trigger test passed; for a skill from
-    outside, also its source and how its dry run ended. `private` keeps
-    its own file, since a record names the folder and a private cousin's
-    folder is its name."""
+    outside, also its source and how its dry run ended; for a review of a
+    stale skill (skills_check.rebaseline), the items it took as still
+    fine. `private` keeps its own file, since a record names the folder
+    and a private cousin's folder is its name."""
     path = _records_path(root, repo)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -309,6 +400,8 @@ def record(root, repo, *, user, action, commit, skill=None, folder=None, diff_sh
         entry["source"] = source
     if dry_run is not None:
         entry["dry_run"] = dry_run
+    if items is not None:
+        entry["items"] = list(items)
     fresh = not path.exists()
     jsonl.append_line(path, json.dumps(entry, sort_keys=True), fsync=True)
     if fresh:
@@ -609,6 +702,8 @@ def write_draft(home, name, *, description, body, context, side_effect,
     if not found:
         why = placement_problem(home, context, scope)
         found = [why] if why else []
+    if not found:
+        found = topic_problems(home, front)
     if found:
         raise SkillError("; ".join(found))
     folder.mkdir(parents=True, exist_ok=True)
@@ -1252,6 +1347,8 @@ def import_draft(home, slug, source, *, context, side_effect, name=None, scope="
     if not found:
         why = placement_problem(home, context, scope)
         found = [why] if why else []
+    if not found:
+        found = topic_problems(home, front)
     if found:
         raise SkillError("; ".join(found))
     dest = _draft_path(home, name)
@@ -1779,7 +1876,8 @@ def main(argv=None):
     p.add_argument("--reads", help="what it reads, pinned: repo@<full commit>:path or"
                                    " path#sha256:<hex>, comma-separated")
     p.add_argument("--rests-on", help="paths, tool versions, memory topics it depends on,"
-                                      " comma-separated")
+                                      " comma-separated; a topic with a comma in double"
+                                      " quotes; live: before one it reads afresh each run")
     p.add_argument("--source", help="a skill from outside: <url>@<full commit>[:<folder>]")
     p.add_argument("--license", help="an SPDX identifier; required with --source")
     p.add_argument("--body-file", help="the steps (default: stdin)")

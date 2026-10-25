@@ -175,6 +175,62 @@ class TestRecall(HooksCase):
         self.assertEqual(recalls, [{"hits": 0, "timed_out": True}])
 
 
+class TestSkillsHint(HooksCase):
+    """The skills hint (skills_hint.py) follows recall in the prompt's
+    additionalContext, for the same body, and never costs a turn."""
+
+    def cbs_with(self, hint, **kw):
+        return hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                               stream=self.stream, recall=lambda body: ("[fw-recall] x", 1),
+                               skill_hint=hint, **kw)
+
+    def prompt(self, cbs, text="check the regenerated board please"):
+        return _run(cbs["UserPromptSubmit"](self._base("UserPromptSubmit", prompt=text), None, {}))
+
+    def hints(self):
+        return [e["payload"] for e in self.stream.tail() if e["kind"] == "skills_hint"]
+
+    def test_the_line_follows_recall_and_the_event_names_the_skills(self):
+        seen = []
+        out = self.prompt(self.cbs_with(lambda body: (seen.append(body),
+                                                      ("[fw-skills] personal:board-check",
+                                                       [("personal:board-check", 0.71)]))[1]))
+        context = out["hookSpecificOutput"]["additionalContext"]
+        self.assertEqual(context, "[fw-recall] x\n\n[fw-skills] personal:board-check")
+        self.assertEqual(seen, ["check the regenerated board please"])
+        self.assertEqual(self.hints(), [{"skills": ["personal:board-check"], "scores": [0.71]}])
+
+    def test_no_match_adds_nothing(self):
+        out = self.prompt(self.cbs_with(lambda body: ("", [])))
+        self.assertEqual(out["hookSpecificOutput"]["additionalContext"], "[fw-recall] x")
+        self.assertEqual(self.hints(), [])
+
+    def test_a_row_with_no_body_gets_none(self):
+        seen = []
+        self.prompt(self.cbs_with(lambda body: (seen.append(body), ("x", [("a:b", 1.0)]))[1],
+                                  body_for_prompt=lambda prompt: ""))
+        self.assertEqual(seen, [])
+
+    def test_a_broken_hint_costs_the_hint_only(self):
+        def broken(body):
+            raise OSError("embedding service down")
+        out = self.prompt(self.cbs_with(broken))
+        self.assertEqual(out["hookSpecificOutput"]["additionalContext"], "[fw-recall] x")
+        errors = [e["payload"] for e in self.stream.tail() if e["kind"] == "hook"]
+        self.assertIn("skills hint: OSError: embedding service down", errors[-1]["error"])
+
+    def test_a_slow_hint_is_cut_off_at_its_budget(self):
+        cbs = self.cbs_with(lambda body: (time.sleep(1.0), ("late", [("a:b", 1.0)]))[1])
+        with mock.patch.object(hooks, "HINT_BUDGET_S", 0.1):
+            out = self.prompt(cbs)
+        self.assertEqual(out["hookSpecificOutput"]["additionalContext"], "[fw-recall] x")
+        self.assertEqual(self.hints(), [{"skills": [], "timed_out": True}])
+
+    def test_without_a_hinter_there_is_no_hint(self):
+        out = self.prompt(self.cbs)
+        self.assertNotIn("[fw-skills]", str(out))
+
+
 class TestRecorderChecksThePolicy(HooksCase):
     """Matched PreToolUse callbacks run concurrently in the CLI: the
     recorder cannot rely on the policy callback having run first."""

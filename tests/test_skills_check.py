@@ -266,6 +266,215 @@ class TestRepositories(CheckCase):
         self.assertIn("skills check", skills_check.user_agent())
 
 
+class TestReadLive(CheckCase):
+    """A rests-on item marked live: is read afresh each run, so only its
+    presence is checked: a change never makes the skill stale."""
+
+    def setUp(self):
+        super().setUp()
+        (self.wren / "notes").mkdir()
+        self.note = self.wren / "notes" / "hosts.md"
+        self.note.write_text("host one\n")
+        memory._append_raw(self.wren, {"topic": "board host facts", "content": "one",
+                                       "truth_level": "L2_TOOL"})
+        self.install("wren", "board-check", {
+            "rests-on": "live:board host facts, live: notes/hosts.md, live:never written"})
+
+    def check(self):
+        return skills_check.check_skill(self.root, "personal", "wren", "board-check")
+
+    def test_the_mark_is_read_only_on_rests_on(self):
+        self.assertEqual(skills_check.live("rests-on", "live: notes/hosts.md"),
+                         (True, "notes/hosts.md"))
+        self.assertEqual(skills_check.live("reads", "live:x.py#sha256:%s" % ("a" * 64))[0], False)
+        self.assertEqual(skills_check.live("rests-on", "board host facts"),
+                         (False, "board host facts"))
+        self.assertEqual(skills_check.classify("rests-on", "live:board host facts"),
+                         ("memory", ("board host facts",)))
+        self.assertEqual(skills_check.classify("rests-on", "live:notes/hosts.md")[0], "file")
+
+    def test_a_change_never_makes_it_stale(self):
+        self.check()
+        memory._append_raw(self.wren, {"topic": "board host facts", "content": "two",
+                                       "truth_level": "L2_TOOL"})
+        self.note.write_text("host two\n")
+        result = self.check()
+        self.assertFalse(result["stale"])
+        states = self.states(result)
+        self.assertEqual((states["live:board host facts"], states["live: notes/hosts.md"]),
+                         ("same", "same"))
+        self.assertTrue(all(r["live"] for r in result["items"]))
+        self.assertIn("only its presence", result["items"][0]["detail"])
+
+    def test_going_missing_does_and_never_found_is_unknown(self):
+        self.check()
+        self.note.unlink()
+        result = self.check()
+        self.assertTrue(result["stale"])
+        states = self.states(result)
+        self.assertEqual(states["live: notes/hosts.md"], "missing")
+        self.assertEqual(states["live:never written"], "unknown")
+
+    def test_the_same_item_unmarked_is_still_compared(self):
+        self.install("wren", "strict", {"rests-on": "board host facts"})
+        check = lambda: skills_check.check_skill(self.root, "personal", "wren", "strict")  # noqa: E731
+        check()
+        memory._append_raw(self.wren, {"topic": "board host facts", "content": "two",
+                                       "truth_level": "L2_TOOL"})
+        self.assertTrue(check()["stale"])
+
+
+class TestReview(CheckCase):
+    """The operator's "reviewed, still fine" for a stale skill (rebaseline):
+    what the last check found changed becomes the baseline, recorded like
+    an approval, for the staleness the console showed."""
+
+    def setUp(self):
+        super().setUp()
+        (self.wren / "notes").mkdir()
+        self.note = self.wren / "notes" / "plan.md"
+        self.note.write_text("plan one\n")
+        self.gone = self.wren / "notes" / "old.md"
+        self.gone.write_text("old\n")
+        self.install("wren", "board-check", {"rests-on": "notes/plan.md, notes/old.md"})
+        self.check()
+        self.note.write_text("plan two\n")
+        self.gone.unlink()
+        self.assertTrue(self.check()["stale"])
+
+    def check(self):
+        return skills_check.check_skill(self.root, "personal", "wren", "board-check")
+
+    def review(self, user="ana"):
+        _view, sha = skills_check.staleness(self.root, "personal", "wren", "board-check")
+        return skills_check.rebaseline(self.root, "personal", "wren", "board-check",
+                                       user=user, sha=sha)
+
+    def test_the_view_lists_what_changed_and_what_went_missing(self):
+        view, sha = skills_check.staleness(self.root, "personal", "wren", "board-check")
+        self.assertEqual({r["item"]: r["state"] for r in view["items"]},
+                         {"notes/plan.md": "changed", "notes/old.md": "missing"})
+        self.assertEqual(len(sha), 64)
+
+    def test_still_fine_clears_it_at_once_and_after_the_next_check(self):
+        entry = self.review()
+        self.assertEqual((entry["action"], entry["user"], entry["skill"], entry["folder"]),
+                         ("rebaseline", "ana", "board-check", "wren"))
+        self.assertEqual(sorted(entry["items"]), ["notes/old.md", "notes/plan.md"])
+        shown = skills_check.last_check(self.root, "personal", "wren", "board-check")
+        self.assertFalse(shown["stale"])
+        self.assertIn("reviewed by ana", shown["items"][0]["detail"])
+        result = self.check()
+        self.assertFalse(result["stale"])
+        self.assertEqual(self.states(result), {"notes/plan.md": "same", "notes/old.md": "unknown"})
+
+    def test_a_later_change_makes_it_stale_again(self):
+        self.review()
+        self.note.write_text("plan three\n")
+        self.assertEqual(self.states(self.check())["notes/plan.md"], "changed")
+
+    def test_an_item_reviewed_while_gone_takes_its_value_when_it_comes_back(self):
+        self.review()
+        self.gone.write_text("back\n")
+        result = self.check()
+        self.assertEqual(self.states(result)["notes/old.md"], "same")
+        self.gone.write_text("back, edited\n")
+        self.assertEqual(self.states(self.check())["notes/old.md"], "changed")
+
+    def test_only_for_the_staleness_shown(self):
+        _view, sha = skills_check.staleness(self.root, "personal", "wren", "board-check")
+        self.note.write_text("plan three\n")
+        self.check()
+        with self.assertRaisesRegex(SkillError, "changed since it was shown"):
+            skills_check.rebaseline(self.root, "personal", "wren", "board-check",
+                                    user="ana", sha=sha)
+        self.assertTrue(self.check()["stale"])
+
+    def test_a_review_is_refused_while_a_check_of_the_skill_runs(self):
+        """Review S1: a check that read the baseline before the review would
+        write what it read after it, and the review would be lost."""
+        _view, sha = skills_check.staleness(self.root, "personal", "wren", "board-check")
+        before = len(skills.records(self.root, "personal"))
+        with skills_check._skill_lock(self.root, "personal", "wren", "board-check"):
+            with self.assertRaisesRegex(SkillError, "a check of personal:wren/board-check is"
+                                                    " running"):
+                skills_check.rebaseline(self.root, "personal", "wren", "board-check",
+                                        user="ana", sha=sha)
+        self.assertEqual(len(skills.records(self.root, "personal")), before)
+        self.assertTrue(skills_check.last_check(self.root, "personal", "wren",
+                                                "board-check")["stale"])
+        self.review()                                   # once the check is done
+        self.assertFalse(self.check()["stale"])
+
+    def test_a_repository_that_moved_meanwhile_is_refused_and_nothing_is_written(self):
+        """Review N1: the record names the approved commit, and one naming an
+        older commit than the last record would leave the repository
+        untrusted."""
+        real, calls = skills.state, []
+
+        def moved(root, repo):
+            calls.append(repo)
+            st = real(root, repo)
+            return dict(st, approved="f" * 40) if len(calls) > 1 else st
+        _view, sha = skills_check.staleness(self.root, "personal", "wren", "board-check")
+        base = skills_check.baseline_path(self.root, "personal", "wren", "board-check")
+        kept = base.read_text()
+        with mock.patch.object(skills, "state", side_effect=moved):
+            with self.assertRaisesRegex(SkillError, "moved since the review began"):
+                skills_check.rebaseline(self.root, "personal", "wren", "board-check",
+                                        user="ana", sha=sha)
+        self.assertEqual(base.read_text(), kept)
+        self.assertEqual(skills.records(self.root, "personal")[-1]["action"], "approve")
+
+    def test_a_skill_that_is_not_stale_has_nothing_to_review(self):
+        self.review()
+        with self.assertRaisesRegex(SkillError, "is not stale"):
+            self.review()
+
+    def test_the_record_keeps_the_repository_trusted_and_the_approval_date(self):
+        approved = skills_check.approved_at(self.root, "personal", "wren", "board-check")
+        self.review()
+        st = skills.state(self.root, "personal")
+        self.assertTrue(st["trusted"])
+        self.assertEqual(skills_check.approved_at(self.root, "personal", "wren", "board-check"),
+                         approved)
+        self.assertEqual(skills.records(self.root, "personal")[-1]["action"], "rebaseline")
+
+    def test_an_edit_of_the_skill_drops_the_review(self):
+        self.review()
+        self.install("wren", "board-check", {"rests-on": "notes/plan.md"})
+        result = self.check()
+        self.assertEqual(result["baseline"]["from"], "skill changed")
+        base = json.loads(skills_check.baseline_path(self.root, "personal", "wren", "board-check")
+                          .read_text())
+        self.assertNotIn("reviewed", base["items"]["notes/plan.md"])
+
+    def test_a_reviewed_pin_is_compared_with_the_reviewed_value(self):
+        lib, first, _second = make_lib(self.tmp)
+        pin = "%s@%s:tools/hash.py" % (lib, first)
+        self.install("wren", "pinned", {"reads": pin})
+        check = lambda: skills_check.check_skill(self.root, "personal", "wren", "pinned")  # noqa: E731
+        self.assertEqual(self.states(check())[pin], "changed")
+        _view, sha = skills_check.staleness(self.root, "personal", "wren", "pinned")
+        skills_check.rebaseline(self.root, "personal", "wren", "pinned", user="ana", sha=sha)
+        self.assertEqual(self.states(check())[pin], "same")
+        (lib / "tools" / "hash.py").write_text("v3\n")
+        _git(lib, "commit", "-q", "-am", "three")
+        self.assertEqual(self.states(check())[pin], "changed")
+
+    def test_a_private_review_is_recorded_in_the_private_file(self):
+        self.install("otto", "ghost", {"rests-on": "notes/n.md"}, repo="private")
+        (self.otto / "notes").mkdir()
+        (self.otto / "notes" / "n.md").write_text("1\n")
+        skills_check.check_skill(self.root, "private", "otto", "ghost")
+        (self.otto / "notes" / "n.md").write_text("2\n")
+        skills_check.check_skill(self.root, "private", "otto", "ghost")
+        _view, sha = skills_check.staleness(self.root, "private", "otto", "ghost")
+        skills_check.rebaseline(self.root, "private", "otto", "ghost", user="ana", sha=sha)
+        self.assertEqual(skills.records(self.root, "private")[-1]["action"], "rebaseline")
+        self.assertNotIn("otto", (self.root / "data" / "skills" / "approvals.jsonl").read_text())
+
+
 class TestUse(CheckCase):
     def test_the_hook_records_a_skill_use_in_the_cousins_home(self):
         payload = {"hook_event_name": "PostToolUse", "tool_name": "Skill",

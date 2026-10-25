@@ -362,6 +362,59 @@ class TestStalenessRoutes(SkillsRoutesCase):
         self.assertTrue(log.with_name("checks.log.1").is_file())
         self.assertLess(log.stat().st_size, 10)
 
+    def stale(self, scope="own"):
+        """An approved skill resting on a note that changed after its first
+        check: under the cousin's home, or the install root for shared/."""
+        from cousin_lib import skills_check
+        base = self.wren if scope == "own" else self.root
+        (base / "notes").mkdir(exist_ok=True)
+        (base / "notes" / "plan.md").write_text("one\n")
+        skills.write_draft(self.wren, "board-check", description="Check a board. Use after a regen.",
+                           body=BODY, context="personal", side_effect="read-only", scope=scope,
+                           metadata=dict(PROMPTS, **{"rests-on": "notes/plan.md"}))
+        status, d = self.approve("wren")
+        self.assertEqual(status, 200, d)
+        folder = "wren" if scope == "own" else "shared"
+        skills_check.check_skill(self.root, "personal", folder, "board-check")
+        (base / "notes" / "plan.md").write_text("two\n")
+        self.assertTrue(skills_check.check_skill(self.root, "personal", folder, "board-check")["stale"])
+
+    def test_a_stale_skill_is_reviewed_as_still_fine_for_the_staleness_shown(self):
+        self.stale()
+        base = "/api/cousins/wren/skills/approved/personal/board-check"
+        status, view = self.get(base + "/staleness")
+        self.assertEqual(status, 200, view)
+        self.assertEqual([(r["item"], r["state"]) for r in view["items"]],
+                         [("notes/plan.md", "changed")])
+        status, d = self.post(base + "/rebaseline", {"staleness_sha256": "0" * 64})
+        self.assertEqual(status, 409, d)
+        self.assertIn("changed since it was shown", d["error"])
+        status, d = self.post(base + "/rebaseline", {"staleness_sha256": view["staleness_sha256"]})
+        self.assertEqual(status, 200, d)
+        self.assertEqual((d["record"]["action"], d["record"]["items"]),
+                         ("rebaseline", ["notes/plan.md"]))
+        status, d = self.get("/api/skills")
+        [sk] = [s for r in d["repos"] for f in r["folders"] for s in f["skills"]]
+        self.assertFalse(sk["check"]["stale"])
+        status, d = self.post(base + "/rebaseline", {"staleness_sha256": view["staleness_sha256"]})
+        self.assertEqual(status, 409, d)
+
+    def test_a_shared_skill_is_reviewed_from_system(self):
+        self.stale(scope="shared")
+        status, view = self.get("/api/skills/shared/board-check/staleness")
+        self.assertEqual(status, 200, view)
+        status, d = self.post("/api/skills/shared/board-check/rebaseline",
+                              {"staleness_sha256": view["staleness_sha256"]})
+        self.assertEqual(status, 200, d)
+        self.assertEqual(d["record"]["folder"], "shared")
+
+    def test_a_skill_never_checked_has_no_staleness_to_review(self):
+        self.draft(self.wren)
+        self.approve("wren")
+        status, d = self.get("/api/cousins/wren/skills/approved/personal/board-check/staleness")
+        self.assertEqual(status, 409, d)
+        self.assertIn("has not been checked yet", d["error"])
+
     def test_system_never_names_a_private_cousin_in_the_run(self):
         from cousin_lib import skills_check
         self.draft(self.kit, context="private")

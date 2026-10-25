@@ -77,7 +77,9 @@ folder name, 1-64 lowercase letters, digits and `-`, not starting or ending
 with `-` and with no `--`; `description` is one line of 1-1024 characters. `license` is an SPDX
 identifier; it is REQUIRED for a skill from outside. The framework's own keys
 sit under `metadata`, as the format asks. The format makes `metadata` a map
-from string keys to string *values*, so a list is one comma-separated string.
+from string keys to string *values*, so a list is one comma-separated string;
+an item that holds a comma (a memory topic such as `"rule: plans, then
+reports"`) goes in double quotes, and a quote inside it is doubled.
 The draft tool writes every value but the name double-quoted, as a JSON
 string, which a YAML reader takes as the same text; a double-quoted value
 with an escape JSON lacks (`\x41`) is refused, since it would read
@@ -89,7 +91,7 @@ differently here and in the agent:
 | `side-effect` | `read-only`, `writes-local`, `outward` | what it can change. An `outward` step (a push, an upload, a message, an order) MUST stop at the operator's go and never carries the go as a step |
 | `reads` | `repo@commit:path` (the full commit) or `path#sha256:<hex>`, comma-separated | what it reads; a change there flags the skill as stale |
 | `hosts` | host names, comma-separated | every host it may contact |
-| `rests-on` | paths, tool versions, memory topics, comma-separated | what it depends on, checked for drift |
+| `rests-on` | paths, tool versions, memory topics, comma-separated; `live:` before one the skill reads afresh each time it runs | what it depends on, checked for drift; a `live:` item only for being there |
 | `should-trigger` | a prompt | one that SHOULD make the cousin use the skill (the trigger test); a draft without it is not approved |
 | `must-not-trigger` | a prompt | one that MUST NOT; a draft without it is not approved |
 | `scope` | `own`, `shared` | the cousin's folder (the default) or `shared/`; `shared` only for a general skill in `personal` |
@@ -101,7 +103,16 @@ contacts no host). The draft tool and
 approval refuse a host that is not a host name, a `reads` pin in neither
 form or not pinned to a full commit, a `source` that is not a URL pinned to a
 full commit, a `license` that is not an
-SPDX expression, and a `source` without a `license`. Loading does not check
+SPDX expression, and a `source` without a `license`. When a draft is
+written (the `draft` tool and command) or imported, a `rests-on` memory
+topic must be one the check can find: for the cousin's own skill, a topic
+its memory has, named exactly (no `memory:` before it), and for a shared
+skill none at all, since no one's memory is read for it. The refusal names
+each topic it lacks with the ones the cousin likely meant (itself without a
+prefix, the topic it is the part before a comma of, a close spelling). An
+item is a memory topic when it has no other form ([What is
+checked](#staleness-and-use)), so a tool written another way (`ssh -V`) is
+refused too. Loading does not check
 them, so a format rule never unloads an approved skill. Reading the
 frontmatter is the one rule loading shares: a value it cannot read (a
 double-quoted one with an escape JSON lacks) keeps that skill from loading,
@@ -252,6 +263,39 @@ stays byte-stable.
 | `tmux` | The same exports, passed as `--plugin-dir`. This lane reads project settings (`--setting-sources project,local`), which load `<home>/.claude/skills/` unapproved (probed 2026-10-21 with the host's Claude Code 2.1.282), so the launcher MUST refuse to start while that directory exists, naming it. That refusal is the only guard on this lane, which has no tool gate. |
 | `opencode` | Not supported. opencode has a skill tool of its own; the framework passes it nothing. |
 
+## The per-turn hint
+
+A loaded skill is used only when the agent thinks of it, and a cousin can
+do a task its own skill covers from memory instead. So each chat message
+on the `sdk` lane carries, after recall, one line naming the skills the
+cousin loads that match it, and the contract tells the cousin to use the
+one that fits instead of working from memory
+(`cousin_lib/skills_hint.py`):
+
+```text
+[fw-skills] skills you load that match this message: personal:board-check. Use the one that fits instead of working from memory; ignore them if none does.
+```
+
+- **Matching.** The message's embedding against each skill's name and
+  description (which says when to use it), through the same embedding
+  service as recall (`config/embedding.toml`): no model call. Up to three
+  skills at cosine 0.62 or more, best first; set on the approved skills'
+  trigger prompts and on real operator messages, where about one message
+  in twelve got a line. A message under 24 characters gets none.
+- **Which skills.** The ones exported for this connect
+  (`<home>/run/skills/`), read at every message, since a
+  [rollover](../glossary.md#rollover) or a reconnect exports afresh: the line never names a skill the agent cannot
+  load, and one cousin's skills never reach another's turns. A skill's
+  vector is taken the first time its name and description are seen, and
+  kept for the runner's life.
+- **When.** For the rows that get recall (an operator's or a person's chat
+  message), side by side with recall, at most 4 seconds, and never at the
+  cost of the turn: a slow or failing embedding service only drops the
+  line. The reasoning pane
+  shows each line's skills (event `skills_hint`).
+- **Lanes.** `sdk` only. `opencode` loads no skills, and the `tmux` kind has
+  no per-turn context hook; their contracts leave the line out.
+
 ## The trigger test
 
 Before approval, each new or changed skill gets one prompt that SHOULD make
@@ -364,7 +408,7 @@ Agreed with the operator (2026-10-22).
 | approve, reject, remove | the operator | the console only |
 | own a skill | the cousin that uses it most; others ask it to run the skill, or report a problem to it | [life after approval](#life-after-approval) |
 | flag a stale or unused skill | the framework | [staleness and use](#staleness-and-use) |
-| decide what a flag means | the operator: an edit drafted by the owner after a yes, a new import, or a removal | the console |
+| decide what a flag means | the operator: an edit drafted by the owner after a yes, a new import, a removal, or a review of a stale skill as still fine | the console |
 
 ## Proposals
 
@@ -387,7 +431,9 @@ multi-step work, it considers a skill. Proposals go **only to the operator**.
 
 - The cousin that uses a skill most owns it. Others ask the owner to run it,
   or report a problem to the owner; they never fork it.
-- A change to anything in `reads` or `rests-on` flags the skill as stale.
+- A change to anything in `reads` or `rests-on` flags the skill as stale,
+  but for a `rests-on` item marked `live:`, which the skill reads afresh
+  each time it runs: only its going missing does.
 - A scheduled check is read-only and rate-limited, and names itself to any
   host it calls. It never runs an outward step or a long job.
 - The console shows each skill's last use and its last check result. A skill
@@ -405,7 +451,8 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
   every item it declares, kept in `data/skills/baselines/`
   (`data/skills/private/baselines/` for the private repository). It is the
   skill's own: a new one is taken only when the skill's folder changes, and
-  an approval of another skill in the repository leaves it as it is. A
+  an approval of another skill in the repository leaves it as it is (the
+  operator's review of a stale skill moves it too, below). A
   skill approved before 3.61.0 gets its baseline at its first check, and an
   item with no value yet (one that needs the network, or was unreadable at
   approval) takes the value its first check reads.
@@ -421,6 +468,7 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
 | `rests-on` a path | the file's sha256 |
 | `rests-on` a word on PATH | the binary's sha256; a word the baseline read as a tool stays one, whatever a later check's PATH finds |
 | `rests-on` anything else | a memory topic: the id of the newest entry on it in the owning cousin's memory (a shared skill has no owner: unknown) |
+| `rests-on` `live:<item>` | any `rests-on` form above, which the skill reads afresh each time it runs (a host-facts topic, a living note): only whether it is there. A change never makes the skill stale; its going missing does, since the skill would find nothing to read |
 | `source` | the source folder's tree at upstream's default branch with its tree at the pinned commit |
 
 - **States.** Each item is `same`, `changed`, `missing` or `unknown` (not
@@ -428,6 +476,21 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
   when an item changed or went missing; an unknown item never makes it
   stale. An upstream change sets **update**: news for the operator, whose
   new import at the newer commit is the update, not staleness.
+- **Reviewed, still fine.** The operator can review a stale skill in the
+  console (System > skills, or the inspector, the skill opened): the page
+  shows what its last check found changed or missing, then and now, and
+  **still fine** makes that its baseline. An item that changed takes the
+  value the check read; one that went missing has none, so it is unknown
+  and never stale until it is found again, when it takes the value found.
+  A pin keeps its text and is compared with the reviewed value from then
+  on. The review is recorded like an approval, in the same file (`action`
+  `rebaseline`, the items reviewed and the sha256 of what was shown), and
+  refused when the check changed since it was shown, while a check of the
+  skill runs (it would write what it read before the review), and when
+  the repository's approval moved meanwhile. An edit of the skill
+  takes a new baseline, and the review goes with it. An item that changes
+  by design, which the skill reads afresh each run, is better marked
+  `live:` in an edit, so it never needs a review.
 - **Read-only and rate-limited.** A check reads files and memory, runs
   `<tool> --version`, and fetches over https only, depth 1, with the
   import's hardening (no credential, hook or global git setting) and the
@@ -446,7 +509,8 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
 - **Where it shows.**
   - System > skills: each approved skill's last check (ok, or stale with
     what changed, or upstream changed), its last use and the unused flag;
-    the last run's counts; and **check now**.
+    the last run's counts; **check now**; and, on a stale skill opened,
+    **reviewed, still fine**.
   - The inspector shows the same for what a cousin loads, its use counted
     from that cousin.
   - `cousin-skill list` and the `skill` tool's `list` mark a stale, updated

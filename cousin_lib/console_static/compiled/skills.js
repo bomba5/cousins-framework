@@ -186,13 +186,19 @@ function SkillDraftReview({ slug, name, onDone }) {
     }
   )), err && /* @__PURE__ */ React.createElement(SysNote, { msg: { ok: false, text: err } }));
 }
-function SkillApproved({ showUrl, removalUrl, removeUrl, onDone }) {
+function SkillStaleness({ view }) {
+  const short = (v) => v == null ? "none" : String(v).slice(0, 16);
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 2, ...SKILL_MONO } }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, "checked ", skillWhen(view.at), ": ", view.items.length, " item", view.items.length === 1 ? "" : "s", " to review"), view.items.map((r) => /* @__PURE__ */ React.createElement("span", { key: `${r.of}/${r.item}` }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, r.of), " ", r.item, ": ", /* @__PURE__ */ React.createElement("span", { style: { color: "var(--red)" } }, r.state), /* @__PURE__ */ React.createElement("span", { className: "muted" }, " (", short(r.then), " to ", short(r.now), "; ", r.detail, ")"))));
+}
+function SkillApproved({ showUrl, removalUrl, removeUrl, stalenessUrl, rebaselineUrl, stale, onDone }) {
   const [s, setS] = React.useState(null);
   const [removal, setRemoval] = React.useState(null);
+  const [review, setReview] = React.useState(null);
   const [err, setErr] = React.useState(null);
   React.useEffect(() => {
     setS(null);
     setRemoval(null);
+    setReview(null);
     setErr(null);
     apiGet(showUrl).then((x) => x ? setS(x) : setErr("this skill cannot be read"));
   }, [showUrl]);
@@ -213,7 +219,30 @@ function SkillApproved({ showUrl, removalUrl, removeUrl, onDone }) {
     padding: 10,
     borderRadius: 6,
     margin: 0
-  } }, s.text), !removal && /* @__PURE__ */ React.createElement(
+  } }, s.text), stale && stalenessUrl && !review && /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn ghost",
+      style: { alignSelf: "flex-start" },
+      onClick: () => apiGet(stalenessUrl).then((x) => x ? setReview(x) : setErr("its last check cannot be read"))
+    },
+    "reviewed, still fine..."
+  ), review && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SkillStaleness, { view: review }), /* @__PURE__ */ React.createElement(
+    SysConfirmButton,
+    {
+      label: "still fine: take these as its baseline",
+      confirmLabel: "click again: record the review",
+      small: false,
+      onConfirm: async () => {
+        try {
+          const res = await skillPost(rebaselineUrl, { staleness_sha256: review.staleness_sha256 });
+          onDone({ ok: true, text: `reviewed as still fine: ${(res.record.items || []).join(", ")}` });
+        } catch (e) {
+          setErr(String(e.message || e));
+        }
+      }
+    }
+  )), !removal && /* @__PURE__ */ React.createElement(
     "button",
     {
       className: "btn ghost",
@@ -329,6 +358,9 @@ function SkillsSystemView() {
             showUrl: urls.base,
             removalUrl: `${urls.base}/removal`,
             removeUrl: `${urls.base}/remove`,
+            stalenessUrl: `${urls.base}/staleness`,
+            rebaselineUrl: `${urls.base}/rebaseline`,
+            stale: !!(sk.check && sk.check.stale),
             onDone: done
           }
         )
@@ -391,7 +423,7 @@ function SkillImportForm({ slug, targets, onDone }) {
     }
     setBusy(false);
   };
-  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6, paddingLeft: 12, borderLeft: "2px solid var(--hair)" } }, field("source", "source", "https://github.com/<owner>/<repo>@<full commit>:<folder>"), /* @__PURE__ */ React.createElement("label", { style: { display: "flex", gap: 8, alignItems: "baseline", ...SKILL_MONO } }, /* @__PURE__ */ React.createElement("span", { className: "muted", style: { minWidth: 150 } }, "scope, repository"), /* @__PURE__ */ React.createElement("select", { className: "sel", value: f.scope, onChange: (e) => setF({ ...f, ...aim(e.target.value) }) }, scopes.map((s) => /* @__PURE__ */ React.createElement("option", { key: s, value: s }, s))), /* @__PURE__ */ React.createElement("select", { className: "sel", value: f.context, onChange: set("context") }, (where[f.scope] || []).map((r) => /* @__PURE__ */ React.createElement("option", { key: r, value: r }, r)))), /* @__PURE__ */ React.createElement("label", { style: { display: "flex", gap: 8, alignItems: "baseline", ...SKILL_MONO } }, /* @__PURE__ */ React.createElement("span", { className: "muted", style: { minWidth: 150 } }, "side effect"), /* @__PURE__ */ React.createElement("select", { className: "sel", value: f.side_effect, onChange: set("side_effect") }, ["read-only", "writes-local"].map((s) => /* @__PURE__ */ React.createElement("option", { key: s, value: s }, s)))), field("name", "draft name", "default: the skill's own"), field("should_trigger", "should trigger", "a prompt that should make it fire"), field("must_not_trigger", "must not trigger", "a prompt that must not"), field("dry_run_task", "dry-run task", "the sample task its dry run does"), field("hosts", "hosts", 'every host it may contact, comma-separated; "" for none'), field("reads", "reads", "repo@<full commit>:path or path#sha256:<hex>, comma-separated"), field("rests_on", "rests on", "paths, tool versions and memory topics, comma-separated"), field("license", "licence", "SPDX id; default: what its licence file reads as"), /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "fetched at that commit, byte for byte; an open licence only; never outward, never into work; shared: every cousin that loads personal gets it; hosts, reads, rests on: blank declares nothing"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", disabled: busy || !f.source || !f.context, onClick: submit }, busy ? "fetching..." : "import"), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setOpen(false) }, "cancel")), err && /* @__PURE__ */ React.createElement(SysNote, { msg: { ok: false, text: err } }));
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6, paddingLeft: 12, borderLeft: "2px solid var(--hair)" } }, field("source", "source", "https://github.com/<owner>/<repo>@<full commit>:<folder>"), /* @__PURE__ */ React.createElement("label", { style: { display: "flex", gap: 8, alignItems: "baseline", ...SKILL_MONO } }, /* @__PURE__ */ React.createElement("span", { className: "muted", style: { minWidth: 150 } }, "scope, repository"), /* @__PURE__ */ React.createElement("select", { className: "sel", value: f.scope, onChange: (e) => setF({ ...f, ...aim(e.target.value) }) }, scopes.map((s) => /* @__PURE__ */ React.createElement("option", { key: s, value: s }, s))), /* @__PURE__ */ React.createElement("select", { className: "sel", value: f.context, onChange: set("context") }, (where[f.scope] || []).map((r) => /* @__PURE__ */ React.createElement("option", { key: r, value: r }, r)))), /* @__PURE__ */ React.createElement("label", { style: { display: "flex", gap: 8, alignItems: "baseline", ...SKILL_MONO } }, /* @__PURE__ */ React.createElement("span", { className: "muted", style: { minWidth: 150 } }, "side effect"), /* @__PURE__ */ React.createElement("select", { className: "sel", value: f.side_effect, onChange: set("side_effect") }, ["read-only", "writes-local"].map((s) => /* @__PURE__ */ React.createElement("option", { key: s, value: s }, s)))), field("name", "draft name", "default: the skill's own"), field("should_trigger", "should trigger", "a prompt that should make it fire"), field("must_not_trigger", "must not trigger", "a prompt that must not"), field("dry_run_task", "dry-run task", "the sample task its dry run does"), field("hosts", "hosts", 'every host it may contact, comma-separated; "" for none'), field("reads", "reads", "repo@<full commit>:path or path#sha256:<hex>, comma-separated"), field("rests_on", "rests on", 'paths, tool versions and memory topics, comma-separated; "a, b" for one with a comma; live: before one read afresh'), field("license", "licence", "SPDX id; default: what its licence file reads as"), /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "fetched at that commit, byte for byte; an open licence only; never outward, never into work; shared: every cousin that loads personal gets it; hosts, reads, rests on: blank declares nothing"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { className: "btn", disabled: busy || !f.source || !f.context, onClick: submit }, busy ? "fetching..." : "import"), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setOpen(false) }, "cancel")), err && /* @__PURE__ */ React.createElement(SysNote, { msg: { ok: false, text: err } }));
 }
 function CousinSkillsPanel({ cousin }) {
   const c = cousin;
@@ -426,7 +458,18 @@ function CousinSkillsPanel({ cousin }) {
         onToggle: () => toggle(key),
         unusedDays: data.unused_days
       },
-      /* @__PURE__ */ React.createElement(SkillApproved, { showUrl: url, removalUrl: `${url}/removal`, removeUrl: `${url}/remove`, onDone: done })
+      /* @__PURE__ */ React.createElement(
+        SkillApproved,
+        {
+          showUrl: url,
+          removalUrl: `${url}/removal`,
+          removeUrl: `${url}/remove`,
+          stalenessUrl: `${url}/staleness`,
+          rebaselineUrl: `${url}/rebaseline`,
+          stale: !!(sk.check && sk.check.stale),
+          onDone: done
+        }
+      )
     );
   }), (data.loaded || []).length === 0 && /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "no approved skills"), data.lane !== "opencode" && /* @__PURE__ */ React.createElement(SkillImportForm, { slug: c.slug, targets: data.import_targets, onDone: done }), (data.drafts || []).map((d) => {
     const key = `draft/${d.name}`;

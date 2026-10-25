@@ -27,19 +27,23 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # "Generations", plus 3.36.0's derived_from line in "Memory", plus
 # 3.58.0's `skill` tool in the shipped registry, plus 3.60.0's `import`
 # and `dry-run` in that tool's description and command list, plus 3.61.0's
-# `check` there, minus 4.0.0's `import` (the operator's act now): the bytes the
+# `check` there, minus 4.0.0's `import` (the operator's act now), plus
+# 4.2.0's skills-hint paragraph in "How messages reach you" (the SDK lane's
+# only, so opencode's bytes did not move with it): the bytes the
 # SDK lane's renderer produces. A registry or static-text edit changes it on
 # purpose: update the hash in the same commit, knowing every SDK and
 # opencode cousin's prompt cache resets (the edit moves both lanes' bytes).
-SDK_CONTRACT_SHA256 = "082aa58d035fd98e8ff1d6878113e053b35e2cb46ff0d2a0d3e85a6ed04a8b4a"
+SDK_CONTRACT_SHA256 = "e12f04f96594e6eb7c0605e50af762a737517eebf212ff057a2af18c73483e01"
 
 
 def as_opencode(sdk_text):
     """The SDK lane's contract or prompt with only the lane's names changed:
     the tool lines, the three names in "Tools, not the terminal CLIs", and
     which runner that section says the cousin is on. The OTHER_SERVERS
-    paragraph is the SDK lane's only (opencode loads exactly one server)."""
+    paragraph is the SDK lane's only (opencode loads exactly one server),
+    and so is SKILL_HINT (opencode loads no skills)."""
     sdk_text = sdk_text.replace("\n\n" + contract.OTHER_SERVERS.strip(), "")
+    sdk_text = sdk_text.replace("\n\n" + contract.SKILL_HINT, "")
     return (sdk_text.replace("- `mcp__cousin__", "- `cousin_")
             .replace("(`mcp__cousin__", "(`cousin_")
             .replace("You run on the SDK runner,", "You run on the opencode runner,"))
@@ -71,7 +75,7 @@ class TestContractLanes(HermeticCase):
     def test_the_opencode_contract_names_cousin_tools(self):
         reg = _registry(TRACKER_TOML)
         text = contract.render(reg, "1.12.0", tool_name=opencode_name, runner=OPENCODE_RUNNER,
-                               other_servers=None)
+                               other_servers=None, skill_hint=False)
         for d in tools.tool_definitions(reg):
             self.assertIn("- `cousin_%s`: " % d["name"], text, d["name"])
         self.assertNotIn("mcp__", text)
@@ -101,6 +105,19 @@ class TestContractLanes(HermeticCase):
         self.assertEqual(hashlib.sha256(contract.render(reg, "1.12.0").encode()).hexdigest(),
                          SDK_CONTRACT_SHA256)
         text.encode("ascii")
+
+    def test_the_skills_hint_paragraph_is_the_sdk_lane_s_only(self):
+        """The SDK lane's turns carry the skills hint (skills_hint.py), so its
+        contract says what the line is and to use the skill; opencode loads
+        no skills and the tmux kind has no per-turn context hook."""
+        reg = _registry()
+        sdk = contract.render(reg, "1.12.0")
+        self.assertIn("\n\n" + contract.SKILL_HINT + "\n\n## How you answer", sdk)
+        self.assertIn("instead of\nworking from memory", contract.SKILL_HINT)
+        self.assertNotIn("[fw-skills]", contract.render(reg, "1.12.0", skill_hint=False))
+        self.assertNotIn("[fw-skills]", contract.render(
+            reg, "1.12.0", tool_name=opencode_name, runner=OPENCODE_RUNNER, other_servers=None,
+            call_form=True, skill_hint=False))
 
     def test_every_tool_line_uses_the_naming_function(self):
         reg = _registry(TRACKER_TOML)
@@ -137,11 +154,19 @@ class TestPromptLanes(PromptCase):
 
     def test_the_opencode_prompt_names_cousin_tools_and_differs_only_there(self):
         sdk = self.compose()
-        oc = self.compose(tool_name=opencode_name, runner=OPENCODE_RUNNER, other_servers=None)
+        oc = self.compose(tool_name=opencode_name, runner=OPENCODE_RUNNER, other_servers=None,
+                          skill_hint=False)
         self.assertIn("- `cousin_reply`: ", oc)
         self.assertIn("- `cousin_handoff`: ", oc)
         self.assertNotIn("mcp__cousin__", oc)
         self.assertEqual(as_opencode(sdk), oc)
+
+    def test_the_skills_hint_line_is_in_the_sdk_prompt_only(self):
+        from cousin_lib.runner import prompt
+        self.assertIn(contract.SKILL_HINT, self.compose())
+        block = prompt.compose_context_block(self.home, root=self.root, registry=self.registry,
+                                             version="1.12.0")
+        self.assertNotIn("[fw-skills]", block)
 
     def test_the_opencode_prompt_carries_the_call_form(self):
         oc = self.compose(tool_name=opencode_name, runner=OPENCODE_RUNNER, other_servers=None,

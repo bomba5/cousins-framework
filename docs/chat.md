@@ -97,7 +97,9 @@ Extras that can ride on the item:
   in place of the path.
 - For a chat message, the runner's prompt hook may add an `[fw-recall]`
   line naming memory files that look relevant
-  ([memory](memory.md#proactive-recall-in-chat)).
+  ([memory](memory.md#proactive-recall-in-chat)), and on the `sdk` kind an
+  `[fw-skills]` line naming the skills the cousin loads that match it
+  ([skills](reference/skills.md#the-per-turn-hint)).
 - A reaction in the console reaches the cousin as a `reaction` item on the
   `system` thread:
   `[fw-reaction] msg-id=42 emoji=... user=ana tap_count=2 op=bumped`.

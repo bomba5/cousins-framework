@@ -9,9 +9,15 @@ whether the place it was imported from has moved on.
   `missing` or `unknown` (not checkable here, or not reachable now). A
   skill is stale when an item changed or went missing; an unknown item
   never makes it stale.
+- A rests-on item marked `live:` is one the skill reads afresh each time
+  it runs: only whether it is there is checked, so a change to it never
+  makes the skill stale, and its going missing does.
 - A skill from outside also has its source folder compared with
   upstream's default branch: `update` says upstream changed it. That is
   news for the operator, not staleness.
+- The operator can review a stale skill as still fine, in the console
+  (rebaseline): what changed becomes its baseline, with a record like an
+  approval's.
 - Use is recorded by the tool hook (recording.handle) in the using
   cousin's own home, so a private cousin's use never leaves it. A skill
   with no use for UNUSED_DAYS, counted from the later of its last use and
@@ -63,6 +69,8 @@ TOOL_VERSION = re.compile(r"^(?P<tool>[A-Za-z0-9_.+-]+) --version$")
 SHARED_REF = re.compile(r"^(?P<name>reference_[A-Za-z0-9_.-]+?)(?:\.md)?$")
 REPO_FILE = re.compile(r"^(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+):(?P<path>[^\s:]+)$")
 WORD = re.compile(r"^[A-Za-z0-9_.+-]+$")
+LIVE = "live:"
+PRESENT = "present"
 
 
 def _now_iso(now=None):
@@ -131,11 +139,22 @@ def items_of(metadata):
     return out
 
 
+def live(of, item):
+    """(read live, the item without its mark): a rests-on item marked
+    `live:` is one the skill reads afresh each time it runs, so a change to
+    it is expected and only its going missing counts."""
+    item = str(item).strip()
+    if of == "rests-on" and item.startswith(LIVE):
+        return True, item[len(LIVE):].strip()
+    return False, item
+
+
 def classify(of, item):
     """(kind, parts) of one declared item. reads: file-pin, repo-pin.
-    rests-on: tool-version, shared-ref, repo-file, file, tool, memory.
-    source: upstream. Anything else: unknown."""
-    item = str(item).strip()
+    rests-on: tool-version, shared-ref, repo-file, file, tool, memory, the
+    same for an item marked live (by what follows the mark). source:
+    upstream. Anything else: unknown."""
+    _read_live, item = live(of, item)
     if of == "source":
         try:
             return "upstream", skills.split_source(item)
@@ -336,6 +355,11 @@ class _Memory:
         rows = self._by_home[key].get(str(topic).strip())
         return memory.entry_id(rows[-1]) if rows else None
 
+    def topics(self, home):
+        """Every topic the home's raw memory has an entry on."""
+        self.newest(home, "")
+        return {t for t in self._by_home[str(home)] if t}
+
 
 def _exe(tool, hint=None):
     """The executable for a tool: the path its baseline resolved when that
@@ -462,6 +486,7 @@ def capture_baseline(root, repo, folder, name, *, origin="approval", now=None):
     values = {}
     for of, item in items_of(metadata):
         kind, parts = classify(of, item)
+        read_live = live(of, item)[0]
         value = None
         if kind not in NETWORK:
             if kind == "file-pin":
@@ -471,7 +496,11 @@ def capture_baseline(root, repo, folder, name, *, origin="approval", now=None):
                                                    remote=None, mem=mem)
                 if state is not None:
                     value = None
+                elif read_live:
+                    value = PRESENT
         values[item] = {"of": of, "kind": kind, "value": value}
+        if read_live:
+            values[item]["live"] = True
         if kind in ("tool", "tool-version") and value is not None:
             values[item]["path"] = detail
     data = {"skill": "%s:%s/%s" % (repo, folder, name), "commit": commit, "tree": tree,
@@ -493,11 +522,37 @@ def _compare(state, value, detail, then):
     return state, detail
 
 
+@contextmanager
+def _skill_lock(root, repo, folder, name, *, wait=True):
+    """One check or review of a skill at a time, whatever started it (a run,
+    a cousin's own check, the console): a check waits for a review, which
+    is quick and local; a review refuses (SkillError) while a check of the
+    skill runs, since that may fetch for minutes and write what it read
+    before the review."""
+    path = _key_path(root, repo, "locks", folder, name).with_suffix(".lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+        except BlockingIOError:
+            raise SkillError("a check of %s:%s/%s is running; look again when it ends"
+                             % (repo, folder, name)) from None
+        yield
+    finally:
+        os.close(fd)
+
+
 def check_skill(root, repo, folder, name, *, remote=None, now=None):
     """Check one approved skill against its baseline (taken when it has none,
     or when the skill changed since it was taken) and keep the result. A
     pin is compared with what it pins; any other item with no baseline value
     yet takes the one it has now."""
+    with _skill_lock(root, repo, folder, name):
+        return _check_skill(root, repo, folder, name, remote=remote, now=now)
+
+
+def _check_skill(root, repo, folder, name, *, remote=None, now=None):
     metadata, commit, tree = _metadata(root, repo, folder, name)
     base = _read(baseline_path(root, repo, folder, name))
     if base is None or base.get("tree") != tree:
@@ -514,14 +569,17 @@ def check_skill(root, repo, folder, name, *, remote=None, now=None):
         rows = []
         for of, item in items_of(metadata):
             kind, parts = classify(of, item)
+            read_live, bare = live(of, item)
             kept = (base.get("items") or {}).setdefault(item, {"of": of, "kind": kind,
                                                                "value": None})
             if kind in ("tool", "memory") and kept.get("kind") in ("tool", "memory"):
                 # a bare word is a tool when PATH finds it; this process's
                 # PATH may not, so the baseline's reading stands
-                kind, parts = kept["kind"], (item,)
+                kind, parts = kept["kind"], (bare,)
             then = kept.get("value")
-            if kind in PINNED and kind != "file-pin":
+            if kind in PINNED and kind != "file-pin" and not kept.get("reviewed"):
+                # a pin is its own baseline, until the operator reviews a
+                # change to it as still fine (rebaseline)
                 try:
                     then = _pinned(kind, parts, remote=remote)
                 except (OSError, SkillError, subprocess.SubprocessError) as err:
@@ -530,16 +588,24 @@ def check_skill(root, repo, folder, name, *, remote=None, now=None):
                     continue
             state, value, detail = fingerprint(kind, parts, root=root, home=home,
                                                remote=remote, mem=mem, hint=kept.get("path"))
-            if kind not in PINNED and then is None and state is None:
-                # no baseline value yet (a network item, or one unreadable at
-                # approval): this check's value becomes it
+            if read_live and state is None:
+                # read afresh each run: that it is there is all that counts
+                value = PRESENT
+            if (kind not in PINNED or kept.get("reviewed")) and then is None and state is None:
+                # no baseline value yet (a network item, one unreadable at
+                # approval, or one reviewed while it was gone): this check's
+                # value becomes it
                 kept["value"], then, adopted = value, value, True
                 if kind in ("tool", "tool-version"):
                     kept["path"] = detail
                 detail = "baseline taken at this check: %s" % detail
             state, detail = _compare(state, value, detail, then)
-            rows.append({"of": of, "item": item, "kind": kind, "state": state,
-                         "then": then, "now": value, "detail": detail})
+            row = {"of": of, "item": item, "kind": kind, "state": state,
+                   "then": then, "now": value, "detail": detail}
+            if read_live:
+                row["live"] = True
+                row["detail"] = "read live, only its presence is checked: %s" % detail
+            rows.append(row)
     finally:
         if own:
             remote.close()
@@ -557,6 +623,79 @@ def check_skill(root, repo, folder, name, *, remote=None, now=None):
 
 def last_check(root, repo, folder, name):
     return _read(check_path(root, repo, folder, name))
+
+
+# ---------------------------------------------------------------- review
+
+def review_rows(result):
+    """The rows of a check that make its skill stale: what changed or went
+    missing in reads and rests-on (an upstream change is news, not
+    staleness)."""
+    return [r for r in (result or {}).get("items") or []
+            if r.get("of") != "source" and r.get("state") in ("changed", "missing")]
+
+
+def staleness(root, repo, folder, name):
+    """(view, sha256) of what a review of a stale skill covers: its last
+    check's time and tree and the rows that make it stale. The console
+    shows the view and sends the sha256 back (rebaseline)."""
+    res = last_check(root, repo, folder, name)
+    if res is None:
+        raise SkillError("%s:%s/%s has not been checked yet" % (repo, folder, name))
+    view = {"skill": res.get("skill"), "at": res.get("at"), "tree": res.get("tree"),
+            "stale": bool(res.get("stale")), "items": review_rows(res)}
+    return view, hashlib.sha256(json.dumps(view, sort_keys=True).encode()).hexdigest()
+
+
+def rebaseline(root, repo, folder, name, *, user, sha, now=None):
+    """The operator's "reviewed, still fine" for a stale skill, for the view
+    whose sha256 the console showed: each item that changed takes the value
+    that check read as its baseline, and one that went missing has none
+    (unknown, never stale, until it is found again). A reviewed pin keeps
+    its text and is compared with the reviewed value from then on. A
+    record like an approval's says who did it and which items; the check
+    is rewritten to match, so the skill reads ok at once. An edit of the
+    skill takes a new baseline, as always, and the review goes with it.
+    Refused while a check of the skill runs (_skill_lock), and when the
+    repository's approved commit moved meanwhile: the record names it, and
+    one naming an older commit would leave the repository untrusted."""
+    with _skill_lock(root, repo, folder, name, wait=False):
+        return _rebaseline(root, repo, folder, name, user=user, sha=sha, now=now)
+
+
+def _rebaseline(root, repo, folder, name, *, user, sha, now=None):
+    view, shown = staleness(root, repo, folder, name)
+    if shown != sha:
+        raise SkillError("the check changed since it was shown; look again")
+    if not view["items"]:
+        raise SkillError("%s:%s/%s is not stale" % (repo, folder, name))
+    _meta, commit, tree = _metadata(root, repo, folder, name)
+    base = _read(baseline_path(root, repo, folder, name))
+    if view["tree"] != tree or base is None or base.get("tree") != tree:
+        raise SkillError("the skill changed since it was checked; check it again first")
+    if skills.state(root, repo)["approved"] != commit:
+        raise SkillError("repository %s moved since the review began; look again" % repo)
+    at = _now_iso(now)
+    reviewed = {}
+    for row in view["items"]:
+        kept = base.setdefault("items", {}).setdefault(row["item"], {"of": row["of"],
+                                                                      "kind": row["kind"]})
+        kept["value"] = row.get("now") if row["state"] == "changed" else None
+        kept["reviewed"] = {"at": at, "by": user}
+        reviewed[row["item"]] = row["state"]
+    _write(baseline_path(root, repo, folder, name), base)
+    entry = skills.record(root, repo, user=user, action="rebaseline", commit=commit,
+                          skill=name, folder=folder, diff_sha=sha, items=list(reviewed))
+    res = last_check(root, repo, folder, name)
+    for r in res.get("items") or []:
+        if r.get("item") in reviewed and r.get("of") != "source":
+            gone = reviewed[r["item"]] == "missing"
+            r["state"] = "unknown" if gone else "same"
+            r["then"] = None if gone else r.get("now")
+            r["detail"] = "reviewed by %s at %s, still fine: %s" % (user, at, r.get("detail"))
+    res["stale"] = bool(review_rows(res))
+    _write(check_path(root, repo, folder, name), res)
+    return entry
 
 
 # ---------------------------------------------------------------- all of them

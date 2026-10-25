@@ -283,8 +283,8 @@ one that fits instead of working from memory
   trigger prompts and on real operator messages, where about one message
   in twelve got a line. A message under 24 characters gets none.
 - **Which skills.** The ones exported for this connect
-  (`<home>/run/skills/`), read at every message, since a rollover or a
-  reconnect exports afresh: the line never names a skill the agent cannot
+  (`<home>/run/skills/`), read at every message, since a
+  [rollover](../glossary.md#rollover) or a reconnect exports afresh: the line never names a skill the agent cannot
   load, and one cousin's skills never reach another's turns. A skill's
   vector is taken the first time its name and description are seen, and
   kept for the runner's life.

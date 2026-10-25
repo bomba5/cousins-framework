@@ -3,6 +3,25 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.2.0 - 2026-10-25
+
+### Added
+
+- **The operator can review a stale skill as still fine.** A stale skill
+  stayed stale until it was edited and approved again, so a change the
+  operator had looked at and found harmless kept showing. Opened in
+  System > skills or the inspector, a stale skill now offers **reviewed,
+  still fine...**: the page shows what its last check found changed or
+  missing, then and now, and the confirm makes that its baseline (an item
+  that changed takes the value the check read; one that went missing has
+  none, and takes the value found if it comes back; a pin is compared
+  with the reviewed value from then on). The review is recorded like an
+  approval, in the same file: `action` `rebaseline`, the console user,
+  the items, and the sha256 of the staleness shown, which the route
+  takes back and refuses when the check changed since. New routes: `GET
+  .../staleness` and `POST .../rebaseline`, for a shared skill and for one
+  a cousin loads. An edit of the skill takes a new baseline, as before.
+
 ## 4.1.1 - 2026-10-24
 
 ### Fixed

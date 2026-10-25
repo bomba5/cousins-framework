@@ -364,7 +364,7 @@ Agreed with the operator (2026-10-22).
 | approve, reject, remove | the operator | the console only |
 | own a skill | the cousin that uses it most; others ask it to run the skill, or report a problem to it | [life after approval](#life-after-approval) |
 | flag a stale or unused skill | the framework | [staleness and use](#staleness-and-use) |
-| decide what a flag means | the operator: an edit drafted by the owner after a yes, a new import, or a removal | the console |
+| decide what a flag means | the operator: an edit drafted by the owner after a yes, a new import, a removal, or a review of a stale skill as still fine | the console |
 
 ## Proposals
 
@@ -405,7 +405,8 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
   every item it declares, kept in `data/skills/baselines/`
   (`data/skills/private/baselines/` for the private repository). It is the
   skill's own: a new one is taken only when the skill's folder changes, and
-  an approval of another skill in the repository leaves it as it is. A
+  an approval of another skill in the repository leaves it as it is (the
+  operator's review of a stale skill moves it too, below). A
   skill approved before 3.61.0 gets its baseline at its first check, and an
   item with no value yet (one that needs the network, or was unreadable at
   approval) takes the value its first check reads.
@@ -428,6 +429,17 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
   when an item changed or went missing; an unknown item never makes it
   stale. An upstream change sets **update**: news for the operator, whose
   new import at the newer commit is the update, not staleness.
+- **Reviewed, still fine.** The operator can review a stale skill in the
+  console (System > skills, or the inspector, the skill opened): the page
+  shows what its last check found changed or missing, then and now, and
+  **still fine** makes that its baseline. An item that changed takes the
+  value the check read; one that went missing has none, so it is unknown
+  and never stale until it is found again, when it takes the value found.
+  A pin keeps its text and is compared with the reviewed value from then
+  on. The review is recorded like an approval, in the same file (`action`
+  `rebaseline`, the items reviewed and the sha256 of what was shown), and
+  refused when the check changed since it was shown. An edit of the skill
+  takes a new baseline, and the review goes with it.
 - **Read-only and rate-limited.** A check reads files and memory, runs
   `<tool> --version`, and fetches over https only, depth 1, with the
   import's hardening (no credential, hook or global git setting) and the
@@ -446,7 +458,8 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
 - **Where it shows.**
   - System > skills: each approved skill's last check (ok, or stale with
     what changed, or upstream changed), its last use and the unused flag;
-    the last run's counts; and **check now**.
+    the last run's counts; **check now**; and, on a stale skill opened,
+    **reviewed, still fine**.
   - The inspector shows the same for what a cousin loads, its use counted
     from that cousin.
   - `cousin-skill list` and the `skill` tool's `list` mark a stale, updated

@@ -13,7 +13,9 @@
 // An approved skill also shows its health (cousin_lib/skills_check.py):
 // stale when one of its pins or what it rests on changed, upstream changed
 // for a skill from outside, unused after 30 days, and its last use. System
-// > skills shows the last staleness run and starts one now.
+// > skills shows the last staleness run and starts one now. A stale skill,
+// opened, takes the operator's "reviewed, still fine": what changed becomes
+// its baseline, for the staleness this page showed (its sha256).
 
 const SKILL_MONO = { fontFamily: "var(--mono)", fontSize: 12 };
 const SKILL_TONES = { "read-only": "green", "writes-local": "amber", "outward": "red" };
@@ -213,13 +215,29 @@ function SkillDraftReview({ slug, name, onDone }) {
   </div>;
 }
 
+// What a stale skill's last check found changed or missing, for the
+// operator's review: each item, what it was and what it is now.
+function SkillStaleness({ view }) {
+  const short = (v) => v == null ? "none" : String(v).slice(0, 16);
+  return <div style={{ display: "flex", flexDirection: "column", gap: 2, ...SKILL_MONO }}>
+    <span className="muted">checked {skillWhen(view.at)}: {view.items.length} item{view.items.length === 1 ? "" : "s"} to review</span>
+    {view.items.map(r => <span key={`${r.of}/${r.item}`}>
+      <span className="muted">{r.of}</span> {r.item}: <span style={{ color: "var(--red)" }}>{r.state}</span>
+      <span className="muted"> ({short(r.then)} to {short(r.now)}; {r.detail})</span>
+    </span>)}
+  </div>;
+}
+
 // One approved skill: its text, and its removal, shown as a diff first.
-function SkillApproved({ showUrl, removalUrl, removeUrl, onDone }) {
+// A stale one also takes the operator's review: what changed, then
+// "still fine", which makes that its baseline (recorded like an approval).
+function SkillApproved({ showUrl, removalUrl, removeUrl, stalenessUrl, rebaselineUrl, stale, onDone }) {
   const [s, setS] = React.useState(null);
   const [removal, setRemoval] = React.useState(null);
+  const [review, setReview] = React.useState(null);
   const [err, setErr] = React.useState(null);
   React.useEffect(() => {
-    setS(null); setRemoval(null); setErr(null);
+    setS(null); setRemoval(null); setReview(null); setErr(null);
     apiGet(showUrl).then(x => x ? setS(x) : setErr("this skill cannot be read"));
   }, [showUrl]);
   if (err) return <SysNote msg={{ ok: false, text: err }} />;
@@ -229,6 +247,20 @@ function SkillApproved({ showUrl, removalUrl, removeUrl, onDone }) {
     <span className="muted" style={SKILL_MONO}>files: {(s.files || []).join(", ")}</span>
     <pre style={{ ...SKILL_MONO, whiteSpace: "pre-wrap", maxHeight: 420, overflow: "auto",
                   background: "var(--bg-0)", padding: 10, borderRadius: 6, margin: 0 }}>{s.text}</pre>
+    {stale && stalenessUrl && !review && <button className="btn ghost" style={{ alignSelf: "flex-start" }}
+                         onClick={() => apiGet(stalenessUrl).then(x => x ? setReview(x) : setErr("its last check cannot be read"))}>
+      reviewed, still fine...
+    </button>}
+    {review && <>
+      <SkillStaleness view={review} />
+      <SysConfirmButton label="still fine: take these as its baseline" confirmLabel="click again: record the review" small={false}
+                        onConfirm={async () => {
+                          try {
+                            const res = await skillPost(rebaselineUrl, { staleness_sha256: review.staleness_sha256 });
+                            onDone({ ok: true, text: `reviewed as still fine: ${(res.record.items || []).join(", ")}` });
+                          } catch (e) { setErr(String(e.message || e)); }
+                        }} />
+    </>}
     {!removal && <button className="btn ghost" style={{ alignSelf: "flex-start" }}
                          onClick={() => apiGet(removalUrl).then(x => x ? setRemoval(x) : setErr("no removal diff"))}>
       remove...
@@ -347,7 +379,9 @@ function SkillsSystemView() {
               return <SkillRow key={key} label={sk.name} item={sk} open={open === key} onToggle={() => toggle(key)}
                                unusedDays={data.unused_days}>
                 <SkillApproved showUrl={urls.base} removalUrl={`${urls.base}/removal`}
-                               removeUrl={`${urls.base}/remove`} onDone={done} />
+                               removeUrl={`${urls.base}/remove`} stalenessUrl={`${urls.base}/staleness`}
+                               rebaselineUrl={`${urls.base}/rebaseline`}
+                               stale={!!(sk.check && sk.check.stale)} onDone={done} />
               </SkillRow>;
             })}
           </div>
@@ -461,7 +495,9 @@ function CousinSkillsPanel({ cousin }) {
         const url = `${base}/approved/${skillPath(sk.plugin, sk.name)}`;
         return <SkillRow key={key} label={`${sk.plugin}:${sk.name}`} item={sk} open={open === key}
                          onToggle={() => toggle(key)} unusedDays={data.unused_days}>
-          <SkillApproved showUrl={url} removalUrl={`${url}/removal`} removeUrl={`${url}/remove`} onDone={done} />
+          <SkillApproved showUrl={url} removalUrl={`${url}/removal`} removeUrl={`${url}/remove`}
+                         stalenessUrl={`${url}/staleness`} rebaselineUrl={`${url}/rebaseline`}
+                         stale={!!(sk.check && sk.check.stale)} onDone={done} />
         </SkillRow>;
       })}
       {(data.loaded || []).length === 0 && <span className="muted" style={SKILL_MONO}>no approved skills</span>}

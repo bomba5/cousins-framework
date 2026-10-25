@@ -7,10 +7,12 @@ panel in each cousin's inspector).
 
 Everything goes through cousin_lib/skills: listing, showing, the diff a
 draft or a removal makes, and the verbs only the console has: import a
-skill from outside, approve, reject, remove, and allowing a dry run of a
-skill from outside. Approve,
+skill from outside, approve, reject, remove, allowing a dry run of a
+skill from outside, and reviewing a stale skill as still fine
+(cousin_lib/skills_check rebaseline). Approve,
 remove and the allow take the sha256 of the diff the page showed and
-refuse any other. A record names the console user who acted.
+refuse any other, and the review the sha256 of the staleness it showed.
+A record names the console user who acted.
 
 Privacy: the System routes (GET /api/skills and /api/skills/shared/...)
 never show a cousin that loads the `private` repository, nor its drafts:
@@ -124,6 +126,22 @@ def _tell(home, text):
         return False
 
 
+def _staleness(root, repo, folder, name):
+    """What a review of a stale skill covers (skills_check.staleness), with
+    the sha256 the rebaseline takes back."""
+    from cousin_lib import skills_check
+    view, sha = _call(skills_check.staleness, root, repo, folder, name)
+    return dict(view, staleness_sha256=sha)
+
+
+def _rebaseline(req, repo, folder, name):
+    """The operator's "reviewed, still fine" for the view the page showed."""
+    from cousin_lib import skills_check
+    entry = _call(skills_check.rebaseline, req.server.root, repo, folder, name, user=_who(req),
+                  sha=str(req.body.get("staleness_sha256") or ""))
+    return {"ok": True, "record": entry}
+
+
 def _restart_note(scope_text):
     return "loads at the next start of %s; restart it from the inspector to load it now" % scope_text
 
@@ -196,6 +214,14 @@ def register():
                       _name(name), user=_who(req), diff_sha=str(req.body.get("diff_sha256") or ""))
         return 200, {"ok": True, "record": entry, "note": _restart_note("every cousin")}
 
+    @router.route("GET", "/api/skills/shared/{name}/staleness")
+    def shared_staleness(req, name):
+        return 200, _staleness(req.server.root, "personal", skills.SHARED, _name(name))
+
+    @router.route("POST", "/api/skills/shared/{name}/rebaseline")
+    def rebaseline_shared(req, name):
+        return 200, _rebaseline(req, "personal", skills.SHARED, _name(name))
+
     @router.route("GET", "/api/cousins/{slug}/skills")
     def cousin_skills(req, slug):
         home = _cousin(req, slug)
@@ -237,6 +263,18 @@ def register():
                       user=_who(req), diff_sha=str(req.body.get("diff_sha256") or ""))
         who = "every cousin" if folder == skills.SHARED else slug
         return 200, {"ok": True, "record": entry, "note": _restart_note(who)}
+
+    @router.route("GET", "/api/cousins/{slug}/skills/approved/{plugin}/{name}/staleness")
+    def loaded_staleness(req, slug, plugin, name):
+        home = _cousin(req, slug)
+        repo, folder = _source(home, slug, plugin)
+        return 200, _staleness(req.server.root, repo, folder, _name(name))
+
+    @router.route("POST", "/api/cousins/{slug}/skills/approved/{plugin}/{name}/rebaseline")
+    def rebaseline_loaded(req, slug, plugin, name):
+        home = _cousin(req, slug)
+        repo, folder = _source(home, slug, plugin)
+        return 200, _rebaseline(req, repo, folder, _name(name))
 
     @router.route("POST", "/api/cousins/{slug}/skills/import")
     def import_skill(req, slug):

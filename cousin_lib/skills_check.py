@@ -12,6 +12,9 @@ whether the place it was imported from has moved on.
 - A skill from outside also has its source folder compared with
   upstream's default branch: `update` says upstream changed it. That is
   news for the operator, not staleness.
+- The operator can review a stale skill as still fine, in the console
+  (rebaseline): what changed becomes its baseline, with a record like an
+  approval's.
 - Use is recorded by the tool hook (recording.handle) in the using
   cousin's own home, so a private cousin's use never leaves it. A skill
   with no use for UNUSED_DAYS, counted from the later of its last use and
@@ -521,7 +524,9 @@ def check_skill(root, repo, folder, name, *, remote=None, now=None):
                 # PATH may not, so the baseline's reading stands
                 kind, parts = kept["kind"], (item,)
             then = kept.get("value")
-            if kind in PINNED and kind != "file-pin":
+            if kind in PINNED and kind != "file-pin" and not kept.get("reviewed"):
+                # a pin is its own baseline, until the operator reviews a
+                # change to it as still fine (rebaseline)
                 try:
                     then = _pinned(kind, parts, remote=remote)
                 except (OSError, SkillError, subprocess.SubprocessError) as err:
@@ -530,9 +535,10 @@ def check_skill(root, repo, folder, name, *, remote=None, now=None):
                     continue
             state, value, detail = fingerprint(kind, parts, root=root, home=home,
                                                remote=remote, mem=mem, hint=kept.get("path"))
-            if kind not in PINNED and then is None and state is None:
-                # no baseline value yet (a network item, or one unreadable at
-                # approval): this check's value becomes it
+            if (kind not in PINNED or kept.get("reviewed")) and then is None and state is None:
+                # no baseline value yet (a network item, one unreadable at
+                # approval, or one reviewed while it was gone): this check's
+                # value becomes it
                 kept["value"], then, adopted = value, value, True
                 if kind in ("tool", "tool-version"):
                     kept["path"] = detail
@@ -557,6 +563,69 @@ def check_skill(root, repo, folder, name, *, remote=None, now=None):
 
 def last_check(root, repo, folder, name):
     return _read(check_path(root, repo, folder, name))
+
+
+# ---------------------------------------------------------------- review
+
+def review_rows(result):
+    """The rows of a check that make its skill stale: what changed or went
+    missing in reads and rests-on (an upstream change is news, not
+    staleness)."""
+    return [r for r in (result or {}).get("items") or []
+            if r.get("of") != "source" and r.get("state") in ("changed", "missing")]
+
+
+def staleness(root, repo, folder, name):
+    """(view, sha256) of what a review of a stale skill covers: its last
+    check's time and tree and the rows that make it stale. The console
+    shows the view and sends the sha256 back (rebaseline)."""
+    res = last_check(root, repo, folder, name)
+    if res is None:
+        raise SkillError("%s:%s/%s has not been checked yet" % (repo, folder, name))
+    view = {"skill": res.get("skill"), "at": res.get("at"), "tree": res.get("tree"),
+            "stale": bool(res.get("stale")), "items": review_rows(res)}
+    return view, hashlib.sha256(json.dumps(view, sort_keys=True).encode()).hexdigest()
+
+
+def rebaseline(root, repo, folder, name, *, user, sha, now=None):
+    """The operator's "reviewed, still fine" for a stale skill, for the view
+    whose sha256 the console showed: each item that changed takes the value
+    that check read as its baseline, and one that went missing has none
+    (unknown, never stale, until it is found again). A reviewed pin keeps
+    its text and is compared with the reviewed value from then on. A
+    record like an approval's says who did it and which items; the check
+    is rewritten to match, so the skill reads ok at once. An edit of the
+    skill takes a new baseline, as always, and the review goes with it."""
+    view, shown = staleness(root, repo, folder, name)
+    if shown != sha:
+        raise SkillError("the check changed since it was shown; look again")
+    if not view["items"]:
+        raise SkillError("%s:%s/%s is not stale" % (repo, folder, name))
+    _meta, commit, tree = _metadata(root, repo, folder, name)
+    base = _read(baseline_path(root, repo, folder, name))
+    if view["tree"] != tree or base is None or base.get("tree") != tree:
+        raise SkillError("the skill changed since it was checked; check it again first")
+    at = _now_iso(now)
+    reviewed = {}
+    for row in view["items"]:
+        kept = base.setdefault("items", {}).setdefault(row["item"], {"of": row["of"],
+                                                                      "kind": row["kind"]})
+        kept["value"] = row.get("now") if row["state"] == "changed" else None
+        kept["reviewed"] = {"at": at, "by": user}
+        reviewed[row["item"]] = row["state"]
+    _write(baseline_path(root, repo, folder, name), base)
+    entry = skills.record(root, repo, user=user, action="rebaseline", commit=commit,
+                          skill=name, folder=folder, diff_sha=sha, items=list(reviewed))
+    res = last_check(root, repo, folder, name)
+    for r in res.get("items") or []:
+        if r.get("item") in reviewed and r.get("of") != "source":
+            gone = reviewed[r["item"]] == "missing"
+            r["state"] = "unknown" if gone else "same"
+            r["then"] = None if gone else r.get("now")
+            r["detail"] = "reviewed by %s at %s, still fine: %s" % (user, at, r.get("detail"))
+    res["stale"] = bool(review_rows(res))
+    _write(check_path(root, repo, folder, name), res)
+    return entry
 
 
 # ---------------------------------------------------------------- all of them

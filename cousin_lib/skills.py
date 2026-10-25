@@ -287,13 +287,14 @@ def _records_path(root, repo):
 
 
 def record(root, repo, *, user, action, commit, skill=None, folder=None, diff_sha=None,
-           trigger=None, source=None, dry_run=None):
+           trigger=None, source=None, dry_run=None, items=None):
     """Append one approval record: who did it in the console, to which
     repository, the commit it produced, the sha256 of the diff shown and,
     for an approval, whether its trigger test passed; for a skill from
-    outside, also its source and how its dry run ended. `private` keeps
-    its own file, since a record names the folder and a private cousin's
-    folder is its name."""
+    outside, also its source and how its dry run ended; for a review of a
+    stale skill (skills_check.rebaseline), the items it took as still
+    fine. `private` keeps its own file, since a record names the folder
+    and a private cousin's folder is its name."""
     path = _records_path(root, repo)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -309,6 +310,8 @@ def record(root, repo, *, user, action, commit, skill=None, folder=None, diff_sh
         entry["source"] = source
     if dry_run is not None:
         entry["dry_run"] = dry_run
+    if items is not None:
+        entry["items"] = list(items)
     fresh = not path.exists()
     jsonl.append_line(path, json.dumps(entry, sort_keys=True), fsync=True)
     if fresh:

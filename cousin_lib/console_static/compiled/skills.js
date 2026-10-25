@@ -186,13 +186,19 @@ function SkillDraftReview({ slug, name, onDone }) {
     }
   )), err && /* @__PURE__ */ React.createElement(SysNote, { msg: { ok: false, text: err } }));
 }
-function SkillApproved({ showUrl, removalUrl, removeUrl, onDone }) {
+function SkillStaleness({ view }) {
+  const short = (v) => v == null ? "none" : String(v).slice(0, 16);
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 2, ...SKILL_MONO } }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, "checked ", skillWhen(view.at), ": ", view.items.length, " item", view.items.length === 1 ? "" : "s", " to review"), view.items.map((r) => /* @__PURE__ */ React.createElement("span", { key: `${r.of}/${r.item}` }, /* @__PURE__ */ React.createElement("span", { className: "muted" }, r.of), " ", r.item, ": ", /* @__PURE__ */ React.createElement("span", { style: { color: "var(--red)" } }, r.state), /* @__PURE__ */ React.createElement("span", { className: "muted" }, " (", short(r.then), " to ", short(r.now), "; ", r.detail, ")"))));
+}
+function SkillApproved({ showUrl, removalUrl, removeUrl, stalenessUrl, rebaselineUrl, stale, onDone }) {
   const [s, setS] = React.useState(null);
   const [removal, setRemoval] = React.useState(null);
+  const [review, setReview] = React.useState(null);
   const [err, setErr] = React.useState(null);
   React.useEffect(() => {
     setS(null);
     setRemoval(null);
+    setReview(null);
     setErr(null);
     apiGet(showUrl).then((x) => x ? setS(x) : setErr("this skill cannot be read"));
   }, [showUrl]);
@@ -213,7 +219,30 @@ function SkillApproved({ showUrl, removalUrl, removeUrl, onDone }) {
     padding: 10,
     borderRadius: 6,
     margin: 0
-  } }, s.text), !removal && /* @__PURE__ */ React.createElement(
+  } }, s.text), stale && stalenessUrl && !review && /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn ghost",
+      style: { alignSelf: "flex-start" },
+      onClick: () => apiGet(stalenessUrl).then((x) => x ? setReview(x) : setErr("its last check cannot be read"))
+    },
+    "reviewed, still fine..."
+  ), review && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(SkillStaleness, { view: review }), /* @__PURE__ */ React.createElement(
+    SysConfirmButton,
+    {
+      label: "still fine: take these as its baseline",
+      confirmLabel: "click again: record the review",
+      small: false,
+      onConfirm: async () => {
+        try {
+          const res = await skillPost(rebaselineUrl, { staleness_sha256: review.staleness_sha256 });
+          onDone({ ok: true, text: `reviewed as still fine: ${(res.record.items || []).join(", ")}` });
+        } catch (e) {
+          setErr(String(e.message || e));
+        }
+      }
+    }
+  )), !removal && /* @__PURE__ */ React.createElement(
     "button",
     {
       className: "btn ghost",
@@ -329,6 +358,9 @@ function SkillsSystemView() {
             showUrl: urls.base,
             removalUrl: `${urls.base}/removal`,
             removeUrl: `${urls.base}/remove`,
+            stalenessUrl: `${urls.base}/staleness`,
+            rebaselineUrl: `${urls.base}/rebaseline`,
+            stale: !!(sk.check && sk.check.stale),
             onDone: done
           }
         )
@@ -426,7 +458,18 @@ function CousinSkillsPanel({ cousin }) {
         onToggle: () => toggle(key),
         unusedDays: data.unused_days
       },
-      /* @__PURE__ */ React.createElement(SkillApproved, { showUrl: url, removalUrl: `${url}/removal`, removeUrl: `${url}/remove`, onDone: done })
+      /* @__PURE__ */ React.createElement(
+        SkillApproved,
+        {
+          showUrl: url,
+          removalUrl: `${url}/removal`,
+          removeUrl: `${url}/remove`,
+          stalenessUrl: `${url}/staleness`,
+          rebaselineUrl: `${url}/rebaseline`,
+          stale: !!(sk.check && sk.check.stale),
+          onDone: done
+        }
+      )
     );
   }), (data.loaded || []).length === 0 && /* @__PURE__ */ React.createElement("span", { className: "muted", style: SKILL_MONO }, "no approved skills"), data.lane !== "opencode" && /* @__PURE__ */ React.createElement(SkillImportForm, { slug: c.slug, targets: data.import_targets, onDone: done }), (data.drafts || []).map((d) => {
     const key = `draft/${d.name}`;

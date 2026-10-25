@@ -1008,7 +1008,7 @@ Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", 
 
 ## Skills
 
-A cousin's skills ([the skills reference](skills.md)): what it loads, its drafts, and the verbs only the console has. Importing a skill from outside, approving, rejecting and removing one happen here (an import also with `cousin-skill --home <home> import` in the operator's own terminal); the `skill` tool only lists, shows, drafts, diffs, checks and records a dry run. Approve and remove take the `diff_sha256` of the diff the page showed, and refuse with `409` when the draft or the skill changed since. Approving, rejecting, removing and allowing a dry run each record the console user who acted. An import only names that user in its reply: the draft it writes loads nowhere until an approval, which is recorded. The System routes (`/api/skills...`) never show a cousin that loads the `private` repository, nor its drafts: its folder is its name. Its skills show only on its own routes. `400` bad slug or skill name, `404` unknown cousin, draft or skill, `409` a refusal from the skills store (its message says why).
+A cousin's skills ([the skills reference](skills.md)): what it loads, its drafts, and the verbs only the console has. Importing a skill from outside, approving, rejecting and removing one happen here (an import also with `cousin-skill --home <home> import` in the operator's own terminal); the `skill` tool only lists, shows, drafts, diffs, checks and records a dry run. Approve and remove take the `diff_sha256` of the diff the page showed, and refuse with `409` when the draft or the skill changed since; a review of a stale skill as still fine takes the `staleness_sha256` of the staleness shown, the same way. Approving, rejecting, removing, allowing a dry run and reviewing a stale skill each record the console user who acted. An import only names that user in its reply: the draft it writes loads nowhere until an approval, which is recorded. The System routes (`/api/skills...`) never show a cousin that loads the `private` repository, nor its drafts: its folder is its name. Its skills show only on its own routes. `400` bad slug or skill name, `404` unknown cousin, draft or skill, `409` a refusal from the skills store (its message says why).
 
 ### `GET /api/skills`
 
@@ -1030,6 +1030,14 @@ One shared skill as approved: `{"repo", "folder", "name", "text", "files"}`.
 
 Body `{"diff_sha256"}`, the removal diff shown. Commits the removal and records it. `{"ok": true, "record", "note"}`; every cousin stops loading it at its next start.
 
+### `GET /api/skills/shared/<name>/staleness`
+
+What a review of a stale shared skill covers: `{"skill", "at", "tree", "stale", "items", "staleness_sha256"}`, its last check (`at`, and `tree`, the skill's folder it checked) and the rows that make it stale (`items`: each `{"of", "item", "kind", "state", "then", "now", "detail"}`, `state` `changed` or `missing`). `409` before its first check.
+
+### `POST /api/skills/shared/<name>/rebaseline`
+
+Body `{"staleness_sha256"}`, the staleness shown: the operator's "reviewed, still fine" ([skills](skills.md#staleness-and-use)). Each item that changed takes the value that check read as its baseline, one that went missing has none, and the skill reads ok at once. Recorded like an approval (`action` `rebaseline`, `items` the items reviewed): `{"ok": true, "record"}`. `409` when the check changed since it was shown, the skill is not stale, or the skill changed since its check.
+
 ### `GET /api/cousins/<slug>/skills`
 
 `{"repos", "states", "lane", "loaded", "drafts", "unused_days", "import_targets"}`: the repositories the cousin loads (`cousin.toml [skills] repos`), each one's state, its runner kind, the approved skills it loads at its next start (each with `plugin`: `shared`, `personal`, `work` or `private`, and the `check`, `usage`, `approved_at` and `unused` of `GET /api/skills`, its use counted from this cousin only), and its drafts. `import_targets` is `{"own": [...], "shared": [...]}`: per scope, the repositories an import from outside can land in for this cousin (`personal` or `private` where it loads them, its own skills in `private` when it loads that, `shared` only in `personal`); the inspector's import form offers only these. A `cousin.toml` list that does not parse is `{"error"}` with empty lists.
@@ -1049,6 +1057,14 @@ One skill the cousin loads, as approved: `{"plugin", "repo", "folder", "name", "
 ### `POST /api/cousins/<slug>/skills/approved/<plugin>/<name>/remove`
 
 Body `{"diff_sha256"}`. Commits the removal and records it: `{"ok": true, "record", "note"}`.
+
+### `GET /api/cousins/<slug>/skills/approved/<plugin>/<name>/staleness`
+
+As `GET /api/skills/shared/<name>/staleness`, for a skill the cousin loads.
+
+### `POST /api/cousins/<slug>/skills/approved/<plugin>/<name>/rebaseline`
+
+As `POST /api/skills/shared/<name>/rebaseline`, for a skill the cousin loads. A private repository's record goes to its own file.
 
 ### `GET /api/cousins/<slug>/skills/drafts/<name>`
 

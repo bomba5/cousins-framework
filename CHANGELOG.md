@@ -21,6 +21,15 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   takes back and refuses when the check changed since. New routes: `GET
   .../staleness` and `POST .../rebaseline`, for a shared skill and for one
   a cousin loads. An edit of the skill takes a new baseline, as before.
+- **A rests-on item can be marked read live.** A skill that reads its
+  facts afresh each time it runs (a host-facts memory topic, a living
+  note) went stale on every new entry or edit, though nothing it does had
+  changed. `live:` before a `rests-on` item (`live:build host facts`,
+  `live:notes/watch-plan.md`) now says so: the check looks only at
+  whether the item is there, so a change never makes the skill stale and
+  its going missing still does (the skill would find nothing to read).
+  The mark works on every `rests-on` form; a pin in `reads` is never
+  live. Check rows of a live item carry `"live": true`.
 
 ## 4.1.1 - 2026-10-24
 

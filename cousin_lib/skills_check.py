@@ -9,6 +9,9 @@ whether the place it was imported from has moved on.
   `missing` or `unknown` (not checkable here, or not reachable now). A
   skill is stale when an item changed or went missing; an unknown item
   never makes it stale.
+- A rests-on item marked `live:` is one the skill reads afresh each time
+  it runs: only whether it is there is checked, so a change to it never
+  makes the skill stale, and its going missing does.
 - A skill from outside also has its source folder compared with
   upstream's default branch: `update` says upstream changed it. That is
   news for the operator, not staleness.
@@ -66,6 +69,8 @@ TOOL_VERSION = re.compile(r"^(?P<tool>[A-Za-z0-9_.+-]+) --version$")
 SHARED_REF = re.compile(r"^(?P<name>reference_[A-Za-z0-9_.-]+?)(?:\.md)?$")
 REPO_FILE = re.compile(r"^(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+):(?P<path>[^\s:]+)$")
 WORD = re.compile(r"^[A-Za-z0-9_.+-]+$")
+LIVE = "live:"
+PRESENT = "present"
 
 
 def _now_iso(now=None):
@@ -134,11 +139,22 @@ def items_of(metadata):
     return out
 
 
+def live(of, item):
+    """(read live, the item without its mark): a rests-on item marked
+    `live:` is one the skill reads afresh each time it runs, so a change to
+    it is expected and only its going missing counts."""
+    item = str(item).strip()
+    if of == "rests-on" and item.startswith(LIVE):
+        return True, item[len(LIVE):].strip()
+    return False, item
+
+
 def classify(of, item):
     """(kind, parts) of one declared item. reads: file-pin, repo-pin.
-    rests-on: tool-version, shared-ref, repo-file, file, tool, memory.
-    source: upstream. Anything else: unknown."""
-    item = str(item).strip()
+    rests-on: tool-version, shared-ref, repo-file, file, tool, memory, the
+    same for an item marked live (by what follows the mark). source:
+    upstream. Anything else: unknown."""
+    _read_live, item = live(of, item)
     if of == "source":
         try:
             return "upstream", skills.split_source(item)
@@ -465,6 +481,7 @@ def capture_baseline(root, repo, folder, name, *, origin="approval", now=None):
     values = {}
     for of, item in items_of(metadata):
         kind, parts = classify(of, item)
+        read_live = live(of, item)[0]
         value = None
         if kind not in NETWORK:
             if kind == "file-pin":
@@ -474,7 +491,11 @@ def capture_baseline(root, repo, folder, name, *, origin="approval", now=None):
                                                    remote=None, mem=mem)
                 if state is not None:
                     value = None
+                elif read_live:
+                    value = PRESENT
         values[item] = {"of": of, "kind": kind, "value": value}
+        if read_live:
+            values[item]["live"] = True
         if kind in ("tool", "tool-version") and value is not None:
             values[item]["path"] = detail
     data = {"skill": "%s:%s/%s" % (repo, folder, name), "commit": commit, "tree": tree,
@@ -517,12 +538,13 @@ def check_skill(root, repo, folder, name, *, remote=None, now=None):
         rows = []
         for of, item in items_of(metadata):
             kind, parts = classify(of, item)
+            read_live, bare = live(of, item)
             kept = (base.get("items") or {}).setdefault(item, {"of": of, "kind": kind,
                                                                "value": None})
             if kind in ("tool", "memory") and kept.get("kind") in ("tool", "memory"):
                 # a bare word is a tool when PATH finds it; this process's
                 # PATH may not, so the baseline's reading stands
-                kind, parts = kept["kind"], (item,)
+                kind, parts = kept["kind"], (bare,)
             then = kept.get("value")
             if kind in PINNED and kind != "file-pin" and not kept.get("reviewed"):
                 # a pin is its own baseline, until the operator reviews a
@@ -535,6 +557,9 @@ def check_skill(root, repo, folder, name, *, remote=None, now=None):
                     continue
             state, value, detail = fingerprint(kind, parts, root=root, home=home,
                                                remote=remote, mem=mem, hint=kept.get("path"))
+            if read_live and state is None:
+                # read afresh each run: that it is there is all that counts
+                value = PRESENT
             if (kind not in PINNED or kept.get("reviewed")) and then is None and state is None:
                 # no baseline value yet (a network item, one unreadable at
                 # approval, or one reviewed while it was gone): this check's
@@ -544,8 +569,12 @@ def check_skill(root, repo, folder, name, *, remote=None, now=None):
                     kept["path"] = detail
                 detail = "baseline taken at this check: %s" % detail
             state, detail = _compare(state, value, detail, then)
-            rows.append({"of": of, "item": item, "kind": kind, "state": state,
-                         "then": then, "now": value, "detail": detail})
+            row = {"of": of, "item": item, "kind": kind, "state": state,
+                   "then": then, "now": value, "detail": detail}
+            if read_live:
+                row["live"] = True
+                row["detail"] = "read live, only its presence is checked: %s" % detail
+            rows.append(row)
     finally:
         if own:
             remote.close()

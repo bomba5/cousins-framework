@@ -266,6 +266,64 @@ class TestRepositories(CheckCase):
         self.assertIn("skills check", skills_check.user_agent())
 
 
+class TestReadLive(CheckCase):
+    """A rests-on item marked live: is read afresh each run, so only its
+    presence is checked: a change never makes the skill stale."""
+
+    def setUp(self):
+        super().setUp()
+        (self.wren / "notes").mkdir()
+        self.note = self.wren / "notes" / "hosts.md"
+        self.note.write_text("host one\n")
+        memory._append_raw(self.wren, {"topic": "board host facts", "content": "one",
+                                       "truth_level": "L2_TOOL"})
+        self.install("wren", "board-check", {
+            "rests-on": "live:board host facts, live: notes/hosts.md, live:never written"})
+
+    def check(self):
+        return skills_check.check_skill(self.root, "personal", "wren", "board-check")
+
+    def test_the_mark_is_read_only_on_rests_on(self):
+        self.assertEqual(skills_check.live("rests-on", "live: notes/hosts.md"),
+                         (True, "notes/hosts.md"))
+        self.assertEqual(skills_check.live("reads", "live:x.py#sha256:%s" % ("a" * 64))[0], False)
+        self.assertEqual(skills_check.live("rests-on", "board host facts"),
+                         (False, "board host facts"))
+        self.assertEqual(skills_check.classify("rests-on", "live:board host facts"),
+                         ("memory", ("board host facts",)))
+        self.assertEqual(skills_check.classify("rests-on", "live:notes/hosts.md")[0], "file")
+
+    def test_a_change_never_makes_it_stale(self):
+        self.check()
+        memory._append_raw(self.wren, {"topic": "board host facts", "content": "two",
+                                       "truth_level": "L2_TOOL"})
+        self.note.write_text("host two\n")
+        result = self.check()
+        self.assertFalse(result["stale"])
+        states = self.states(result)
+        self.assertEqual((states["live:board host facts"], states["live: notes/hosts.md"]),
+                         ("same", "same"))
+        self.assertTrue(all(r["live"] for r in result["items"]))
+        self.assertIn("only its presence", result["items"][0]["detail"])
+
+    def test_going_missing_does_and_never_found_is_unknown(self):
+        self.check()
+        self.note.unlink()
+        result = self.check()
+        self.assertTrue(result["stale"])
+        states = self.states(result)
+        self.assertEqual(states["live: notes/hosts.md"], "missing")
+        self.assertEqual(states["live:never written"], "unknown")
+
+    def test_the_same_item_unmarked_is_still_compared(self):
+        self.install("wren", "strict", {"rests-on": "board host facts"})
+        check = lambda: skills_check.check_skill(self.root, "personal", "wren", "strict")  # noqa: E731
+        check()
+        memory._append_raw(self.wren, {"topic": "board host facts", "content": "two",
+                                       "truth_level": "L2_TOOL"})
+        self.assertTrue(check()["stale"])
+
+
 class TestReview(CheckCase):
     """The operator's "reviewed, still fine" for a stale skill (rebaseline):
     what the last check found changed becomes the baseline, recorded like

@@ -89,7 +89,7 @@ differently here and in the agent:
 | `side-effect` | `read-only`, `writes-local`, `outward` | what it can change. An `outward` step (a push, an upload, a message, an order) MUST stop at the operator's go and never carries the go as a step |
 | `reads` | `repo@commit:path` (the full commit) or `path#sha256:<hex>`, comma-separated | what it reads; a change there flags the skill as stale |
 | `hosts` | host names, comma-separated | every host it may contact |
-| `rests-on` | paths, tool versions, memory topics, comma-separated | what it depends on, checked for drift |
+| `rests-on` | paths, tool versions, memory topics, comma-separated; `live:` before one the skill reads afresh each time it runs | what it depends on, checked for drift; a `live:` item only for being there |
 | `should-trigger` | a prompt | one that SHOULD make the cousin use the skill (the trigger test); a draft without it is not approved |
 | `must-not-trigger` | a prompt | one that MUST NOT; a draft without it is not approved |
 | `scope` | `own`, `shared` | the cousin's folder (the default) or `shared/`; `shared` only for a general skill in `personal` |
@@ -387,7 +387,9 @@ multi-step work, it considers a skill. Proposals go **only to the operator**.
 
 - The cousin that uses a skill most owns it. Others ask the owner to run it,
   or report a problem to the owner; they never fork it.
-- A change to anything in `reads` or `rests-on` flags the skill as stale.
+- A change to anything in `reads` or `rests-on` flags the skill as stale,
+  but for a `rests-on` item marked `live:`, which the skill reads afresh
+  each time it runs: only its going missing does.
 - A scheduled check is read-only and rate-limited, and names itself to any
   host it calls. It never runs an outward step or a long job.
 - The console shows each skill's last use and its last check result. A skill
@@ -422,6 +424,7 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
 | `rests-on` a path | the file's sha256 |
 | `rests-on` a word on PATH | the binary's sha256; a word the baseline read as a tool stays one, whatever a later check's PATH finds |
 | `rests-on` anything else | a memory topic: the id of the newest entry on it in the owning cousin's memory (a shared skill has no owner: unknown) |
+| `rests-on` `live:<item>` | any `rests-on` form above, which the skill reads afresh each time it runs (a host-facts topic, a living note): only whether it is there. A change never makes the skill stale; its going missing does, since the skill would find nothing to read |
 | `source` | the source folder's tree at upstream's default branch with its tree at the pinned commit |
 
 - **States.** Each item is `same`, `changed`, `missing` or `unknown` (not
@@ -439,7 +442,9 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
   on. The review is recorded like an approval, in the same file (`action`
   `rebaseline`, the items reviewed and the sha256 of what was shown), and
   refused when the check changed since it was shown. An edit of the skill
-  takes a new baseline, and the review goes with it.
+  takes a new baseline, and the review goes with it. An item that changes
+  by design, which the skill reads afresh each run, is better marked
+  `live:` in an edit, so it never needs a review.
 - **Read-only and rate-limited.** A check reads files and memory, runs
   `<tool> --version`, and fetches over https only, depth 1, with the
   import's hardening (no credential, hook or global git setting) and the

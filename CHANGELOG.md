@@ -42,8 +42,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   cousin loads whose name and description are near the message (the
   recall embedding service, cosine 0.62 or more, best first; no model
   call), and the contract says to use the one that fits instead of
-  working from memory. The skills' vectors are taken once per runner, the
-  line waits at most 4 seconds and a failure only drops it. The reasoning
+  working from memory. It reads the skills exported for this connect at
+  every message (a rollover or a reconnect exports afresh) and keeps each
+  skill's vector once taken; it runs side by side with recall, waits at
+  most 4 seconds, and a failure only drops it. The reasoning
   pane shows it (event `skills_hint`). `opencode` and the `tmux` kind get
   no line, and their contract bytes do not move; the SDK lane's contract
   gains the one paragraph, so its prompt cache starts over once.

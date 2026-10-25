@@ -282,14 +282,16 @@ one that fits instead of working from memory
   skills at cosine 0.62 or more, best first; set on the approved skills'
   trigger prompts and on real operator messages, where about one message
   in twelve got a line. A message under 24 characters gets none.
-- **Which skills.** The ones exported for this start
-  (`<home>/run/skills/`), so the line never names a skill the agent cannot
-  load, and one cousin's skills never reach another's turns. Their
-  vectors are taken at the runner's first message and kept: skills change
-  only at a start.
+- **Which skills.** The ones exported for this connect
+  (`<home>/run/skills/`), read at every message, since a rollover or a
+  reconnect exports afresh: the line never names a skill the agent cannot
+  load, and one cousin's skills never reach another's turns. A skill's
+  vector is taken the first time its name and description are seen, and
+  kept for the runner's life.
 - **When.** For the rows that get recall (an operator's or a person's chat
-  message), at most 4 seconds, and never at the cost of the turn: a slow
-  or failing embedding service only drops the line. The reasoning pane
+  message), side by side with recall, at most 4 seconds, and never at the
+  cost of the turn: a slow or failing embedding service only drops the
+  line. The reasoning pane
   shows each line's skills (event `skills_hint`).
 - **Lanes.** `sdk` only. `opencode` loads no skills, and the `tmux` kind has
   no per-turn context hook; their contracts leave the line out.

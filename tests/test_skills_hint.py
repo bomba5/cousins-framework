@@ -3,6 +3,7 @@ skills.md, "The per-turn hint"): the skills exported for this start that
 match a message, by embedding, with no model call. The embedding service
 is stood in for: each text has a vector of our choosing. Invented cast."""
 import pathlib
+import shutil
 import tempfile
 from unittest import mock
 
@@ -17,6 +18,7 @@ VECTORS = {
     "please check the regenerated board for wren": [0.9, 0.2, 0.0],
     "is the board fine, and what is for dinner?": [0.7, 0.7, 0.0],
     "what is the weather like on the coast today": [0.0, 0.0, 1.0],
+    "what should we cook for dinner this week": [0.1, 0.9, 0.0],
 }
 CONFIG = {"url": "http://embed.test", "model": "m", "recall": {}}
 
@@ -87,6 +89,31 @@ class TestHint(HintCase):
                 self.hinter.hint("please check the regenerated board for wren")
         self.assertEqual(self.hinter.hint("please check the regenerated board for wren")[1][0][0],
                          "personal:board-check")
+
+
+class TestExportOfNow(HintCase):
+    def test_each_message_reads_the_export_of_now(self):
+        """Review M1: a rollover or a reconnect exports afresh in the same
+        runner; a skill removed since is never named, and a new one is."""
+        hinter = skills_hint.Hinter(self.home, self.root)
+        self.export("personal", "board-check", BOARD.split(": ", 1)[1])
+        board = "please check the regenerated board for wren"
+        self.assertEqual([n for n, _ in hinter.hint(board)[1]], ["personal:board-check"])
+        shutil.rmtree(skills.export_dir(self.home))
+        self.export("shared", "dinner-plan", DINNER.split(": ", 1)[1])
+        self.assertEqual(hinter.hint(board), ("", []))
+        line, hits = hinter.hint("what should we cook for dinner this week")
+        self.assertEqual([n for n, _ in hits], ["shared:dinner-plan"])
+        self.assertNotIn("board-check", line)
+
+    def test_a_skill_exported_again_unchanged_is_not_asked_again(self):
+        hinter = skills_hint.Hinter(self.home, self.root)
+        self.export("personal", "board-check", BOARD.split(": ", 1)[1])
+        hinter.hint("please check the regenerated board for wren")
+        shutil.rmtree(skills.export_dir(self.home))
+        self.export("personal", "board-check", BOARD.split(": ", 1)[1])
+        hinter.hint("please check the regenerated board for wren")
+        self.assertEqual(self.asked.count(BOARD), 1)
 
 
 class TestNothingToHint(HintCase):

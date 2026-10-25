@@ -589,7 +589,8 @@ class SdkRunner:
         # policy (config_watch), never fall back to the start's.
         self.config_watch = config_watch.ConfigWatch(self.home, self.root)
         self.memory_watch = memory_watch.MemoryWatch(self.home)
-        # the skills hint keeps the skills' vectors, taken at the first message
+        # the skills hint: one per runner, so a skill's vector outlives a
+        # reconnect; it reads each connect's export at every message
         self.skill_hint = skills_hint.Hinter(self.home, self.root)
         from cousin_lib.runner.session_store import SqliteSessionStore
         self.session_store = SqliteSessionStore(self.home)

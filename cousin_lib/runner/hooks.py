@@ -527,13 +527,16 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
             written = ""
             stream.append("hook", {"event": "UserPromptSubmit",
                                    "error": "memory check: %s: %s" % (type(err).__name__, err)})
-        recalled = await recall_text(prompt)
-        try:
-            hinted = await hint_text(prompt)
-        except Exception as err:  # noqa: BLE001 - a broken hint must not cost the turn
-            hinted = ""
-            stream.append("hook", {"event": "UserPromptSubmit",
-                                   "error": "skills hint: %s: %s" % (type(err).__name__, err)})
+        async def hinted_or_nothing():
+            try:
+                return await hint_text(prompt)
+            except Exception as err:  # noqa: BLE001 - a broken hint must not cost the turn
+                stream.append("hook", {"event": "UserPromptSubmit",
+                                       "error": "skills hint: %s: %s" % (type(err).__name__, err)})
+                return ""
+        # side by side: a slow embedding service holds the prompt for one
+        # budget, not two
+        recalled, hinted = await asyncio.gather(recall_text(prompt), hinted_or_nothing())
         text = "\n\n".join(t for t in (changed, written, recalled, hinted) if t)
         if not text:
             return {}

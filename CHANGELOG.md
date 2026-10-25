@@ -18,7 +18,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   with the reviewed value from then on). The review is recorded like an
   approval, in the same file: `action` `rebaseline`, the console user,
   the items, and the sha256 of the staleness shown, which the route
-  takes back and refuses when the check changed since. New routes: `GET
+  takes back and refuses when the check changed since, while a check of
+  the skill runs, or when the repository's approval moved meanwhile. A
+  check and a review of one skill never overlap (a lock per skill, which
+  every check takes). New routes: `GET
   .../staleness` and `POST .../rebaseline`, for a shared skill and for one
   a cousin loads. An edit of the skill takes a new baseline, as before.
 - **A rests-on item can be marked read live.** A skill that reads its

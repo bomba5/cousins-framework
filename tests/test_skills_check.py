@@ -390,6 +390,42 @@ class TestReview(CheckCase):
                                     user="ana", sha=sha)
         self.assertTrue(self.check()["stale"])
 
+    def test_a_review_is_refused_while_a_check_of_the_skill_runs(self):
+        """Review S1: a check that read the baseline before the review would
+        write what it read after it, and the review would be lost."""
+        _view, sha = skills_check.staleness(self.root, "personal", "wren", "board-check")
+        before = len(skills.records(self.root, "personal"))
+        with skills_check._skill_lock(self.root, "personal", "wren", "board-check"):
+            with self.assertRaisesRegex(SkillError, "a check of personal:wren/board-check is"
+                                                    " running"):
+                skills_check.rebaseline(self.root, "personal", "wren", "board-check",
+                                        user="ana", sha=sha)
+        self.assertEqual(len(skills.records(self.root, "personal")), before)
+        self.assertTrue(skills_check.last_check(self.root, "personal", "wren",
+                                                "board-check")["stale"])
+        self.review()                                   # once the check is done
+        self.assertFalse(self.check()["stale"])
+
+    def test_a_repository_that_moved_meanwhile_is_refused_and_nothing_is_written(self):
+        """Review N1: the record names the approved commit, and one naming an
+        older commit than the last record would leave the repository
+        untrusted."""
+        real, calls = skills.state, []
+
+        def moved(root, repo):
+            calls.append(repo)
+            st = real(root, repo)
+            return dict(st, approved="f" * 40) if len(calls) > 1 else st
+        _view, sha = skills_check.staleness(self.root, "personal", "wren", "board-check")
+        base = skills_check.baseline_path(self.root, "personal", "wren", "board-check")
+        kept = base.read_text()
+        with mock.patch.object(skills, "state", side_effect=moved):
+            with self.assertRaisesRegex(SkillError, "moved since the review began"):
+                skills_check.rebaseline(self.root, "personal", "wren", "board-check",
+                                        user="ana", sha=sha)
+        self.assertEqual(base.read_text(), kept)
+        self.assertEqual(skills.records(self.root, "personal")[-1]["action"], "approve")
+
     def test_a_skill_that_is_not_stale_has_nothing_to_review(self):
         self.review()
         with self.assertRaisesRegex(SkillError, "is not stale"):

@@ -522,11 +522,37 @@ def _compare(state, value, detail, then):
     return state, detail
 
 
+@contextmanager
+def _skill_lock(root, repo, folder, name, *, wait=True):
+    """One check or review of a skill at a time, whatever started it (a run,
+    a cousin's own check, the console): a check waits for a review, which
+    is quick and local; a review refuses (SkillError) while a check of the
+    skill runs, since that may fetch for minutes and write what it read
+    before the review."""
+    path = _key_path(root, repo, "locks", folder, name).with_suffix(".lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+        except BlockingIOError:
+            raise SkillError("a check of %s:%s/%s is running; look again when it ends"
+                             % (repo, folder, name)) from None
+        yield
+    finally:
+        os.close(fd)
+
+
 def check_skill(root, repo, folder, name, *, remote=None, now=None):
     """Check one approved skill against its baseline (taken when it has none,
     or when the skill changed since it was taken) and keep the result. A
     pin is compared with what it pins; any other item with no baseline value
     yet takes the one it has now."""
+    with _skill_lock(root, repo, folder, name):
+        return _check_skill(root, repo, folder, name, remote=remote, now=now)
+
+
+def _check_skill(root, repo, folder, name, *, remote=None, now=None):
     metadata, commit, tree = _metadata(root, repo, folder, name)
     base = _read(baseline_path(root, repo, folder, name))
     if base is None or base.get("tree") != tree:
@@ -629,7 +655,15 @@ def rebaseline(root, repo, folder, name, *, user, sha, now=None):
     its text and is compared with the reviewed value from then on. A
     record like an approval's says who did it and which items; the check
     is rewritten to match, so the skill reads ok at once. An edit of the
-    skill takes a new baseline, as always, and the review goes with it."""
+    skill takes a new baseline, as always, and the review goes with it.
+    Refused while a check of the skill runs (_skill_lock), and when the
+    repository's approved commit moved meanwhile: the record names it, and
+    one naming an older commit would leave the repository untrusted."""
+    with _skill_lock(root, repo, folder, name, wait=False):
+        return _rebaseline(root, repo, folder, name, user=user, sha=sha, now=now)
+
+
+def _rebaseline(root, repo, folder, name, *, user, sha, now=None):
     view, shown = staleness(root, repo, folder, name)
     if shown != sha:
         raise SkillError("the check changed since it was shown; look again")
@@ -639,6 +673,8 @@ def rebaseline(root, repo, folder, name, *, user, sha, now=None):
     base = _read(baseline_path(root, repo, folder, name))
     if view["tree"] != tree or base is None or base.get("tree") != tree:
         raise SkillError("the skill changed since it was checked; check it again first")
+    if skills.state(root, repo)["approved"] != commit:
+        raise SkillError("repository %s moved since the review began; look again" % repo)
     at = _now_iso(now)
     reviewed = {}
     for row in view["items"]:

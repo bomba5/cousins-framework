@@ -1036,7 +1036,7 @@ What a review of a stale shared skill covers: `{"skill", "at", "tree", "stale", 
 
 ### `POST /api/skills/shared/<name>/rebaseline`
 
-Body `{"staleness_sha256"}`, the staleness shown: the operator's "reviewed, still fine" ([skills](skills.md#staleness-and-use)). Each item that changed takes the value that check read as its baseline, one that went missing has none, and the skill reads ok at once. Recorded like an approval (`action` `rebaseline`, `items` the items reviewed): `{"ok": true, "record"}`. `409` when the check changed since it was shown, the skill is not stale, or the skill changed since its check.
+Body `{"staleness_sha256"}`, the staleness shown: the operator's "reviewed, still fine" ([skills](skills.md#staleness-and-use)). Each item that changed takes the value that check read as its baseline, one that went missing has none, and the skill reads ok at once. Recorded like an approval (`action` `rebaseline`, `items` the items reviewed): `{"ok": true, "record"}`. `409` when the check changed since it was shown, the skill is not stale, the skill changed since its check, a check of the skill is running, or the repository's approval moved meanwhile.
 
 ### `GET /api/cousins/<slug>/skills`
 

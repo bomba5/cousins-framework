@@ -483,7 +483,9 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
   A pin keeps its text and is compared with the reviewed value from then
   on. The review is recorded like an approval, in the same file (`action`
   `rebaseline`, the items reviewed and the sha256 of what was shown), and
-  refused when the check changed since it was shown. An edit of the skill
+  refused when the check changed since it was shown, while a check of the
+  skill runs (it would write what it read before the review), and when
+  the repository's approval moved meanwhile. An edit of the skill
   takes a new baseline, and the review goes with it. An item that changes
   by design, which the skill reads afresh each run, is better marked
   `live:` in an edit, so it never needs a review.

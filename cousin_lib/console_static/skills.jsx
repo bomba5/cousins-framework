@@ -456,7 +456,7 @@ function SkillImportForm({ slug, targets, onDone }) {
     {field("dry_run_task", "dry-run task", "the sample task its dry run does")}
     {field("hosts", "hosts", 'every host it may contact, comma-separated; "" for none')}
     {field("reads", "reads", "repo@<full commit>:path or path#sha256:<hex>, comma-separated")}
-    {field("rests_on", "rests on", "paths, tool versions and memory topics, comma-separated")}
+    {field("rests_on", "rests on", 'paths, tool versions and memory topics, comma-separated; "a, b" for one with a comma; live: before one read afresh')}
     {field("license", "licence", "SPDX id; default: what its licence file reads as")}
     <span className="muted" style={SKILL_MONO}>
       fetched at that commit, byte for byte; an open licence only; never outward, never into work;

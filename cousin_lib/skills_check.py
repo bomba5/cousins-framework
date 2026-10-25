@@ -355,6 +355,11 @@ class _Memory:
         rows = self._by_home[key].get(str(topic).strip())
         return memory.entry_id(rows[-1]) if rows else None
 
+    def topics(self, home):
+        """Every topic the home's raw memory has an entry on."""
+        self.newest(home, "")
+        return {t for t in self._by_home[str(home)] if t}
+
 
 def _exe(tool, hint=None):
     """The executable for a tool: the path its baseline resolved when that

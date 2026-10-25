@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from unittest import mock
 
-from cousin_lib import skills
+from cousin_lib import memory, skills
 from cousin_lib.skills import SkillError
 from tests._hermetic import HermeticCase
 
@@ -166,6 +166,8 @@ class TestDeclaredKeys(SkillsCase):
         return skills.parse(path.read_text())[0]
 
     def test_written_normalized_and_an_empty_value_declares_none(self):
+        memory._append_raw(self.wren, {"topic": "board-notes", "content": "rev A",
+                                       "truth_level": "L3_COUSIN_CONCLUSION"})
         front = self.write(hosts=" a.example ,b.example,, ",
                            reads="wren-lab/widget@%s:tools/x.py, notes/a.md#sha256:%s" % (COMMIT, SHA),
                            **{"rests-on": "kicad-cli --version,  board-notes"})
@@ -331,6 +333,62 @@ def make_hostile(base, parts):
     return repo, _git(repo, "commit-tree", tree([(b"40000", "sk", sk)]), "-m", "hostile")
 
 
+class TestMemoryTopics(SkillsCase):
+    """A draft names only memory topics its staleness check can find
+    (docs/reference/skills.md, "What is checked"): the cousin's own, each
+    by its exact name, one with a comma in double quotes. Anything else is
+    refused when it is written, with the topics it likely means."""
+
+    def setUp(self):
+        super().setUp()
+        for topic in ("rule: board revisions", "rule: plans, then reports"):
+            memory._append_raw(self.wren, {"topic": topic, "content": "x",
+                                           "truth_level": "L0_OPERATOR"})
+
+    def write(self, rests_on, scope="own"):
+        return skills.write_draft(self.wren, "board-check", description="Check a board.",
+                                  body=BODY, context="personal", side_effect="read-only",
+                                  scope=scope, metadata=dict(PROMPTS, **{"rests-on": rests_on}))
+
+    def test_a_topic_it_has_is_taken_a_comma_one_in_quotes(self):
+        path = self.write('rule: board revisions, "rule: plans, then reports",'
+                          ' live:rule: board revisions')
+        meta = skills.parse(path.read_text())[0]["metadata"]
+        self.assertEqual(skills._items(meta["rests-on"]),
+                         ["rule: board revisions", "rule: plans, then reports",
+                          "live:rule: board revisions"])
+
+    def test_a_topic_it_lacks_is_refused_with_the_one_it_likely_means(self):
+        with self.assertRaises(SkillError) as raised:
+            self.write("memory topic: rule: board revisions, rule: plans, then reports")
+        text = str(raised.exception)
+        self.assertIn('"memory topic: rule: board revisions" (yours: "rule: board revisions")', text)
+        self.assertIn('"rule: plans" (yours: "rule: plans, then reports")', text)
+        self.assertIn('"then reports"', text)
+        self.assertIn("in double quotes when it holds a comma", text)
+        self.assertFalse((self.wren / "skill-drafts" / "board-check").exists())
+
+    def test_a_shared_skill_names_no_memory_topic(self):
+        with self.assertRaisesRegex(SkillError, "a shared skill has no owner"):
+            self.write("rule: board revisions", scope="shared")
+        self.write("kicad-cli --version, notes/board.md", scope="shared")
+
+    def test_the_other_forms_are_no_topics(self):
+        self.write("kicad-cli --version, reference_board-rules, wren-lab/widget:tools/x.py,"
+                   " scripts/check.py, live:notes/plan.md")
+
+    def test_an_empty_live_mark_is_refused(self):
+        with self.assertRaisesRegex(SkillError, "nothing after the mark"):
+            self.write("live:")
+
+    def test_a_list_reads_back_its_quotes_and_splits_the_rest_as_before(self):
+        items = ["a", "b, c", '"d"', 'e "f"']
+        self.assertEqual(skills._items(skills._joined(items)), items)
+        self.assertEqual(skills._items('"a, b'), ['"a', "b"])
+        self.assertEqual(skills._items('x "a, b"'), ['x "a', 'b"'])
+        self.assertEqual(skills._items(" a.example ,b.example,, "), ["a.example", "b.example"])
+
+
 class OutsideCase(SkillsCase):
     """A skill from outside: the source names an https URL, and the fetch
     the tests hand in reads a local repository over file:// instead,
@@ -370,6 +428,15 @@ class OutsideCase(SkillsCase):
 
 
 class TestImport(OutsideCase):
+    def test_the_operator_names_only_the_cousins_own_topics_too(self):
+        with self.assertRaisesRegex(SkillError, '"board notes", which is no memory topic'):
+            self.imported(metadata=dict(PROMPTS, **{"dry-run-task": "run scripts/check.py",
+                                                     "rests-on": "board notes"}))
+        memory._append_raw(self.wren, {"topic": "board notes", "content": "x",
+                                       "truth_level": "L0_OPERATOR"})
+        self.imported(metadata=dict(PROMPTS, **{"dry-run-task": "run scripts/check.py",
+                                                 "rests-on": "board notes"}))
+
     def test_the_folder_comes_as_published_under_a_frontmatter_of_ours(self):
         path, report = self.imported()
         draft = self.wren / "skill-drafts" / "board-check"

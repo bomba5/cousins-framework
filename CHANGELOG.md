@@ -31,6 +31,23 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   The mark works on every `rests-on` form; a pin in `reads` is never
   live. Check rows of a live item carry `"live": true`.
 
+### Changed
+
+- **A draft names only memory topics its check can find.** A `rests-on`
+  item with no other form is a memory topic, and 71 of the 97 items the
+  staleness check could never check were topics no memory had: a
+  `memory:` or `memory topic:` put before the name, a topic cut at its
+  comma (the list splits there), a tool written another way. Writing a
+  draft (the `draft` tool, `cousin-skill draft`) or importing one now
+  refuses a topic the cousin's memory lacks, naming each with the topics
+  it likely meant (itself without the prefix, the whole topic a part
+  before a comma belongs to, a close spelling), and refuses any memory
+  topic in a shared skill, which has no owner whose memory is read. An
+  item that holds a comma goes in double quotes (`"rule: plans, then
+  reports"`); a quote inside it is doubled; any other list splits as
+  before. Approved skills keep loading as they are: an old one with such
+  an item is refused only when its next edit is written.
+
 ## 4.1.1 - 2026-10-24
 
 ### Fixed

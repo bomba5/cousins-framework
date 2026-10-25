@@ -77,7 +77,9 @@ folder name, 1-64 lowercase letters, digits and `-`, not starting or ending
 with `-` and with no `--`; `description` is one line of 1-1024 characters. `license` is an SPDX
 identifier; it is REQUIRED for a skill from outside. The framework's own keys
 sit under `metadata`, as the format asks. The format makes `metadata` a map
-from string keys to string *values*, so a list is one comma-separated string.
+from string keys to string *values*, so a list is one comma-separated string;
+an item that holds a comma (a memory topic such as `"rule: plans, then
+reports"`) goes in double quotes, and a quote inside it is doubled.
 The draft tool writes every value but the name double-quoted, as a JSON
 string, which a YAML reader takes as the same text; a double-quoted value
 with an escape JSON lacks (`\x41`) is refused, since it would read
@@ -101,7 +103,16 @@ contacts no host). The draft tool and
 approval refuse a host that is not a host name, a `reads` pin in neither
 form or not pinned to a full commit, a `source` that is not a URL pinned to a
 full commit, a `license` that is not an
-SPDX expression, and a `source` without a `license`. Loading does not check
+SPDX expression, and a `source` without a `license`. When a draft is
+written (the `draft` tool and command) or imported, a `rests-on` memory
+topic must be one the check can find: for the cousin's own skill, a topic
+its memory has, named exactly (no `memory:` before it), and for a shared
+skill none at all, since no one's memory is read for it. The refusal names
+each topic it lacks with the ones the cousin likely meant (itself without a
+prefix, the topic it is the part before a comma of, a close spelling). An
+item is a memory topic when it has no other form ([What is
+checked](#staleness-and-use)), so a tool written another way (`ssh -V`) is
+refused too. Loading does not check
 them, so a format rule never unloads an approved skill. Reading the
 frontmatter is the one rule loading shares: a value it cannot read (a
 double-quoted one with an escape JSON lacks) keeps that skill from loading,

@@ -31,10 +31,12 @@ class TestContextBlock(PromptCase):
         self.assertIn("mcp__cousin__reply", block)             # the stdio server is `cousin`
 
     def test_the_sdk_prompt_does_not_move(self):
+        # the pane kind has no per-turn context hook, so no skills hint
         sdk = self.compose()
         block = prompt.compose_context_block(self.home, root=self.root, registry=self.registry,
                                              version="1.12.0")
         self.assertEqual(sdk.replace("You run on the SDK runner,", "You run on %s," % PANE)
+                         .replace("\n\n" + contract.SKILL_HINT, "")
                          .replace(self.identity(), ""), block)
 
     def identity(self):

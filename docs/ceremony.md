@@ -40,6 +40,7 @@ session that started after that day's flip time.
 | [heartbeat](#the-heartbeat) | 1 per beat | `[heartbeat] context_beat_seconds` (3600; 0 is off) |
 | [rollover and the daily flip](#rollover-and-the-daily-flip) | 2 per [rollover](glossary.md#rollover) (the handoff, then the digest) | `[agent] rollover_at_percent` (80), `[lifecycle] flip_at` (the install's `default_flip_at`, `04:00`) |
 | [recall](#recall) | none | `[memory] proactive_recall` (true) |
+| [skills hint](#the-skills-hint) | none | none: the skills the cousin loads |
 | [memory proposals](#memory-proposals) | 1 each, at most 6 a day | none |
 | [review gate](#the-review-gate) | 1 separate call per batch | `[memory] review_batch` (3), `[memory] review_model` (the cousin's model) |
 | [mining and distilling](#mining-and-distilling) | none | none |
@@ -191,6 +192,24 @@ get no recall.
 service recall is off unless `[memory] recall_keyword_only` is true (default
 false). `config/embedding.toml` `[recall]` sets `min_chars` (24),
 `min_score` (0.45) and `top` (3); [memory](memory.md) has the details.
+
+## The skills hint
+
+**Costs.** No model turn. On the `sdk` kind, after recall, the runner
+embeds the same message and adds one `[fw-skills]` line naming up to three
+of the skills the cousin loads whose name and description are near it
+(cosine 0.62 or more), best first (`cousin_lib/skills_hint.py`). The skills'
+own vectors are taken at the runner's first message and kept until it
+stops. It waits at most 4 seconds (`HINT_BUDGET_S`) and goes on without the
+line past that. The same rows get it as get recall, and the system prompt
+tells the cousin to use the skill that fits instead of working from memory.
+
+**Without it.** A cousin with a skill for the task at hand may still do the
+task from memory and never load the skill.
+
+**Knob.** None. A cousin that loads no skills, an install without an
+embedding service, and the `opencode` and `tmux` kinds get no line
+([skills](reference/skills.md#the-per-turn-hint)).
 
 ## Memory proposals
 

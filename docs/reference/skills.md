@@ -263,6 +263,37 @@ stays byte-stable.
 | `tmux` | The same exports, passed as `--plugin-dir`. This lane reads project settings (`--setting-sources project,local`), which load `<home>/.claude/skills/` unapproved (probed 2026-10-21 with the host's Claude Code 2.1.282), so the launcher MUST refuse to start while that directory exists, naming it. That refusal is the only guard on this lane, which has no tool gate. |
 | `opencode` | Not supported. opencode has a skill tool of its own; the framework passes it nothing. |
 
+## The per-turn hint
+
+A loaded skill is used only when the agent thinks of it, and a cousin can
+do a task its own skill covers from memory instead. So each chat message
+on the `sdk` lane carries, after recall, one line naming the skills the
+cousin loads that match it, and the contract tells the cousin to use the
+one that fits instead of working from memory
+(`cousin_lib/skills_hint.py`):
+
+```text
+[fw-skills] skills you load that match this message: personal:board-check. Use the one that fits instead of working from memory; ignore them if none does.
+```
+
+- **Matching.** The message's embedding against each skill's name and
+  description (which says when to use it), through the same embedding
+  service as recall (`config/embedding.toml`): no model call. Up to three
+  skills at cosine 0.62 or more, best first; set on the approved skills'
+  trigger prompts and on real operator messages, where about one message
+  in twelve got a line. A message under 24 characters gets none.
+- **Which skills.** The ones exported for this start
+  (`<home>/run/skills/`), so the line never names a skill the agent cannot
+  load, and one cousin's skills never reach another's turns. Their
+  vectors are taken at the runner's first message and kept: skills change
+  only at a start.
+- **When.** For the rows that get recall (an operator's or a person's chat
+  message), at most 4 seconds, and never at the cost of the turn: a slow
+  or failing embedding service only drops the line. The reasoning pane
+  shows each line's skills (event `skills_hint`).
+- **Lanes.** `sdk` only. `opencode` loads no skills, and the `tmux` kind has
+  no per-turn context hook; their contracts leave the line out.
+
 ## The trigger test
 
 Before approval, each new or changed skill gets one prompt that SHOULD make

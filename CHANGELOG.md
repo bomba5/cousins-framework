@@ -31,6 +31,20 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   The mark works on every `rests-on` form; a pin in `reads` is never
   live. Check rows of a live item carry `"live": true`.
 
+- **Each chat message names the skills that match it.** A loaded skill
+  is used only when the agent thinks of it: a cousin did a release check
+  from memory with the skill for it loaded, and 17 of 32 approved skills
+  had never been used. On the `sdk` lane, after recall,
+  the runner now adds one `[fw-skills]` line naming up to three skills the
+  cousin loads whose name and description are near the message (the
+  recall embedding service, cosine 0.62 or more, best first; no model
+  call), and the contract says to use the one that fits instead of
+  working from memory. The skills' vectors are taken once per runner, the
+  line waits at most 4 seconds and a failure only drops it. The reasoning
+  pane shows it (event `skills_hint`). `opencode` and the `tmux` kind get
+  no line, and their contract bytes do not move; the SDK lane's contract
+  gains the one paragraph, so its prompt cache starts over once.
+
 ### Changed
 
 - **A draft names only memory topics its check can find.** A `rests-on`

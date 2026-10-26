@@ -128,5 +128,60 @@ class TestFold(RawFoldCase):
         self.assertIn("2 entries", text)
 
 
+class TestDayMap(RawFoldCase):
+    """Where each day file landed in its archive, so a cursor that counted
+    a day file's lines (dreaming's) resumes on its own line."""
+
+    def _archive(self, month):
+        return memory.raw_dir(self.home) / "archive" / (month + ".jsonl.gz")
+
+    def test_records_where_each_day_landed_across_folds(self):
+        self._write_day("2026-09-01", [{"topic": "a", "content": "one"},
+                                       {"topic": "a", "content": "two"}])
+        self._write_day("2026-09-02", [{"topic": "b", "content": "three"}])
+        raw_fold.fold_raw(self.home, keep_days=0)
+        later = self._write_day("2026-09-03", [{"topic": "c", "content": "four"},
+                                               {"topic": "c", "content": "five"}])
+        raw_fold.fold_raw(self.home, keep_days=0)
+        archive = self._archive("2026-09")
+        self.assertEqual([raw_fold.landed(archive, day) for day in
+                          ("2026-09-01", "2026-09-02", "2026-09-03")],
+                         [(0, 2), (2, 1), (3, 2)])
+        with gzip.open(archive, "rt") as fh:
+            self.assertEqual(fh.read().splitlines()[3:5], later)
+
+    def test_a_day_written_again_after_its_fold_keeps_where_it_landed_first(self):
+        # the decisions backfill appends to a decision's own, often old, day
+        self._write_day("2026-09-01", [{"topic": "a", "content": "one"},
+                                       {"topic": "a", "content": "two"}])
+        raw_fold.fold_raw(self.home, keep_days=0)
+        self._write_day("2026-09-01", [{"topic": "a", "content": "a late write"}])
+        raw_fold.fold_raw(self.home, keep_days=0)
+        self.assertEqual(raw_fold.landed(self._archive("2026-09"), "2026-09-01"), (0, 2))
+
+    def test_an_archive_from_before_day_maps_stays_unmapped(self):
+        memory.ensure_layout(self.home)
+        archive = self._archive("2026-09")
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        with gzip.open(archive, "wt") as fh:
+            fh.write(json.dumps({"topic": "a", "content": "folded before maps",
+                                 "timestamp": "2026-09-01T10:00:00+00:00"}) + "\n")
+        self._write_day("2026-09-02", [{"topic": "b", "content": "two"}])
+        raw_fold.fold_raw(self.home, keep_days=0)
+        self.assertIsNone(raw_fold.landed(archive, "2026-09-02"))
+        self.assertFalse(raw_fold.day_map_path(archive).exists())
+
+    def test_a_map_its_archive_no_longer_agrees_with_is_not_believed(self):
+        self._write_day("2026-09-01", [{"topic": "a", "content": "one"}])
+        self._write_day("2026-09-02", [{"topic": "b", "content": "two"}])
+        raw_fold.fold_raw(self.home, keep_days=0)
+        archive = self._archive("2026-09")
+        self.assertEqual(raw_fold.landed(archive, "2026-09-02"), (1, 1))
+        # as many lines, other bytes: an archive replaced under its map
+        with gzip.open(archive, "wt") as fh:
+            fh.write('{"topic": "x", "content": "other"}\n' * 2)
+        self.assertIsNone(raw_fold.landed(archive, "2026-09-02"))
+
+
 if __name__ == "__main__":
     unittest.main()

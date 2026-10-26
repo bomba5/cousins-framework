@@ -36,7 +36,11 @@ stamp older than entries written after it and an out-of-order stamp is
 normal; a timestamp cursor would re-dream out-of-order forever. It
 cannot be an entry id: `memory.entry_id` is a sha1 over the entry's
 text, which carries no order at all. A line number carries order and a
-file name carries position in the store.
+file name carries position in the store. Once raw_fold has moved the day
+a cursor names into its month's archive, the cursor's lines still count
+the day file's lines: it resumes in the archive on its own line where
+the fold mapped that day (`raw_fold.landed`), else a day early, and it
+is compared with another cursor by where each one resumes.
 
 The ledger is `memory/.dream-ledger.json` (memory/, not data/: a
 transplant copies memory/, and a transplanted cousin must not re-dream
@@ -69,7 +73,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from cousin_lib import jsonl
-from cousin_lib import memory, memory_lock, perimeter
+from cousin_lib import memory, memory_lock, perimeter, raw_fold
 
 # memory/.dream-ledger.json
 LEDGER_PARTS = ("memory", ".dream-ledger.json")
@@ -216,8 +220,19 @@ def _resume(files, through):
     if index < len(files) and len(through["month"]) == 10 \
             and files[index][0] == through["month"][:7]:
         # the day it named is folded into this archive
-        return index, _archive_offset(files[index][2], through["month"])
+        return index, _folded_offset(files[index][2], through)
     return index, 0
+
+
+def _folded_offset(path, through):
+    """Where a cursor in a folded day resumes in the archive at `path`:
+    on the line after the last one it took, where the fold mapped that
+    day; else a day early (`_archive_offset`)."""
+    landed = raw_fold.landed(path, through["month"])
+    if landed is None:
+        return _archive_offset(path, through["month"])
+    first, lines = landed
+    return first + min(through["lines"], lines)
 
 
 # ---- the ledger --------------------------------------------------------------
@@ -365,14 +380,18 @@ def commit(home, pass_id, through):
 
 
 def _behind(home, new, old):
-    """True when `new` is behind `old` in the store's own file order."""
+    """True when `new` is behind `old` in the store's own file order. On
+    one file the lines decide. On two, where each resumes today does: a
+    cursor whose day the fold moved into an archive still counts the day
+    file's lines, which are not the archive's."""
     try:
         old = cursor(old)
     except ValueError:
         return False
+    if new["month"] == old["month"]:
+        return new["lines"] < old["lines"]
     files = _files(home)
-    a, b = _index_of(files, new["month"]), _index_of(files, old["month"])
-    return (a, new["lines"]) < (b, old["lines"]) if a == b else a < b
+    return _resume(files, new) < _resume(files, old)
 
 
 def abandon(home, pass_id, reason):

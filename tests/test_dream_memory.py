@@ -13,7 +13,7 @@ import pathlib
 import tempfile
 import unittest
 
-from cousin_lib import dream_memory, memory
+from cousin_lib import dream_memory, memory, raw_fold
 
 
 class DreamCase(unittest.TestCase):
@@ -218,6 +218,37 @@ class TestTheCursorIsAStructuralRefusal(DreamCase):
         self.assertNotIn("early month", piece.text)
         for kept in ("day before", "the cursor's day", "later"):
             self.assertIn(kept, piece.text)
+
+    def test_a_pass_resumed_inside_an_archive_commits_where_it_stopped(self):
+        # an archive folded before day maps, so the pass starts a day early;
+        # the cursor counted 8 lines of its day file, the archive counts its own
+        self.archive("2026-09", ("2026-09-23", "the day before"),
+                     *[("2026-09-24", "line %02d" % n) for n in range(1, 11)])
+        dream_memory._save(self.home, {"schema_version": dream_memory.SCHEMA_VERSION,
+                                       "through": {"month": "2026-09-24", "lines": 8}})
+        piece = self.dream(chars=1)
+        self.assertEqual(piece.through, {"month": "2026-09", "lines": 1})
+        dream_memory.commit(self.home, self.pass_id, piece.through)
+        self.assertEqual(dream_memory.committed(self.home), {"month": "2026-09", "lines": 1})
+        # the next pass goes on from there, not back to the same slice
+        again = dream_memory.slice_for(self.home, chars=1)
+        self.assertEqual(again.through, {"month": "2026-09", "lines": 2})
+
+    def test_a_cursor_in_a_day_the_fold_mapped_resumes_on_its_own_line(self):
+        self.raw("2026-09-23", ("kestrel", "the day before"))
+        self.raw("2026-09-24", *[("kestrel", "line %02d" % n) for n in range(1, 11)])
+        dream_memory._save(self.home, {"schema_version": dream_memory.SCHEMA_VERSION,
+                                       "through": {"month": "2026-09-24", "lines": 8}})
+        raw_fold.fold_raw(self.home, keep_days=0)
+        # the day map beside the archive is never read as one
+        self.assertEqual([f[0] for f in dream_memory._files(self.home)], ["2026-09"])
+        piece = self.dream()
+        for dreamed in ("the day before", "line 01", "line 08"):
+            self.assertNotIn(dreamed, piece.text)
+        for left in ("line 09", "line 10"):
+            self.assertIn(left, piece.text)
+        dream_memory.commit(self.home, self.pass_id, piece.through)
+        self.assertEqual(dream_memory.committed(self.home), {"month": "2026-09", "lines": 11})
 
     def test_a_first_pass_whose_since_was_folded_early_starts_inside_the_archive(self):
         # a compact with fewer hot days than the floor folded days after since

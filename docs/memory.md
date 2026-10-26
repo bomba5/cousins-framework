@@ -591,8 +591,10 @@ cousin-sweep compact --target both      # every cousin, for a timer
   `--hot-days` (default 30) are appended byte for byte to
   `memory/raw/archive/<YYYY-MM>.jsonl.gz` and removed. Each month keeps
   one digest entry per topic in `memory/raw/<YYYY-MM>-digest.jsonl`, so
-  the distiller still sees the topic. There's no dry run because nothing
-  is lost.
+  the distiller still sees the topic. An archive the [fold](glossary.md#fold) starts also
+  gets a day map, `<YYYY-MM>.days.json` beside it: the line where each
+  day file landed, so dreaming can resume where it was. There's no dry
+  run because nothing is lost.
 - **Index compaction** (`--target index`). When `MEMORY.md` is over
   the byte budget (default 24000), the oldest pointer lines are removed
   until it fits. A line only goes if it has a date, is older than
@@ -622,12 +624,14 @@ undone.
 A pass takes the next slice of raw memory: the lines no pass has taken
 yet, oldest first with the monthly archives included, up to 40,000
 characters of claims (about 10k tokens). When raw fold has folded away
-the day file dreaming had got to, the next pass starts inside that month's
-archive at the first line stamped on or after the day before it (a day of
-slack: day files are named in local time, lines stamped in UTC), so at most
-a day is read again and nothing is skipped. A first pass whose starting day
-was folded early (a compact with fewer hot days than 30) starts inside the
-archive the same way. Each claim is
+the day file dreaming had got to, the next pass goes on inside that month's
+archive from the line after the last one it took, which the archive's day
+map gives. An archive started before day maps existed (before 4.2.1) has
+none, so there the pass starts at the first line stamped on or after the
+day before (a day of slack: day files are named in local time, lines
+stamped in UTC): at most a day is read again and nothing is skipped. A
+first pass whose starting day was folded early (a compact with fewer hot
+days than 30) starts inside the archive a day early too. Each claim is
 shown on one line with its time, truth level, id and topic, cut at 800
 characters. Monthly digests and the framework's own log (`episode:`,
 `job:`, `framework:`) are skipped, and the open
@@ -1202,7 +1206,9 @@ and appends lines as bytes.
 What moves:
 
 - `memory/raw/*.jsonl` (day files and monthly digests) and
-  `memory/raw/archive/*.jsonl.gz`, the archives not recompressed;
+  `memory/raw/archive/*.jsonl.gz`, the archives not recompressed, each
+  with its day map (`*.days.json`): an archive arrives as its bytes or not
+  at all, so its map stays true;
 - the knowledge files `memory/*.md`, `memory/distilled/`,
   `memory/imported/` and `memory/.trash/` (the decisions backfill reads
   the trash, so a removal is not undone in the new home);

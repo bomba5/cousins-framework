@@ -17,7 +17,8 @@ What moves (MANIFEST.json lists it, each file with its size and sha256):
 
 - memory/raw/*.jsonl, the day files and the monthly digests ("lines");
 - memory/raw/archive/*.jsonl.gz, the folded months ("archive"), never
-  recompressed;
+  recompressed, each with its day map (*.days.json): an archive arrives
+  as its bytes or not at all, so the map stays true of it;
 - memory/*.md, the knowledge files; memory/distilled/, memory/imported/
   and memory/.trash/ (removed memories, which the decisions backfill
   reads so a removal is not undone); memory/.dream-ledger.json;
@@ -64,6 +65,7 @@ _SINGLE = {"memory/.dream-ledger.json": FILE, "data/template-sync.json": FILE,
            "data/decisions.jsonl": LINES}
 _RAW_DAY = re.compile(r"^memory/raw/[^/]+\.jsonl$")
 _RAW_ARCHIVE = re.compile(r"^memory/raw/archive/[^/]+\.jsonl\.gz$")
+_RAW_DAY_MAP = re.compile(r"^memory/raw/archive/[^/]+\.days\.json$")
 _KNOWLEDGE = re.compile(r"^memory/[^/]+\.md$")
 _DECISIONS_ARCHIVE = re.compile(r"^data/decisions-archive-[^/]+\.jsonl$")
 
@@ -119,6 +121,8 @@ def kind_of(rel):
         return LINES
     if _RAW_ARCHIVE.match(rel):
         return ARCHIVE
+    if _RAW_DAY_MAP.match(rel):
+        return FILE
     if _KNOWLEDGE.match(rel):
         return FILE
     if any(rel.startswith(tree) for tree in _TREES):

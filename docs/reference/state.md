@@ -27,6 +27,7 @@ lags its source is shown with what it has, and the source decides.
 | `memory/raw/YYYY-MM-DD.jsonl` | raw event | `memory._append_raw` (remember, decide, record_event, obsolete), extraction, the review gate, dreaming, job results | **the memory record.** Lines leave only through trash or the monthly [fold](../glossary.md#fold) |
 | `memory/raw/YYYY-MM-digest.jsonl` | projection | `raw_fold.fold_raw` | from the folded day files; the archive is the record |
 | `memory/raw/archive/YYYY-MM.jsonl.gz` | raw event | `raw_fold` | byte copies of folded day files |
+| `memory/raw/archive/YYYY-MM.days.json` | transactional | `raw_fold` | where each day file landed in the archive beside it; a day it no longer agrees with is not believed, and dreaming resumes a day early there |
 | `memory/distilled/*.md` | projection | `distill.distill` | from raw; text above the auto marker is authored and kept |
 | `memory/capsules.jsonl` | raw event | `capsule.write_capsule` (deprecated 3.50.0) | reasoning capsules (`cousin-reason list`, the console); removed in 4.0.0 |
 | `memory/fts_index.db`, `memory/vectors.db` | projection | `memory_search` | from memory, notes and raw; a cache, rebuilt when stale |

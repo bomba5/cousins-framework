@@ -3,6 +3,29 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.2.1 - 2026-10-26
+
+### Fixed
+
+- **Dreaming no longer gets stuck after the raw fold moves the day it had
+  reached.** The cursor counts lines of the day file it got to. After the
+  fold moved that day into its month's archive, the next pass resumed in
+  the archive, and the commit compared the archive line it stopped at
+  with the day file's line count: a pass that stopped at archive line 754
+  was refused as behind a cursor at line 2040 of its day, and every later
+  pass took the same slice and was refused the same way. Two cursors on
+  different files are now compared by where each one resumes.
+- **A pass resumes on its own line after a fold.** An archive the fold
+  starts now gets a day map beside it,
+  `memory/raw/archive/<YYYY-MM>.days.json`: where each day file landed
+  (its first line, its lines, and a key of that first line). A cursor in
+  a folded day resumes right after the last line it took instead of a
+  day early, which on a long day (an import) meant re-reading thousands
+  of lines. A map is believed only while it covers its archive from the
+  first line and agrees with it at that day; otherwise, and in an archive
+  started before 4.2.1, the pass still starts a day early. The memory
+  export moves each map with its archive.
+
 ## 4.2.0 - 2026-10-25
 
 ### Added

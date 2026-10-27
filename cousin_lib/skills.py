@@ -918,12 +918,14 @@ def _extract(path, commit, folder, dest):
     return sorted(p.name for p in out.iterdir() if p.is_dir())
 
 
-def export_plugins(root, home, slug, *, base=None):
+def export_plugins(root, home, slug, *, base=None, omit=None):
     """Export what the cousin loads, afresh, and return (plugin dirs,
     report). Each directory is a local plugin (a manifest plus skills/),
     read-only, named for the repository; a skill that does not parse is
     left out and reported, and so is a repository that is missing or has
-    moved past its last approval. Never raises for a skill problem."""
+    moved past its last approval. omit, a (repo, folder, name), leaves
+    that one skill out: the approved copy a draft under test would
+    replace. Never raises for a skill problem."""
     base = Path(base) if base is not None else export_dir(home)
     if base.exists():
         _writable_tree(base)
@@ -949,6 +951,9 @@ def export_plugins(root, home, slug, *, base=None):
         names = _extract(repo_dir(root, repo), st["approved"], folder, dest)
         kept = []
         for name in names:
+            if omit == (repo, folder, name):
+                shutil.rmtree(dest / "skills" / name)
+                continue
             skill = dest / "skills" / name / SKILL_FILE
             try:
                 front, _ = parse(skill.read_text())
@@ -1029,8 +1034,13 @@ def trigger_test(root, home, slug, name, *, checker=None):
     else:
         model = "test"
     expect = "draft:%s" % name
+    # a draft that edits an approved skill is tested instead of that skill,
+    # not beside it: the approved copy, with the same name and description,
+    # would take the prompt and fail the test of an edit that is fine
+    repo, where = target(slug, front)
     with tempfile.TemporaryDirectory(prefix="cousin-trigger-plugins-") as tmp:
-        plugins, _report = export_plugins(root, home, slug, base=Path(tmp) / "loaded")
+        plugins, _report = export_plugins(root, home, slug, base=Path(tmp) / "loaded",
+                                          omit=(repo, where, name))
         draft = Path(tmp) / "draft"
         (draft / ".claude-plugin").mkdir(parents=True)
         (draft / ".claude-plugin" / "plugin.json").write_text(

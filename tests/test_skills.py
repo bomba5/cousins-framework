@@ -1163,6 +1163,30 @@ class TestTriggerTest(SkillsCase):
         self.assertIsNone(skills.last_trigger_test(self.root, self.wren, "wren", "board-check",
                                                    sha2))
 
+    def test_a_draft_that_edits_an_approved_skill_is_tested_instead_of_it(self):
+        # the approved copy has the same name and description: loaded beside
+        # the draft it takes the should-trigger prompt and fails a sound edit
+        self.draft(self.wren)
+        self.approve(self.wren, "wren")
+        self.draft(self.wren, name="board-export")
+        self.approve(self.wren, "wren", "board-export")
+        self.draft(self.wren, body=BODY + "3. Check the silkscreen too.\n")
+        seen = []
+
+        def checker(prompt, plugin_dirs):
+            seen.append(sorted("%s:%s" % (d.name, s.name) for d in plugin_dirs
+                               for s in (d / "skills").iterdir()))
+            return ("draft:board-check" if "board" in prompt else None), "ok"
+        result = skills.trigger_test(self.root, self.wren, "wren", "board-check", checker=checker)
+        self.assertTrue(result["pass"])
+        # the rest of what loads is still there; only the copy being replaced is not
+        self.assertEqual(seen, [["draft:board-check", "personal:board-export"]] * 2)
+        # and the cousin's own export, outside a test, still has both
+        dirs, _ = skills.export_plugins(self.root, self.wren, "wren",
+                                        base=self.root / "export-check")
+        self.assertEqual(sorted(s.name for d in dirs for s in (d / "skills").iterdir()),
+                         ["board-check", "board-export"])
+
     def test_a_skill_that_fires_on_the_wrong_prompt_fails(self):
         skills.write_draft(self.wren, "board-check", description="Check a board.", body=BODY,
                            context="personal", side_effect="read-only",

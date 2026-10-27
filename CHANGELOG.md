@@ -38,6 +38,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   session in a new empty `/tmp/cousin-dream-*` directory and left it
   there, hundreds of them on a busy host. It now goes when the session
   does, a failed one included.
+- **A skill draft that edits an approved skill passes its trigger test
+  when it should.** The test loaded the approved copy, with the same
+  name and description, beside the draft, so the copy took the
+  should-trigger prompt and a sound edit failed. The copy the draft would
+  replace is left out of the test; everything else the cousin loads is
+  still there.
 
 ## 4.2.1 - 2026-10-26
 

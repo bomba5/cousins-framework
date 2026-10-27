@@ -22,6 +22,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Fixed
 
+- **A dreaming pass keeps its result when its directory will not go.**
+  Since 4.3.0 each pass removes its working directory when the session
+  ends; an error while removing it (a busy mount, say) replaced the
+  pass's own result or error. The removal now ignores its own errors.
 - **A busy store keeps a runner idle.** A disk saturated by another
   writer held the inbox past its 30 s busy timeout, and each claim that
   failed on it turned the runner `errored`, then back to idle, every 30 s:

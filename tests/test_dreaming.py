@@ -3,9 +3,12 @@ pass run under its budget with memory tools only, its record, undo, and
 the loops worker. The memory side (dream_memory) is a fake here: this is
 the harness's contract with it."""
 import asyncio
+import errno
 import json
 import os
 import pathlib
+import shutil
+import sys
 import tempfile
 import time
 import unittest
@@ -252,6 +255,25 @@ class TestPass(DreamCase):
         for c in (client, failed):
             self.assertTrue(pathlib.Path(c.options.cwd).name.startswith("cousin-dream-"))
             self.assertFalse(pathlib.Path(c.options.cwd).exists())
+
+    def test_a_directory_that_will_not_go_never_fails_the_pass(self):
+        # removing the session's directory is housekeeping: an error there
+        # (a busy mount, say) must not replace the pass's own result
+        def busy(path, onexc=None, onerror=None, **kw):
+            try:
+                raise OSError(errno.EBUSY, "Device or resource busy", path)
+            except OSError as exc:              # rmtree calls its handler from here
+                if onexc is not None:
+                    onexc(os.rmdir, path, exc)
+                else:
+                    onerror(os.rmdir, path, sys.exc_info())
+        ops = FakeOps()
+        with mock.patch.object(tempfile._shutil, "rmtree", busy):
+            end, (client,) = self.run_pass(ops, calls=[
+                ("retire", {"entry_id": "abc", "why": "a newer claim says the barn"})])
+        self.addCleanup(shutil.rmtree, client.options.cwd, True)
+        self.assertEqual(end["result"], "done")
+        self.assertIn(("commit", "e42"), ops.calls)
 
     def test_a_pass_that_cannot_load_its_memory_side_is_recorded_once(self):
         self.toml('dreaming = "nightly"\ndreaming_at = "00:00"\n')

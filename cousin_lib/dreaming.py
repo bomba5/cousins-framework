@@ -274,8 +274,9 @@ async def _session(env, model, prompt, server, budget, client_factory):
     from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, \
         ResultMessage, TextBlock
     # the session's empty working directory goes when the session does,
-    # failed or not: one per pass would otherwise pile up in /tmp
-    with tempfile.TemporaryDirectory(prefix="cousin-dream-") as cwd:
+    # failed or not: one per pass would otherwise pile up in /tmp. Removing
+    # it is housekeeping: an error there never replaces the pass's result
+    with tempfile.TemporaryDirectory(prefix="cousin-dream-", ignore_cleanup_errors=True) as cwd:
         options = ClaudeAgentOptions(
             cwd=cwd, model=model, env=env, setting_sources=[], tools=[],
             mcp_servers={"dream": server}, permission_mode="bypassPermissions",

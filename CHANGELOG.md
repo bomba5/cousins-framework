@@ -3,6 +3,15 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.4.1 - 2026-10-27
+
+### Fixed
+
+- **`in 2h` is two real hours across a clock change.** A prompt
+  scheduled `in 2h` on the night summer time ended fired three hours
+  later: the add passed a naive local time, so the sum ran on the wall
+  clock. The time now carries its offset, and `in` adds real time.
+
 ## 4.4.0 - 2026-10-27
 
 ### Added

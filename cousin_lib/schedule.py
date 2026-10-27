@@ -55,7 +55,9 @@ def parse_when(when, *, now=None):
     """'in 30m' / 'tomorrow 06:30' / ISO datetime -> unix timestamp.
     The bare-number form defaults to minutes."""
     when = when.strip()
-    now = now or datetime.now().astimezone()
+    # 'in' counts real time, so now carries its offset: a naive now added
+    # to is wall-clock arithmetic, an hour off across a clock change
+    now = (now or datetime.now()).astimezone()
     m = re.match(r"^in\s+(\d+)\s*([smhd]?)$", when, re.I)
     if m:
         n = int(m.group(1))
@@ -199,7 +201,7 @@ def _slug():
 def add(slug, when, prompt, *, now=None):
     """Schedule one prompt for a cousin. ValueError for a bad or past
     time or an empty prompt. Returns the row as a dict."""
-    now_dt = now or datetime.now()
+    now_dt = (now or datetime.now()).astimezone()
     ts = parse_when(when, now=now_dt)           # raises ValueError itself
     if ts <= now_dt.timestamp():
         raise ValueError("target %s is in the past"

@@ -4,8 +4,9 @@ import io
 import os
 import pathlib
 import tempfile
+import time
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from cousin_lib import schedule
 from tests._hermetic import HermeticCase
@@ -49,6 +50,25 @@ class TestScheduleLibrary(HermeticCase):
             schedule.add("wren", "yesterday 09:00", "x")
         with self.assertRaises(ValueError):
             schedule.add("wren", "in 5m", "   ")
+
+    def test_in_2h_is_two_real_hours_across_the_fall_back_night(self):
+        # central European rules as a POSIX TZ (no tzdata needed): summer
+        # time ends at 03:00 on 2026-10-25. 'in 2h' set at 01:04 local
+        # (23:04 UTC) is due at 01:04 UTC; 03:04 on the wall that night is
+        # 02:04 UTC, three hours on. `now` is naive, as datetime.now() is.
+        old = os.environ.get("TZ")
+        os.environ["TZ"] = "CET-1CEST,M3.5.0,M10.5.0/3"
+        time.tzset()
+        try:
+            row = schedule.add("wren", "in 2h", "x", now=datetime(2026, 10, 25, 1, 4))
+            self.assertEqual(datetime.fromtimestamp(row["target_ts"], timezone.utc)
+                             .strftime("%Y-%m-%d %H:%M"), "2026-10-25 01:04")
+        finally:
+            if old is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = old
+            time.tzset()
 
     def test_the_cli_add_still_works(self):
         out = io.StringIO()

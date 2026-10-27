@@ -3,7 +3,7 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## 4.4.0 - 2026-10-26
+## 4.4.0 - 2026-10-27
 
 ### Added
 
@@ -37,7 +37,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   failure is reported as before. The SDK, opencode and test runners all
   do this.
 
-## 4.3.0 - 2026-10-26
+## 4.3.0 - 2026-10-27
 
 ### Added
 

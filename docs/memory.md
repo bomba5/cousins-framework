@@ -980,7 +980,7 @@ adds one line to what the cousin sees (the other runner kinds do not
 recall):
 
 ```
-[fw-recall] possibly relevant from your memory: Upkeep (memory:upkeep.md) - cousin-memory search for details; ignore if not.
+[fw-recall] possibly relevant from your memory: Upkeep (memory:upkeep.md) - the memory tool's search has the details; ignore if not.
 ```
 
 Titles and paths only, never file contents, and your stored message is

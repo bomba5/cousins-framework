@@ -10,8 +10,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 - **The recall line points to the memory tool.** On the SDK lane the
   per-turn recall line ended with "cousin-memory search for details",
   sending the cousin to the CLI the contract says never to use for
-  memory. It now says the memory tool's search has the details; the
-  terminal lane keeps the CLI wording.
+  memory. It now says the memory tool's search has the details.
 - **The contract names `remember` as the memory tool's command.** Its
   Memory section said "`remember` with `level=operator`", a bare name a
   cousin can take for a tool of its own: cousins called a

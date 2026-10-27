@@ -28,6 +28,12 @@ reuses the rest, drops what is gone, keeps a prior vector when the
 service fails mid-pass (stale beats invisible), treats an empty index
 over non-empty sources as stale, and is written atomically.
 
+Within one process a search keeps what it read for the next one (the
+runner looks memory up on every turn): the stored vectors with their
+norms, each raw file parsed, each source read and chunked. Each piece
+is keyed on the stat of the file it came from and read again when that
+changes; what is written to disk is as before.
+
 The degrade contract: soft-degrade is silent ONLY when nothing was
 promised. No embedding config -> keyword, silently - the install
 never claimed semantic search. Configured but unreachable or broken
@@ -39,15 +45,18 @@ Context comes from COUSIN_HOME and fails loud: a search that silently
 reads nothing teaches its caller that memory is empty, which is worse
 than an error.
 """
+import collections
 import fcntl
 import gzip
 import array
 import hashlib
 import json
 import math
+import operator
 import os
 import re
 import sqlite3
+import threading
 import time
 import tomllib
 import urllib.request
@@ -135,6 +144,67 @@ def _unpack(blob):
     out = array.array("f")
     out.frombytes(blob)
     return out.tolist()
+
+
+# ------------------------------------------------------- in-process cache
+# The runner recalls on every turn, on worker threads of one long-lived
+# process, and each lookup read the whole store again: every raw file
+# parsed (four times a lookup) and chunked (twice), every stored vector
+# unpacked (twice) and both norms worked out again for every pair.
+# Measured on a real home of 6,191 chunks: 4.5 to 5.6 s a lookup against
+# the runner's 4 s recall budget, and 48 of 77 turns went without
+# recall. A home's reads are kept here and used again while the files
+# they came from are unchanged: the same stat, taken BEFORE the read, so
+# a write that lands during a read shows at the next lookup. Only memory
+# changes: the files, the indexes and their format are what they were.
+#
+# One lock guards it all, for the runner's threads. What a lookup gets
+# out of it is shared: nobody may change it. A runner serves one home;
+# the cap keeps a process that searches many (the console, the loops)
+# from holding every cousin's vectors.
+_CACHE_HOMES = 2
+_CACHE_LOCK = threading.RLock()
+_CACHES = collections.OrderedDict()     # str(home): _HomeCache
+
+
+class _HomeCache:
+    """One home's cached reads, each replaced whole under _CACHE_LOCK."""
+
+    __slots__ = ("raw_files", "raw", "texts", "chunks", "index")
+
+    def __init__(self):
+        self.raw_files = {}  # str(path): (sig, mtime, [(key, text, fingerprint)])
+        self.raw = None      # (each raw file read with its sig, the rows)
+        self.texts = {}      # str(path): (sig, collection, rel, text)
+        self.chunks = None   # (each input of _chunks with its sig, its dict)
+        self.index = None    # (store sig, or None once stale, _VectorIndex)
+
+
+def _home_cache(home):
+    """`home`'s cache, made on first use; past _CACHE_HOMES the least
+    recently used home's goes. Call with _CACHE_LOCK held."""
+    name = str(Path(home))
+    cache = _CACHES.pop(name, None) or _HomeCache()
+    _CACHES[name] = cache
+    while len(_CACHES) > _CACHE_HOMES:
+        _CACHES.popitem(last=False)
+    return cache
+
+
+def _file_stat(path):
+    try:
+        return os.stat(path)
+    except OSError:
+        return None
+
+
+def _sig(st):
+    """What makes a file the one read before: the same file, size and
+    times (an os.stat result; None for no file)."""
+    if st is None:
+        return None
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns,
+            st.st_ctime_ns)
 
 
 # ---------------------------------------------------------------- sources
@@ -237,45 +307,82 @@ def _raw_entries(home):
     149 entries identical), and indexing both returns one memory as
     two hits. Files are walked hot-first, so the copy that survives is
     the readable one.
+
+    A file is parsed again only when its stat changed (_raw_state).
     """
-    out = []
-    seen = set()
+    with _CACHE_LOCK:
+        return list(_raw_state(_home_cache(home), home)[1])
+
+
+def _raw_state(cache, home):
+    """(signature, rows) of the raw store: the rows _raw_entries returns
+    and, as their signature, every file they were read from with its
+    stat. Only a file whose stat changed since `cache` read it is parsed
+    again, so a turn's new entry costs one day file, not the store. A
+    file that cannot be read is skipped, as ever, and tried again next
+    time. Call with _CACHE_LOCK held."""
+    parsed = {}
     for path in _raw_files(home):
-        try:
-            mtime = path.stat().st_mtime
-            opener = gzip.open if path.suffix == ".gz" else open
-            with opener(path, "rt", errors="replace") as fh:
-                lines = fh.readlines()
-        except (OSError, EOFError, zlib.error):
+        st = _file_stat(path)
+        if st is None:
             continue
-        for number, line in enumerate(lines, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except ValueError:
-                continue
-            if not isinstance(entry, dict):
-                continue
-            body = "\n".join(
-                str(entry[f]) for f in _RAW_FIELDS if entry.get(f))
-            if not body:
-                continue
-            when = str(entry.get("timestamp", ""))[:19]
-            text = "%s\n%s" % (when, body) if when else body
-            # Dedupe on the memory, not on its metadata: a digest twin
-            # carries the same topic and content under a different
-            # source, id, entry count and first/last timestamps.
-            same = "%s\n%s" % (entry.get("topic", ""),
-                               entry.get("content", ""))
-            fingerprint = hashlib.sha256(
-                same.encode("utf-8", "replace")).digest()
-            if fingerprint in seen:
-                continue
-            seen.add(fingerprint)
-            out.append(("raw", "%s#%d" % (path, number), text, mtime))
-    return out
+        held = cache.raw_files.get(str(path))
+        if held is not None and held[0] == _sig(st):
+            parsed[str(path)] = held
+            continue
+        rows = _read_raw_file(path)
+        if rows is not None:
+            parsed[str(path)] = (_sig(st), st.st_mtime, rows)
+    cache.raw_files = parsed
+    signature = tuple((name, held[0]) for name, held in parsed.items())
+    if cache.raw is None or cache.raw[0] != signature:
+        out = []
+        seen = set()
+        for _s, mtime, rows in parsed.values():
+            for key, text, fingerprint in rows:
+                if fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+                out.append(("raw", key, text, mtime))
+        cache.raw = (signature, out)
+    return cache.raw
+
+
+def _read_raw_file(path):
+    """[(key, text, fingerprint)] for each line of one raw file that
+    holds an entry, or None when the file cannot be read."""
+    try:
+        opener = gzip.open if path.suffix == ".gz" else open
+        with opener(path, "rt", errors="replace") as fh:
+            lines = fh.readlines()
+    except (OSError, EOFError, zlib.error):
+        return None
+    rows = []
+    for number, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        body = "\n".join(
+            str(entry[f]) for f in _RAW_FIELDS if entry.get(f))
+        if not body:
+            continue
+        when = str(entry.get("timestamp", ""))[:19]
+        text = "%s\n%s" % (when, body) if when else body
+        # Dedupe on the memory, not on its metadata: a digest twin
+        # carries the same topic and content under a different
+        # source, id, entry count and first/last timestamps.
+        same = "%s\n%s" % (entry.get("topic", ""),
+                           entry.get("content", ""))
+        fingerprint = hashlib.sha256(
+            same.encode("utf-8", "replace")).digest()
+        rows.append(("%s#%d" % (path, number), text, fingerprint))
+    return rows
 
 
 def _read(path):
@@ -500,11 +607,25 @@ def _embed(text, config):
         return json.loads(response.read())["embedding"]
 
 
-def _cosine(a, b):
-    dot = sum(x * y for x, y in zip(a, b))
-    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(
-        sum(x * x for x in b))
+def _norm(vector):
+    return math.sqrt(sum(map(operator.mul, vector, vector)))
+
+
+def _cosine_normed(a, norm_a, b, norm_b):
+    """_cosine with each vector's norm given (_norm), so scoring one
+    query against every stored vector works each norm out once, not
+    once per pair. The same arithmetic to the last bit: map makes the
+    products zip did and sum() adds them in the same order.
+    math.sumprod adds in extended precision, so it can differ in the
+    last bit, and it measured 2.7 times slower than this on the Xeon the
+    runner was timed on."""
+    dot = sum(map(operator.mul, a, b))
+    norm = norm_a * norm_b
     return dot / norm if norm else 0.0
+
+
+def _cosine(a, b):
+    return _cosine_normed(a, _norm(a), b, _norm(b))
 
 
 def _chunk_text(body, *, size=2000, overlap=200):
@@ -540,27 +661,52 @@ def _text_hash(text):
 
 def _chunks(home, config, root=None):
     """Every embeddable chunk as {key: (collection, path, text)} with
-    key "<collection>:<relpath>#<chunk>"."""
+    key "<collection>:<relpath>#<chunk>".
+
+    Built again only when an input changed: the chunk sizes, the list
+    of sources, a source's stat or the raw store's (_raw_state); and a
+    source whose stat is unchanged is not read again. The dict is a
+    copy, its values are shared."""
     size = int(config.get("chunk_chars", _DEFAULTS["chunk_chars"]))
     overlap = int(config.get("chunk_overlap", _DEFAULTS["chunk_overlap"]))
-    out = {}
-    for collection, path, rel in _sources(home, root):
-        body = _source_text(collection, path, rel)
-        if body is None:
-            continue
-        for i, text in enumerate(_chunk_text(body, size=size,
-                                             overlap=overlap)):
-            out["%s:%s#%d" % (collection, rel, i)] = (collection, path,
-                                                       text)
-    for collection, key, body, _mtime in _raw_entries(home):
-        # An entry is its own chunk when it fits, which is the usual
-        # case (median 881 chars against a 2000-char window); a long
-        # one still splits rather than being truncated.
-        for i, text in enumerate(_chunk_text(body, size=size,
-                                             overlap=overlap)):
-            out["%s:%s#%d" % (collection, key, i)] = (collection,
-                                                      Path(key), text)
-    return out
+    listed = _sources(home, root)
+    with _CACHE_LOCK:
+        cache = _home_cache(home)
+        raw_signature, raw = _raw_state(cache, home)
+        sources = [(collection, path, rel, _sig(_file_stat(path)))
+                   for collection, path, rel in listed]
+        signature = (size, overlap, raw_signature,
+                     tuple((c, str(p), r, s) for c, p, r, s in sources))
+        if cache.chunks is not None and cache.chunks[0] == signature:
+            return dict(cache.chunks[1])
+        out = {}
+        texts = {}
+        for collection, path, rel, sig in sources:
+            held = cache.texts.get(str(path))
+            if sig is not None and held is not None \
+                    and held[:3] == (sig, collection, rel):
+                body = held[3]
+            else:
+                body = _source_text(collection, path, rel)
+            if body is None:
+                continue
+            if sig is not None:
+                texts[str(path)] = (sig, collection, rel, body)
+            for i, text in enumerate(_chunk_text(body, size=size,
+                                                 overlap=overlap)):
+                out["%s:%s#%d" % (collection, rel, i)] = (collection, path,
+                                                           text)
+        cache.texts = texts
+        for collection, key, body, _mtime in raw:
+            # An entry is its own chunk when it fits, which is the usual
+            # case (median 881 chars against a 2000-char window); a long
+            # one still splits rather than being truncated.
+            for i, text in enumerate(_chunk_text(body, size=size,
+                                                 overlap=overlap)):
+                out["%s:%s#%d" % (collection, key, i)] = (collection,
+                                                          Path(key), text)
+        cache.chunks = (signature, out)
+        return dict(out)
 
 
 def _migrate_legacy_index(home):
@@ -591,15 +737,8 @@ def _load_index(home):
     path = _index_path(home)
     if not path.exists():
         return _migrate_legacy_index(home)
-    try:
-        conn = sqlite3.connect(path)
-        try:
-            rows = conn.execute(
-                "SELECT key, mtime, text_hash, vector FROM vectors"
-            ).fetchall()
-        finally:
-            conn.close()
-    except sqlite3.Error:
+    rows = _index_rows(path)
+    if rows is None:
         return None
     out = {}
     for key, mtime, text_hash, blob in rows:
@@ -608,6 +747,119 @@ def _load_index(home):
             entry["vector"] = _unpack(blob)
         out[key] = entry
     return out
+
+
+def _index_rows(path):
+    """Every row of the store at `path` as (key, mtime, text_hash,
+    vector blob), or None when it cannot be read."""
+    try:
+        conn = sqlite3.connect(path)
+        try:
+            return conn.execute(
+                "SELECT key, mtime, text_hash, vector FROM vectors"
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+
+
+class _VectorIndex:
+    """The store as the semantic leg reads it. `entries` as _load_index
+    gives them, except that each vector is a float32 array: the store's
+    own bytes, so the same numbers _unpack gives, in a quarter of a
+    list's memory. `norms`: a vector's norm by key, worked out the first
+    time a lookup scores it. Shared between threads: entries never
+    change once built, and norms only gain keys, under _CACHE_LOCK."""
+
+    __slots__ = ("entries", "norms")
+
+    def __init__(self, entries, norms=None):
+        self.entries = entries
+        self.norms = {} if norms is None else norms
+
+
+def _index_from_rows(rows, previous=None):
+    """A _VectorIndex of `rows`. A row whose vector bytes `previous`
+    holds already keeps that vector and its norm, so a store rewritten
+    for one new chunk is unpacked for one row, not every row."""
+    held = previous.entries if previous is not None else {}
+    held_norms = previous.norms if previous is not None else {}
+    entries = {}
+    norms = {}
+    for key, mtime, text_hash, blob in rows:
+        entry = {"mtime": mtime, "text_hash": text_hash}
+        if blob:
+            prior = (held.get(key) or {}).get("vector")
+            if isinstance(prior, array.array) and prior.tobytes() == blob:
+                entry["vector"] = prior
+                if key in held_norms:
+                    norms[key] = held_norms[key]
+            else:
+                entry["vector"] = array.array("f")
+                entry["vector"].frombytes(blob)
+        entries[key] = entry
+    return _VectorIndex(entries, norms)
+
+
+def _index_sig(path):
+    """The store's stat and its WAL's, or None when there is no store. In
+    WAL mode a commit lands in <store>-wal and reaches the store itself
+    at a checkpoint, so the store's own stat would miss it."""
+    st = _file_stat(path)
+    if st is None:
+        return None
+    return _sig(st), _sig(_file_stat(str(path) + "-wal"))
+
+
+def _cached_index(home):
+    """The store as a _VectorIndex, read from the disk again only when
+    the store or its WAL changed since this process read it, or after
+    this process wrote it (_forget_index); None when there is no
+    readable store, as _load_index. A reread unpacks only the rows whose
+    bytes changed."""
+    home = Path(home)
+    path = _index_path(home)
+    with _CACHE_LOCK:
+        cache = _home_cache(home)
+        sig = _index_sig(path)
+        if sig is not None:
+            held_sig, held = cache.index or (None, None)
+            if held is not None and held_sig == sig:
+                return held
+            rows = _index_rows(path)
+            if rows is None:
+                cache.index = None
+                return None
+            loaded = _index_from_rows(rows, held)
+            cache.index = (sig, loaded)
+            return loaded
+        cache.index = None
+    # No store: _load_index migrates a legacy JSON one or says there is
+    # none. Once in a home's life, so not cached, and outside the lock:
+    # the migration writes.
+    loaded = _load_index(home)
+    return None if loaded is None else _VectorIndex(loaded)
+
+
+def _index_norms(index, keys):
+    """index.norms, holding the norm of each of `keys` (keys of `index`
+    with a vector): only the ones not there yet are worked out."""
+    with _CACHE_LOCK:
+        for key in keys:
+            if key not in index.norms:
+                index.norms[key] = _norm(index.entries[key]["vector"])
+        return index.norms
+
+
+def _forget_index(home):
+    """Mark `home`'s cached store stale: this process wrote it. The next
+    read goes to the disk even when the write left every stat as it
+    was, and still keeps the vectors whose bytes did not change."""
+    with _CACHE_LOCK:
+        cache = _CACHES.get(str(Path(home)))
+        if cache is not None and cache.index is not None:
+            cache.index = (None, cache.index[1])
 
 
 _VECTORS_SCHEMA = (
@@ -620,7 +872,15 @@ def _write_index_atomic(home, index):
     """Replace the store's contents with `index`, in one transaction:
     a reader never sees a half-written index and a crash mid-write
     leaves the previous contents intact. Keys absent from `index` are
-    gone, which is what the JSON write did by rewriting the file."""
+    gone, which is what the JSON write did by rewriting the file. This
+    process's cached copy is marked stale however the write ends."""
+    try:
+        _write_index(home, index)
+    finally:
+        _forget_index(home)
+
+
+def _write_index(home, index):
     path = _index_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -719,7 +979,10 @@ def ensure_index(home, config, *, force=False, root=None, wait=True,
 
 def _refresh_index(home, config, *, force, root, budget=None):
     chunks = _chunks(home, config, root)
-    old = None if force else _load_index(home)
+    # The cached store: what _load_index would read, shared, so `old`
+    # and its entries are only ever read here.
+    old = None if force else _cached_index(home)
+    old = None if old is None else old.entries
     missing = old is None
     if force:
         reason = "forced"
@@ -732,6 +995,7 @@ def _refresh_index(home, config, *, force, root, budget=None):
     old = old or {}
 
     index = {}
+    digests = {}
     embedded = reused = failed = 0
     fresh = 0
     incomplete = False
@@ -743,7 +1007,7 @@ def _refresh_index(home, config, *, force, root, budget=None):
             for rest, entry in old.items():
                 index.setdefault(rest, entry)
             break
-        digest = _text_hash(text)
+        digest = digests[key] = _text_hash(text)
         try:
             mtime = path.stat().st_mtime
         except OSError:
@@ -787,7 +1051,7 @@ def _refresh_index(home, config, *, force, root, budget=None):
     ranked = sum(1 for key, (_c, _p, text) in chunks.items()
                  if (index.get(key) or {}).get("vector")
                  and (index.get(key) or {}).get("text_hash")
-                 == _text_hash(text))
+                 == (digests.get(key) or _text_hash(text)))
     return {"embedded": embedded, "reused": reused, "dropped": dropped,
             "failed": failed, "stale_reason": reason, "busy": False,
             "incomplete": incomplete, "ranked": ranked,
@@ -809,20 +1073,28 @@ def _semantic_search(query, home, top, config, collection=None, root=None):
     and the failure raises to the caller, which degrades WITH a
     notice - the contract forbids this leg dying quietly. Returns
     (hits, failed) where failed counts chunks the pass could not
-    embed."""
+    embed. The vectors, their norms and the chunks come from this
+    process's cache (_cached_index, _chunks): a lookup over an unchanged
+    memory reads neither the store nor a raw file again, and scores
+    each chunk with one dot product."""
     query_vector = _embed(query, config)
     report = ensure_index(home, config, wait=False, root=root,
                           budget=FOREGROUND_BUDGET)
-    index = _load_index(home) or {}
+    index = _cached_index(home) or _VectorIndex({})
     chunks = _chunks(home, config, root)
-    best = {}
+    scored = []
     for key, (coll, path, text) in chunks.items():
         if collection and coll != collection:
             continue
-        entry = index.get(key)
+        entry = index.entries.get(key)
         if not entry or not entry.get("vector"):
             continue
-        score = _cosine(query_vector, entry["vector"])
+        scored.append((key, coll, path, text, entry["vector"]))
+    norms = _index_norms(index, [row[0] for row in scored])
+    query_norm = _norm(query_vector)
+    best = {}
+    for key, coll, path, text, vector in scored:
+        score = _cosine_normed(query_vector, query_norm, vector, norms[key])
         chunk = int(key.rsplit("#", 1)[1])
         current = best.get(str(path))
         if current is None or score > current["score"]:

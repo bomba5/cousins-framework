@@ -3,6 +3,23 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.4.3 - 2026-10-27
+
+### Fixed
+
+- **Proactive recall answers inside its budget again.** Each turn's
+  recall read the whole memory store anew: every raw file parsed four
+  times and chunked twice, every stored vector unpacked twice, and both
+  norms worked out again for every chunk. On a home of 6,200 chunks a
+  lookup took 4.5 to 5.6 s against the runner's 4 s budget, so 48 of
+  77 turns went without recall. A long-lived process now keeps what a
+  lookup read (the vectors with their norms, each memory file parsed
+  and chunked) and reads a file again only when its stat changes, and
+  then only that file. On a copy of that home a repeat lookup takes 1.2
+  to 1.5 s instead of 4.7 to 5.5 s, and the first one in a process 2.3
+  to 3.0 s. Hits and scores are the same to the last bit, and the files
+  on disk are written as before.
+
 ## 4.4.2 - 2026-10-27
 
 ### Fixed

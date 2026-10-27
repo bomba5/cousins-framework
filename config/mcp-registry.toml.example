@@ -32,7 +32,8 @@ query = { type = "string", description = "search text (search)" }
 top = { type = "integer", description = "max results (search)" }
 collection = { type = "string", enum = ["memory", "notes", "harness"], description = "limit to one collection (search)" }
 json = { type = "boolean", description = "hits as a JSON list (search)" }
-topic = { type = "string", description = "decision topic (decide, remember); the topic to retire (obsolete)" }
+topic = { type = "string", description = "decision topic (decide, remember), one claim per topic: the newest entry on a topic is the one the distilled views show, so independent facts get topics of their own; the topic to retire (obsolete)" }
+topics = { type = "array", items = "string", optional = true, description = "more topics to retire in the same call, with the same why: the views are rebuilt once for all of them (obsolete)" }
 decision = { type = "string", description = "the decision (decide)" }
 reasoning = { type = "string", description = "why (decide)" }
 fact = { type = "string", description = "the fact to keep (remember)" }
@@ -69,7 +70,7 @@ argv = ["why", "{id}"]
 options = { json = "--json", depth = "--depth" }
 
 [tools.memory.commands.obsolete]
-argv = ["obsolete", "{topic}"]
+argv = ["obsolete", "{topic}", "{topics}"]
 options = { why = "--why", force = "--force", entry = "--entry" }
 
 [tools.memory.commands.recall]

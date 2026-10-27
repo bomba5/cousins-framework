@@ -156,6 +156,9 @@ SHIPPED_BEFORE = {
     ('tools.memory.commands.decide', 'options'): (
         {'level': '--level', 'cite': '--cite'},
     ),
+    ('tools.memory.commands.obsolete', 'argv'): (
+        ['obsolete', '{topic}'],
+    ),
     ('tools.memory.commands.obsolete', 'options'): (
         {'why': '--why', 'force': '--force'},
     ),
@@ -187,9 +190,11 @@ SHIPPED_BEFORE = {
         'filter (recall)',
     ),
     ('tools.memory.properties', 'topic'): (
+        {'type': 'string', 'description': 'decision topic (decide, remember); the topic to retire (obsolete)'},
         {'type': 'string', 'description': 'decision topic (decide)'},
     ),
     ('tools.memory.properties', 'topic.description'): (
+        'decision topic (decide, remember); the topic to retire (obsolete)',
         'decision topic (decide)',
     ),
     ('tools.send.commands.operator', 'options'): (

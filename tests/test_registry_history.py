@@ -32,3 +32,30 @@ class TestRegistryHistory(unittest.TestCase):
         from cousin_lib import template_sync
         for key, olds in registry_history.SHIPPED_BEFORE.items():
             self.assertEqual([old for old, _ in template_sync._MIGRATIONS[key]], list(olds))
+
+    def test_the_topic_wording_says_one_claim_per_topic_and_reaches_old_homes(self):
+        # the distilled views show the newest entry per topic: a topic with
+        # several independent facts hid all but one, so the tool says so
+        import json
+        import tempfile
+        import tomllib
+        from cousin_lib import template_sync
+
+        def topic(text):
+            return tomllib.loads(text)["tools"]["memory"]["properties"]["topic"]["description"]
+        shipped = (ROOT / registry_history.REGISTRY).read_text()
+        new, old = topic(shipped), \
+            "decision topic (decide, remember); the topic to retire (obsolete)"
+        self.assertIn("one claim per topic", new)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "config").mkdir()
+            (root / registry_history.REGISTRY).write_text(shipped)
+            home = root / "cousins" / "wren"
+            home.mkdir(parents=True)
+            reg = home / "mcp-registry.toml"
+            reg.write_text(shipped.replace(json.dumps(new), json.dumps(old)))
+            self.assertEqual(topic(reg.read_text()), old)
+            out = template_sync._registry_sync(home, root, apply=True)
+            self.assertIn("tools.memory.properties.topic", out["corrected"])
+            self.assertEqual(topic(reg.read_text()), new)

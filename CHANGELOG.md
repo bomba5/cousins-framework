@@ -3,6 +3,48 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.3.0 - 2026-10-26
+
+### Added
+
+- **Several memory topics retire in one call.** A cleanup that marked 35
+  topics obsolete ran 35 full rebuilds of the distilled views, one per
+  call. `cousin-memory obsolete` now takes one or more topics with one
+  reason, and the memory tool's `obsolete` takes `topics` beside
+  `topic`; the views are rebuilt once, after the last mark. A refused
+  topic (no raw entries, no `--force`) stops the batch there: the topics
+  before it stay marked, the views are rebuilt for them, and the error
+  names both. `--entry`, which retires one claim, still takes a single
+  topic.
+
+### Fixed
+
+- **The memory tool says one claim per topic.** The distilled views show
+  the newest entry of a topic, so a topic holding several independent
+  facts showed one and read the rest as superseded. The `topic`
+  description now says so; a home still holding the earlier wording
+  gets it on its next registry sync.
+- **A new cousin records the release its registry came from.**
+  `cousin-spawn` wrote no `data/template-sync.json`, so the home's first
+  `cousin-upgrade` planned it from the running code, which after
+  `--switch` is already the target, and missed the entries that release
+  retired. Spawn now writes the record `cousin-upgrade` writes, for the
+  checkout it rendered from.
+- **`cousin-spawn --sync-template` says what syncs a CLAUDE.md.** Its
+  help and its dry run said every start and flip syncs it. Nothing does
+  by itself: `--apply` here writes it, and `cousin-upgrade --apply-homes`
+  brings only the registry.
+- **A dreaming pass removes its working directory.** Each pass ran its
+  session in a new empty `/tmp/cousin-dream-*` directory and left it
+  there, hundreds of them on a busy host. It now goes when the session
+  does, a failed one included.
+- **A skill draft that edits an approved skill passes its trigger test
+  when it should.** The test loaded the approved copy, with the same
+  name and description, beside the draft, so the copy took the
+  should-trigger prompt and a sound edit failed. The copy the draft would
+  replace is left out of the test; everything else the cousin loads is
+  still there.
+
 ## 4.2.1 - 2026-10-26
 
 ### Fixed

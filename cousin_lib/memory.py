@@ -491,6 +491,25 @@ def mark_obsolete(home, topic, why, *, by=None, force=False,
     return _append_raw(home, mark)
 
 
+def mark_obsolete_many(home, topics, why, *, by=None, force=False, entry=None):
+    """mark_obsolete for each of `topics` in order, so a cleanup rebuilds
+    the distilled views once after the batch instead of once per topic.
+    Stops at the first refusal: (marked topics, None), or (marked,
+    (topic, ObsoleteRefused)). `entry` is one claim of one topic, so it
+    takes a single topic."""
+    topics = list(dict.fromkeys(str(t or "").strip() for t in topics))
+    if entry and len(topics) != 1:
+        raise ObsoleteRefused("an entry is one claim of one topic: give a single topic with it")
+    marked = []
+    for topic in topics:
+        try:
+            mark_obsolete(home, topic, why, by=by, force=force, entry=entry)
+        except ObsoleteRefused as err:
+            return marked, (topic, err)
+        marked.append(topic)
+    return marked, None
+
+
 WHY_MAX_DEPTH = 12
 
 
@@ -1343,18 +1362,27 @@ def _cmd_why(args):
 
 
 def _cmd_obsolete(args):
-    """Mark a topic superseded (L5): out of the distilled views, kept in
-    raw. A later entry on the topic brings it back."""
+    """Mark one or more topics superseded (L5): out of the distilled
+    views, kept in raw. A later entry on a topic brings it back. The
+    views are rebuilt once, after the last mark."""
     home = _home(args)
     try:
-        mark_obsolete(home, args.topic, args.why, force=args.force,
-                      by=os.environ.get("COUSIN_SLUG") or home.name, entry=args.entry)
+        marked, refused = mark_obsolete_many(
+            home, args.topic, args.why, force=args.force,
+            by=os.environ.get("COUSIN_SLUG") or home.name, entry=args.entry)
     except ObsoleteRefused as err:
         print("error: %s" % err, file=sys.stderr)
         return 2
-    print("Marked obsolete [%s]: %s" % (args.topic.strip(),
-                                        " ".join(args.why.split())))
-    return _run_distill(home)
+    for topic in marked:
+        print("Marked obsolete [%s]: %s" % (topic, " ".join(args.why.split())))
+    if marked:
+        _run_distill(home)
+    if refused:
+        topic, err = refused
+        print(("error: %s" % err) if not marked else
+              ("error: [%s] not marked: %s" % (topic, err)), file=sys.stderr)
+        return 2
+    return 0
 
 
 def _cmd_history(args):
@@ -1772,7 +1800,9 @@ def memory_main(argv=None):
         help="mark a topic superseded (L5_OBSOLETE): the distiller drops"
              " it from the distilled views, raw keeps the history; a"
              " later entry on the topic revives it")
-    p.add_argument("topic")
+    p.add_argument("topic", nargs="+",
+                   help="one or more topics, all with the same --why; the views"
+                        " are rebuilt once for the batch")
     p.add_argument("--why", required=True,
                    help="what superseded it (required, non-empty)")
     p.add_argument("--force", action="store_true",

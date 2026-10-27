@@ -246,6 +246,13 @@ class TestPass(DreamCase):
         self.assertEqual(ops.calls[-1][0], "abandon")
         self.assertEqual(dreaming.passes(self.home)[0]["result"], "error")
 
+    def test_the_session_directory_is_gone_after_a_pass_good_or_failed(self):
+        _, (client,) = self.run_pass(FakeOps())
+        _, (failed,) = self.run_pass(FakeOps(), fail=RuntimeError("the CLI died"))
+        for c in (client, failed):
+            self.assertTrue(pathlib.Path(c.options.cwd).name.startswith("cousin-dream-"))
+            self.assertFalse(pathlib.Path(c.options.cwd).exists())
+
     def test_a_pass_that_cannot_load_its_memory_side_is_recorded_once(self):
         self.toml('dreaming = "nightly"\ndreaming_at = "00:00"\n')
         with mock.patch.object(dreaming, "_memory_ops", side_effect=ImportError("no dream_memory")):

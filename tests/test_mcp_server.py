@@ -266,6 +266,11 @@ class CallAssemblyCase(unittest.TestCase):
             self.tool, "obsolete", {"topic": "t", "why": "w", "force": True},
             resolve=lambda name: name)
         self.assertEqual(argv[-1], "--force")
+        # more topics in the same call: one rebuild of the views for all
+        argv, _ = mcp_server.build_call(
+            self.tool, "obsolete", {"topic": "a", "topics": ["b", "c"], "why": "w"},
+            resolve=lambda name: name)
+        self.assertEqual(argv, ["cousin-memory", "obsolete", "a", "b", "c", "--why", "w"])
 
     def test_a_schema_property_no_command_passes_on_is_refused(self):
         """A home's registry whose schema grew while a command's options

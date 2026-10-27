@@ -881,7 +881,13 @@ class TestTurns(OpencodeCase):
         home = self.home()
         r = self.started(self.runner([[("AUTH_401",)], [("text", "back")]], home=home))
         a = r.enqueue(_op("one"))
-        self.assertTrue(_wait(lambda: r.login_required()))
+        # wait for everything read below, not just the flag: the result and
+        # auth events and the file land after it, later still on a loaded host
+        self.assertTrue(_wait(lambda: r.login_required() and r.state() == "errored"
+                              and any(p.get("auth") == "login_required"
+                                      for p in self.payloads(r, "result"))
+                              and self.payloads(r, "auth")
+                              and (home / "data" / "login-required.json").exists()))
         self.assertEqual(r.state(), "errored")
         self.assertEqual(r.inbox.get(a.inbox_id)["state"], "queued")
         result = self.payloads(r, "result")[-1]

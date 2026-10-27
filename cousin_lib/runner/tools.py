@@ -113,15 +113,21 @@ def _m_why(ctx, a):
 
 
 def _m_obsolete(ctx, a):
-    # The CLI marks, prints one line, then rebuilds the distilled views
-    # and prints the distill report; the report is formatted here instead
-    # of printed so nothing reaches this process's stdout.
+    # The CLI marks, prints one line per topic, then rebuilds the distilled
+    # views once and prints the distill report; the report is formatted
+    # here instead of printed so nothing reaches this process's stdout.
+    # `topics` adds more topics to the same call: each mark is cheap, a
+    # rebuild of the views is not, so a cleanup pays for one.
     from cousin_lib import distill, memory
-    topic, why = _str(a, "topic"), _str(a, "why")
+    topics = [_str(a, "topic")] + [str(t) for t in (a.get("topics") or [])]
+    why = _str(a, "why")
     # `entry` retires one claim by its id (`tensions`/`history` list them)
-    memory.mark_obsolete(ctx.home, topic, why, force=bool(a.get("force")), by=ctx.slug,
-                         entry=_str(a, "entry") or None)
-    lines = ["Marked obsolete [%s]: %s" % (topic.strip(), " ".join(why.split()))]
+    marked, refused = memory.mark_obsolete_many(
+        ctx.home, topics, why, force=bool(a.get("force")), by=ctx.slug,
+        entry=_str(a, "entry") or None)
+    if refused and not marked:
+        raise refused[1]
+    lines = ["Marked obsolete [%s]: %s" % (t, " ".join(why.split())) for t in marked]
     report = distill.distill(Path(ctx.home))
     lines.append("distilled %d topics from %d raw entries:"
                  % (report["topics"], report["entries"]))
@@ -130,6 +136,10 @@ def _m_obsolete(ctx, a):
                      % report["obsolete"])
     for fname, count in report["files"].items():
         lines.append("  %s: %d" % (fname, count))
+    if refused:
+        # an error, so it is not read as all done, with what was done in it
+        raise memory.ObsoleteRefused("%s\n[%s] not marked, nor any topic after it: %s"
+                                     % ("\n".join(lines), refused[0], refused[1]))
     return "\n".join(lines)
 
 

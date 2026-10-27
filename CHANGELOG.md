@@ -34,6 +34,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   help and its dry run said every start and flip syncs it. Nothing does
   by itself: `--apply` here writes it, and `cousin-upgrade --apply-homes`
   brings only the registry.
+- **A dreaming pass removes its working directory.** Each pass ran its
+  session in a new empty `/tmp/cousin-dream-*` directory and left it
+  there, hundreds of them on a busy host. It now goes when the session
+  does, a failed one included.
 
 ## 4.2.1 - 2026-10-26
 

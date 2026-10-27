@@ -273,43 +273,45 @@ async def _session(env, model, prompt, server, budget, client_factory):
     the stop for a runaway pass, and `tokens` says what a pass spent."""
     from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, \
         ResultMessage, TextBlock
-    cwd = tempfile.mkdtemp(prefix="cousin-dream-")
-    options = ClaudeAgentOptions(
-        cwd=cwd, model=model, env=env, setting_sources=[], tools=[],
-        mcp_servers={"dream": server}, permission_mode="bypassPermissions",
-        max_turns=MAX_TURNS,
-        # strict-mcp-config: without it the CLI also attaches the account's
-        # claude.ai connectors (mail, drive, calendar), ~42k tokens of tool
-        # definitions under bypassPermissions; tools=[] does not stop them
-        extra_args={"no-session-persistence": None, "strict-mcp-config": None})
-    client = (client_factory or (lambda o: ClaudeSDKClient(options=o)))(options)
-    tokens, texts, over, seen = 0, [], False, set()
-    await client.connect()
-    try:
-        await client.query(prompt)
-        async for msg in client.receive_response():
-            if isinstance(msg, AssistantMessage):
-                # one API response can arrive as several messages sharing
-                # its id and its usage: count each response once
-                mid = getattr(msg, "message_id", None)
-                if mid is None or mid not in seen:
-                    seen.add(mid)
-                    tokens += _weighted(getattr(msg, "usage", None))
-                texts += [b.text for b in msg.content or () if isinstance(b, TextBlock)]
-                if tokens > budget and not over:
-                    over = True
-                    await client.interrupt()
-            elif isinstance(msg, ResultMessage):
-                # the run's real total: a streamed message carries its
-                # response's usage from before the output (thinking
-                # included) was written, so the check above sees output
-                # late. Over by the total alone, the session still ended
-                # on its own: it read its whole slice, and abandoning it
-                # would hand the next pass the same slice to pay for again
-                total = _weighted(getattr(msg, "usage", None))
-                tokens = max(tokens, total)
-    finally:
-        await client.disconnect()
+    # the session's empty working directory goes when the session does,
+    # failed or not: one per pass would otherwise pile up in /tmp
+    with tempfile.TemporaryDirectory(prefix="cousin-dream-") as cwd:
+        options = ClaudeAgentOptions(
+            cwd=cwd, model=model, env=env, setting_sources=[], tools=[],
+            mcp_servers={"dream": server}, permission_mode="bypassPermissions",
+            max_turns=MAX_TURNS,
+            # strict-mcp-config: without it the CLI also attaches the account's
+            # claude.ai connectors (mail, drive, calendar), ~42k tokens of tool
+            # definitions under bypassPermissions; tools=[] does not stop them
+            extra_args={"no-session-persistence": None, "strict-mcp-config": None})
+        client = (client_factory or (lambda o: ClaudeSDKClient(options=o)))(options)
+        tokens, texts, over, seen = 0, [], False, set()
+        await client.connect()
+        try:
+            await client.query(prompt)
+            async for msg in client.receive_response():
+                if isinstance(msg, AssistantMessage):
+                    # one API response can arrive as several messages sharing
+                    # its id and its usage: count each response once
+                    mid = getattr(msg, "message_id", None)
+                    if mid is None or mid not in seen:
+                        seen.add(mid)
+                        tokens += _weighted(getattr(msg, "usage", None))
+                    texts += [b.text for b in msg.content or () if isinstance(b, TextBlock)]
+                    if tokens > budget and not over:
+                        over = True
+                        await client.interrupt()
+                elif isinstance(msg, ResultMessage):
+                    # the run's real total: a streamed message carries its
+                    # response's usage from before the output (thinking
+                    # included) was written, so the check above sees output
+                    # late. Over by the total alone, the session still ended
+                    # on its own: it read its whole slice, and abandoning it
+                    # would hand the next pass the same slice to pay for again
+                    total = _weighted(getattr(msg, "usage", None))
+                    tokens = max(tokens, total)
+        finally:
+            await client.disconnect()
     summary = " ".join(" ".join(texts[-1:]).split())[:500] if texts else ""
     return tokens, summary, over
 

@@ -730,6 +730,26 @@ class TestOneCousinPerAccount(OpencodeCase):
 
 
 class TestTurns(OpencodeCase):
+    def test_a_busy_store_is_waited_out_and_said_once(self):
+        # an error event every claim while another writer held the inbox; now
+        # one store_busy when it starts and one when a claim gets through
+        import sqlite3
+        r = self.runner([[("text", "done")]])
+        real, fails = r.inbox.claim, [sqlite3.OperationalError("database is locked")] * 2
+
+        def claim(**kw):
+            if fails:
+                raise fails.pop()
+            return real(**kw)
+        r.inbox.claim = claim
+        self.started(r)
+        a = r.enqueue(_op("while the disk is busy"))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 10))
+        self.assertEqual(self.outcome(r, a), "delivered")
+        self.assertEqual([p["ongoing"] for p in self.payloads(r, "system")
+                          if p.get("subtype") == "store_busy"], [True, False])
+        self.assertFalse([p for p in self.payloads(r, "error") if "inbox" in p.get("error", "")])
+
     def test_a_turn_emits_its_events_and_closes_its_row(self):
         r = self.started(self.runner([[("reasoning", "let me look"),
                                        ("tool", "cousin_memory", {"command": "search"}, "found"),

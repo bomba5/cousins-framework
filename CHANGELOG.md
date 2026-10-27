@@ -20,6 +20,18 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   task's stack and the sites the turn waits at. A loop too stuck to run
   that shows in the thread stacks instead.
 
+### Fixed
+
+- **A busy store keeps a runner idle.** A disk saturated by another
+  writer held the inbox past its 30 s busy timeout, and each claim that
+  failed on it turned the runner `errored`, then back to idle, every 30 s:
+  the console showed a fault for a wait. A claim that fails on a locked or
+  busy store now leaves the runner idle and is tried again a second
+  later; the stream says it once (`system` `store_busy`) and once more
+  when a claim gets through, with how long it took. Any other store
+  failure is reported as before. The SDK, opencode and test runners all
+  do this.
+
 ## 4.3.0 - 2026-10-26
 
 ### Added

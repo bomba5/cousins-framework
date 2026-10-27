@@ -5,10 +5,49 @@ the locked interface; every runner kind implements
 it (`FakeRunner`, `SdkRunner`, `OpencodeRunner`, `TmuxRunner`) and one
 contract suite tests them.
 """
+import sqlite3
+import time
 from dataclasses import dataclass
 from typing import Iterator, Protocol
 
 from cousin_lib.delivery import Item, parse_thread
+
+
+class StoreBusy:
+    """An idle claim that failed on a store another writer holds:
+    sqlite's "database is locked" or "busy", after the connection's own
+    busy timeout (a saturated disk can hold a write that long). It is
+    transient, not the runner failing: the runner stays idle and claims
+    again, and the stream says it once per episode (`system` `store_busy`,
+    ongoing) and once when a claim gets through (with how long it took),
+    never `errored` every backoff."""
+
+    def __init__(self, stream):
+        self.stream = stream
+        self.since = None
+
+    @staticmethod
+    def is_busy(exc):
+        text = str(exc).lower()
+        return isinstance(exc, sqlite3.OperationalError) and ("locked" in text or "busy" in text)
+
+    def failed(self, exc):
+        """True when `exc` is a busy store, said in the stream the first
+        time; False for any other failure, which stays the caller's."""
+        if not self.is_busy(exc):
+            return False
+        if self.since is None:
+            self.since = time.monotonic()
+            self.stream.append("system", {"subtype": "store_busy", "ongoing": True,
+                                          "error": "%s: %s" % (type(exc).__name__, exc)})
+        return True
+
+    def claimed(self):
+        """A claim got through: the episode, if one ran, ends."""
+        if self.since is not None:
+            self.stream.append("system", {"subtype": "store_busy", "ongoing": False,
+                                          "seconds": round(time.monotonic() - self.since, 1)})
+            self.since = None
 
 
 class RunnerError(Exception):

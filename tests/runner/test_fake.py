@@ -119,6 +119,27 @@ class TestFakeRunner(HermeticCase):
         super().setUp()
         self.home = temp_home(self)
 
+    def test_a_busy_store_is_waited_out_idle_and_never_errored(self):
+        # the contract the real kinds keep: a locked store is waited out
+        import sqlite3
+        r = FakeRunner(self.home); self.addCleanup(lambda: r.stop(timeout=5))
+        real, fails = r.inbox.claim, [sqlite3.OperationalError("database is locked")] * 2
+
+        def claim(**kw):
+            if fails:
+                raise fails.pop()
+            return real(**kw)
+        r.inbox.claim = claim
+        rec = r.inbox.put(Item("operator:priya", "chat", "x", sender="Priya"))
+        r.start()
+        deadline = time.monotonic() + 10
+        while r.inbox.get(rec)["state"] != "done" and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(r.inbox.get(rec)["state"], "done")
+        self.assertNotIn("errored", [e["payload"]["to"] for e in r.events() if e["kind"] == "state"])
+        self.assertEqual([e["payload"]["ongoing"] for e in r.events() if e["kind"] == "system"
+                          and e["payload"].get("subtype") == "store_busy"], [True, False])
+
     def test_state_transitions_are_in_the_stream(self):
         r = FakeRunner(self.home); self.addCleanup(lambda: r.stop(timeout=5))
         r.start()

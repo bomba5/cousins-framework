@@ -47,7 +47,7 @@ from cousin_lib.crashpoint import crashpoint
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
 from cousin_lib.runner import (auth, config_watch, cost_cap, envelope, extract, hooks,
                                memory_watch, restart_note, rollover, tool_ledger, tools, wake)
-from cousin_lib.runner.base import (INTERRUPT, NO_TURN, SURFACE_KINDS, Receipt, RunnerError,
+from cousin_lib.runner.base import (INTERRUPT, NO_TURN, SURFACE_KINDS, Receipt, RunnerError, StoreBusy,
                                      folds_into_turn)
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.policy import Policy
@@ -479,6 +479,7 @@ class SdkRunner:
                                         uuid.uuid4().hex[:8])
         self.inbox = Inbox(self.home)
         self.stream = EventStream(self.home, self.session_id)
+        self._store_busy = StoreBusy(self.stream)
         self.machine = StateMachine(on_change=self._on_state)
         self.turn = Turn()
         self._lock = threading.Lock()
@@ -1582,9 +1583,15 @@ class SdkRunner:
                     try:
                         rows = self._claim(1)
                     except Exception as exc:  # noqa: BLE001 - a store failure is never silence
+                        if self._store_busy.failed(exc):
+                            # another writer holds the store (a saturated disk): the
+                            # claim waited out its busy timeout; idle, and again
+                            await asyncio.sleep(1.0)
+                            continue
                         self._fail_turn([], exc)
                         await asyncio.sleep(0.2)  # a wedged store must not spin the loop
                         continue
+                    self._store_busy.claimed()
                     if not rows:
                         self._pump_start()            # the CLI is not always quiet
                         await asyncio.get_running_loop().run_in_executor(

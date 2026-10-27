@@ -72,7 +72,7 @@ from cousin_lib.runner import auth, checkpoints, cost_cap, envelope, opencode_gu
 from cousin_lib.runner import hooks, tools, wake
 from cousin_lib.runner import policy as _policy
 from cousin_lib.runner import rollover as _rollover
-from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, RunnerError, folds_into_turn
+from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, RunnerError, StoreBusy, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.opencode_http import (EventReader, OpencodeClient, OpencodeError,
                                              OpencodeServer)
@@ -723,6 +723,7 @@ class OpencodeRunner:
         self.opencode_session = None                             # the server's session id
         self.inbox = Inbox(self.home)
         self.stream = EventStream(self.home, self.session_id)
+        self._store_busy = StoreBusy(self.stream)
         self.machine = StateMachine(on_change=self._on_state)
         self.turn = Turn()
         self._lock = threading.Lock()
@@ -1351,10 +1352,14 @@ class OpencodeRunner:
                     try:
                         rows = self.inbox.claim(limit=1, claimant=self.session_id)
                     except Exception as exc:  # noqa: BLE001 - a store failure is never silence
+                        if self._store_busy.failed(exc):
+                            time.sleep(1.0)     # another writer holds the store: again
+                            continue
                         self.stream.append("error", {"error": "inbox: %s: %s"
                                                      % (type(exc).__name__, exc)})
                         time.sleep(0.2)
                         continue
+                    self._store_busy.claimed()
                     if not rows:
                         listener.wait(self.poll_s)
                         continue

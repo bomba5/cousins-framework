@@ -18,7 +18,7 @@ from pathlib import Path
 from cousin_lib.crashpoint import crashpoint
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
 from cousin_lib.runner import cost_cap, wake
-from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, folds_into_turn
+from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, StoreBusy, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream
@@ -39,6 +39,7 @@ class FakeRunner:
         self.session_id = "fake-" + uuid.uuid4().hex[:8]
         self.inbox = Inbox(home)
         self.stream = EventStream(home, self.session_id)
+        self._store_busy = StoreBusy(self.stream)
         self.machine = StateMachine(on_change=self._on_state)
         self.turn = Turn()
         self._stop = threading.Event()
@@ -125,9 +126,13 @@ class FakeRunner:
                 try:
                     rows = self.inbox.claim(limit=1, claimant=self.session_id)
                 except Exception as exc:  # noqa: BLE001 - a store failure is never silence
+                    if self._store_busy.failed(exc):
+                        time.sleep(1.0)     # another writer holds the store: again
+                        continue
                     self._fail_turn([], exc)
                     time.sleep(0.2)  # a wedged store must not spin the loop
                     continue
+                self._store_busy.claimed()
                 if not rows:
                     listener.wait(timeout=0.2)
                     continue

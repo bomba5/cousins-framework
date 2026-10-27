@@ -329,6 +329,7 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
         # the registry (default, operator filled) and the .mcp.json
         # that points the harness at it.
         provision_mcp(home, root=root, slug=slug, operator=operator)
+        record_registry_sync(home)
         # The cousin's own harness project settings: its hooks, by
         # absolute path with the home in each command, and the approval
         # of its `cousin` server. Without them a session inherits
@@ -340,6 +341,33 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
         shutil.rmtree(home, ignore_errors=True)
         raise SpawnError("create failed, home removed: %s" % err)
     return {"slug": slug, "home": home}
+
+
+def record_registry_sync(home):
+    """Write data/template-sync.json as cousin-upgrade does, for the
+    release this home's registry was just rendered from. Without it the
+    home's first upgrade plans it from the running code, which after a
+    switch is already the target, and misses what that release retired.
+    Nothing is written when the code does not run from a git checkout, or
+    git is not there to say its commit: the upgrade's fallback stands, and
+    the record never fails a spawn. Returns the record, or None."""
+    from cousin_lib import atomic, upgrade, version
+    try:
+        sha = upgrade.resolve(version.CHECKOUT, "HEAD") \
+            if (version.CHECKOUT / ".git").exists() else None
+    except (OSError, subprocess.SubprocessError, upgrade.UpgradeError):
+        sha = None
+    if not sha:
+        return None
+    record = {"to": version.version(), "ref": sha, "at": int(time.time()),
+              "registry": "in-step"}
+    path = Path(home) / upgrade.STATE
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic.write_text(path, json.dumps(record, indent=2) + "\n")
+    except OSError:
+        return None
+    return record
 
 
 def _pid_file(home):
@@ -1114,8 +1142,8 @@ def _sync_template(root, slug, *, apply, prune=False):
         print("%s: CLAUDE.md synced; the old one is %s"
               % (slug, result["backup"]))
     else:
-        print("%s: dry run; --apply writes it (a start or flip does too)"
-              % slug)
+        print("%s: dry run; --apply writes it (nothing else does: no start or flip"
+              " syncs it)" % slug)
     return 0
 
 
@@ -1174,9 +1202,10 @@ def spawn_main(argv=None):
     parser.add_argument("--sync-template", action="store_true",
                         help="create nothing: show how an EXISTING"
                              " cousin's CLAUDE.md framework part differs"
-                             " from the current template (every start"
-                             " and flip syncs it by itself); with"
-                             " --apply, write it")
+                             " from the current template; with --apply,"
+                             " write it. Nothing syncs it by itself: no"
+                             " start or flip does, and cousin-upgrade"
+                             " --apply-homes brings only the registry")
     parser.add_argument("--apply", action="store_true",
                         help="with --sync-template: write the sync")
     parser.add_argument("--prune-retired", action="store_true",

@@ -24,6 +24,16 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   facts showed one and read the rest as superseded. The `topic`
   description now says so; a home still holding the earlier wording
   gets it on its next registry sync.
+- **A new cousin records the release its registry came from.**
+  `cousin-spawn` wrote no `data/template-sync.json`, so the home's first
+  `cousin-upgrade` planned it from the running code, which after
+  `--switch` is already the target, and missed the entries that release
+  retired. Spawn now writes the record `cousin-upgrade` writes, for the
+  checkout it rendered from.
+- **`cousin-spawn --sync-template` says what syncs a CLAUDE.md.** Its
+  help and its dry run said every start and flip syncs it. Nothing does
+  by itself: `--apply` here writes it, and `cousin-upgrade --apply-homes`
+  brings only the registry.
 
 ## 4.2.1 - 2026-10-26
 

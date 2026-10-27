@@ -76,6 +76,29 @@ class TestCreateCousin(CreateCase):
         self.assertIn("## Open loops", status)
         self.assertTrue((home / "MEMORY.md").is_file())
 
+    def test_a_new_home_records_the_release_its_registry_came_from(self):
+        # its first cousin-upgrade plans it from there, not from the running
+        # code, which after a switch is already the target
+        from cousin_lib import upgrade, version
+        root = self._framework_root()
+        self._create(root)
+        home = root / "cousins" / "wren"
+        rec = json.loads((home / "data" / "template-sync.json").read_text())
+        head = upgrade.resolve(version.CHECKOUT, "HEAD")
+        self.assertEqual((rec["to"], rec["ref"], rec["registry"]),
+                         (version.version(), head, "in-step"))
+        planned, note = upgrade._home_from(home, version.CHECKOUT, "v9.9.9")
+        self.assertEqual((planned["source"], planned["ref"], note), (upgrade.STATE, head, None))
+
+    def test_no_git_to_say_the_commit_is_no_record_never_a_failed_spawn(self):
+        from cousin_lib import upgrade
+        root = self._framework_root()
+        with mock.patch.object(upgrade, "resolve",
+                               side_effect=FileNotFoundError(2, "No such file", "git")):
+            out = self._create(root)
+        self.assertTrue((out["home"] / "cousin.toml").is_file())
+        self.assertFalse((out["home"] / "data" / "template-sync.json").exists())
+
     def test_role_paragraph_headings_stay_inside_identity(self):
         # #326: a role paragraph's own ## heading started a section the
         # runner prompt drops; spawn nests it under ## Identity.
@@ -1209,6 +1232,28 @@ class TestSyncTemplateCLI(unittest.TestCase):
         with mock.patch.dict("os.environ", env):
             rc = spawn.spawn_main(["wren", "--sync-template"])
         self.assertEqual(rc, 0)
+
+    def test_the_texts_say_nothing_syncs_it_by_itself(self):
+        # no start or flip syncs CLAUDE.md: the dry run and the help must
+        # not promise one, or a template change is waited for in vain
+        import contextlib
+        import io
+        from cousin_lib import spawn
+        tpl = self.root / "templates" / "cousin-CLAUDE.template.md"
+        tpl.write_text(tpl.read_text().replace(
+            "## Append", "## Chat\n\nAnswer in the chat.\n\n## Append"))
+        out = io.StringIO()
+        with mock.patch.dict("os.environ", {"FRAMEWORK_ROOT": str(self.root)}), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(spawn.spawn_main(["wren", "--sync-template"]), 0)
+        self.assertIn("wren: dry run; --apply writes it (nothing else does", out.getvalue())
+        self.assertNotIn("a start or flip does too", out.getvalue())
+        helped = io.StringIO()
+        with contextlib.redirect_stdout(helped), self.assertRaises(SystemExit):
+            spawn.spawn_main(["--help"])
+        text = " ".join(helped.getvalue().split())
+        self.assertIn("Nothing syncs it by itself", text)
+        self.assertNotIn("every start and flip syncs it", text)
 
 
 class TestRegistrySyncOrder(unittest.TestCase):

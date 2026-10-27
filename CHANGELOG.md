@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.4.2 - 2026-10-27
+
+### Fixed
+
+- **The recall line points to the memory tool.** On the SDK lane the
+  per-turn recall line ended with "cousin-memory search for details",
+  sending the cousin to the CLI the contract says never to use for
+  memory. It now says the memory tool's search has the details; the
+  terminal lane keeps the CLI wording.
+
 ## 4.4.1 - 2026-10-27
 
 ### Fixed

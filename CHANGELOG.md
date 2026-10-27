@@ -18,7 +18,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   runner writes `data/runner-stacks.txt` in its home: every thread's
   Python stack, then, from the event loop's own thread, every asyncio
   task's stack and the sites the turn waits at. A loop too stuck to run
-  that shows in the thread stacks instead.
+  that shows in the thread stacks instead, and the `stacks` event says
+  so (`tasks: false`). A second signal waits for the dump before it.
 
 ### Fixed
 

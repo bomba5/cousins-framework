@@ -9,6 +9,7 @@ import asyncio
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 try:
@@ -71,6 +72,31 @@ class OwnedLock:
         self._lock.release()
 
 
+class GatedRunner:
+    """A runner whose loop writes a dump's tasks only once `gate` opens,
+    so two dumps can overlap on purpose."""
+
+    def __init__(self, home):
+        self.home = home
+        self.gate = threading.Event()
+        self.scheduled, self.events = [], []
+        self.stream = SimpleNamespace(append=lambda kind, payload: self.events.append(payload))
+
+    def dump_tasks(self, path, done=None):
+        n = len(self.scheduled) + 1
+
+        def write():
+            self.gate.wait(10)
+            with open(path, "a") as fh:
+                fh.write("tasks of dump %d\n" % n)
+            if done is not None:
+                done.set()
+        thread = threading.Thread(target=write, daemon=True)
+        self.scheduled.append(thread)
+        thread.start()
+        return True
+
+
 class TestStallProbe(HermeticCase):
     def test_a_wait_after_the_result_is_named(self):
         # a turn that never came back after its result said nothing in its
@@ -128,6 +154,39 @@ class TestStallProbe(HermeticCase):
                       [e["payload"].get("path") for e in r.events()
                        if e["kind"] == "system" and e["payload"].get("subtype") == "stacks"])
 
+    def test_two_dumps_close_together_leave_one_whole_dump(self):
+        # two SIGUSR1s in a row: each dump rewrites the file, so the second
+        # waits until the first one's tasks are written
+        from cousin_lib.runner import main as runner_main
+        r = GatedRunner(temp_home(self))
+        first = runner_main.dump_stacks_soon(r)
+        self.assertTrue(_wait(lambda: len(r.scheduled) == 1))
+        second = runner_main.dump_stacks_soon(r)
+        _wait(lambda: len(r.scheduled) == 2, timeout=0.5)    # it must not start yet
+        r.gate.set()
+        for thread in [first, second] + r.scheduled:
+            thread.join(timeout=10)
+            self.assertFalse(thread.is_alive())
+        text = (r.home / "data" / "runner-stacks.txt").read_text()
+        self.assertEqual(text.count(" stacks at "), 1)
+        self.assertEqual([l for l in text.splitlines() if l.startswith("tasks of dump")],
+                         ["tasks of dump 2"])
+        self.assertEqual([e.get("tasks") for e in r.events if e.get("subtype") == "stacks"],
+                         [True, True])
+
+    def test_a_blocked_loop_still_gets_its_thread_stacks(self):
+        # a loop that never writes its half: after TASKS_WAIT_S the dump
+        # ends anyway, and its event says the tasks are missing
+        from cousin_lib.runner import main as runner_main
+        r = GatedRunner(temp_home(self))                     # the gate stays shut
+        with mock.patch.object(runner_main, "TASKS_WAIT_S", 0.2):
+            path = runner_main.dump_stacks(r)
+        self.assertIn("most recent call first", path.read_text())
+        self.assertEqual([e.get("tasks") for e in r.events if e.get("subtype") == "stacks"],
+                         [False])
+        r.gate.set()
+        for thread in r.scheduled:
+            thread.join(timeout=10)
 
     def test_a_long_fold_is_named_while_it_runs_and_when_it_ends(self):
         home = temp_home(self)

@@ -1000,11 +1000,12 @@ class SdkRunner:
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
-    def dump_tasks(self, stacks_file):
+    def dump_tasks(self, stacks_file, done=None):
         """Append every asyncio task's stack to `stacks_file` (cousin-runner's
         SIGUSR1 dump). Run on the loop's own thread, where reading tasks is
         safe; a loop that is blocked never runs it, and the thread stacks
-        written before it show where. Returns whether it was scheduled."""
+        written before it show where. `done` (a threading.Event) is set once
+        they are written. Returns whether it was scheduled."""
         loop = self._loop
         if loop is None or loop.is_closed():
             return False
@@ -1019,7 +1020,9 @@ class SdkRunner:
                         fh.write("\n%r\n" % task)
                         task.print_stack(file=fh)
             except OSError:
-                pass
+                return
+            if done is not None:
+                done.set()
         loop.call_soon_threadsafe(dump)
         return True
 

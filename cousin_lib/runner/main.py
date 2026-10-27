@@ -652,6 +652,12 @@ def _name_lane_gaps(runner):
 
 
 STACKS_FILE = "data/runner-stacks.txt"
+# how long a dump waits for the loop to write the tasks before the next
+# dump may start: a blocked loop never writes them
+TASKS_WAIT_S = 5.0
+# one dump at a time: each one rewrites the file, so two SIGUSR1s close
+# together would cut into each other's dump
+_DUMP_LOCK = threading.Lock()
 
 
 def dump_stacks(runner):
@@ -660,22 +666,26 @@ def dump_stacks(runner):
     thread too), then, from the loop's own thread, every asyncio task's
     stack when the runner keeps one (dump_tasks). For a runner that hangs
     with nothing in its stream, read without ptrace: `kill -USR1 <pid>`.
-    Returns the path, or None when it could not be written."""
+    One dump at a time: the next starts once this one's tasks are written,
+    or after TASKS_WAIT_S without them; the `stacks` event says which
+    (`tasks`). Returns the path, or None when it could not be written."""
     import faulthandler
     path = Path(runner.home) / STACKS_FILE
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as fh:
-            fh.write("cousin-runner %d stacks at %s\n\n" % (
-                os.getpid(), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
-            fh.flush()
-            faulthandler.dump_traceback(file=fh, all_threads=True)
-        tasks = getattr(runner, "dump_tasks", None)
-        if tasks is not None:
-            tasks(path)
-        runner.stream.append("system", {"subtype": "stacks", "path": str(path)})
-    except OSError:
-        return None
+    with _DUMP_LOCK:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write("cousin-runner %d stacks at %s\n\n" % (
+                    os.getpid(), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+                fh.flush()
+                faulthandler.dump_traceback(file=fh, all_threads=True)
+            tasks, written = getattr(runner, "dump_tasks", None), threading.Event()
+            if tasks is not None and tasks(path, done=written):
+                written.wait(TASKS_WAIT_S)
+            runner.stream.append("system", {"subtype": "stacks", "path": str(path),
+                                            "tasks": written.is_set()})
+        except OSError:
+            return None
     return path
 
 

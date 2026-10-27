@@ -585,7 +585,12 @@ recover.
   `cousin-supervisor status`) writes `data/runner-stacks.txt` in the
   cousin's home: every Python stack in the process, then every asyncio
   task's stack from the runner's event loop. Take it before a restart,
-  which loses it.
+  which loses it. Its `stacks` event says `tasks: false` when the loop
+  wrote no task stacks within 5 s: a blocked loop, and the Python stacks
+  above show where it blocks. A second signal waits for the first dump,
+  then writes its own. A loop that wakes after a dump gave up on it still
+  adds that dump's task stacks, so the next file can hold two task
+  blocks: the first one is from the earlier signal.
 - Fix: `cousin-supervisor stop <slug>`, then `start <slug>` (or the
   console's stop and start); claimed rows go back to the queue.
 

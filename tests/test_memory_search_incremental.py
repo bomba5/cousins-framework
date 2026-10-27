@@ -8,11 +8,17 @@ what changed, reuses the rest, drops what is gone, and survives a
 dead embedding service without poisoning what it already had. The
 fake embedder is real HTTP on loopback; only the vectors are scripted.
 """
+import array
+import contextlib
+import hashlib
 import json
+import math
 import os
 import pathlib
+import random
 import sqlite3
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -394,6 +400,298 @@ class TestServiceOptions(unittest.TestCase):
     def test_no_options_sends_no_options_key(self):
         body = self._payload({"url": "http://x", "model": "m"})
         self.assertNotIn("options", body)
+
+
+QUERY = "where does the heron sleep at night?"
+
+
+def _heron(text):
+    """The query and anything about the heron embed alike; everything
+    else is orthogonal to them."""
+    return [1.0, 0.0, 0.0] if "heron" in text else [0.0, 1.0, 0.0]
+
+
+def _scattered(text):
+    """64 components that depend on the text alone, spread so that every
+    product and every sum rounds: where two ways of scoring differ in
+    the last bit, these vectors show it."""
+    rng = random.Random(hashlib.sha256(text.encode()).digest())
+    return [rng.uniform(-1.0, 1.0) for _ in range(64)]
+
+
+def _raw_line(topic, content, day="2026-10-26"):
+    return json.dumps({"timestamp": "%sT10:00:00+02:00" % day,
+                       "topic": topic, "content": content,
+                       "truth_level": "L3_COUSIN_CONCLUSION",
+                       "source": "decision"}) + "\n"
+
+
+def _cold():
+    """Forget every home's cached reads, as a new process starts."""
+    with memory_search._CACHE_LOCK:
+        memory_search._CACHES.clear()
+
+
+def _store_reads(home, run):
+    """How many times `run` opened the vector store of `home`."""
+    store = str(pathlib.Path(home) / "memory" / "vectors.db")
+    real = sqlite3.connect
+    opened = []
+
+    def connect(database, *args, **kwargs):
+        opened.append(str(database))
+        return real(database, *args, **kwargs)
+
+    with mock.patch.object(memory_search.sqlite3, "connect", connect):
+        run()
+    return opened.count(store)
+
+
+def _raw_reads(run):
+    """The raw memory files `run` opened, in order."""
+    opened = []
+
+    def tracked(real):
+        def opener(path, *args, **kwargs):
+            opened.append(str(path))
+            return real(path, *args, **kwargs)
+        return opener
+
+    with mock.patch.object(memory_search, "open", tracked(open),
+                           create=True), \
+            mock.patch.object(memory_search.gzip, "open",
+                              tracked(memory_search.gzip.open)):
+        run()
+    return [path for path in opened if "/memory/raw/" in path]
+
+
+def _uncached_semantic(query_vector, home, top, config, root):
+    """The semantic leg's ranking as it was before the cache: the store
+    read and unpacked afresh, and both norms worked out for every
+    pair."""
+    index = memory_search._load_index(home) or {}
+    best = {}
+    for key, (coll, path, text) in memory_search._chunks(
+            home, config, root).items():
+        entry = index.get(key)
+        if not entry or not entry.get("vector"):
+            continue
+        a, b = query_vector, entry["vector"]
+        dot = sum(x * y for x, y in zip(a, b))
+        norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(
+            sum(x * x for x in b))
+        score = dot / norm if norm else 0.0
+        current = best.get(str(path))
+        if current is None or score > current["score"]:
+            best[str(path)] = {
+                "path": str(path), "collection": coll, "score": score,
+                "snippet": memory_search._first_line(text),
+                "chunk": int(key.rsplit("#", 1)[1]), "similarity": score}
+    return sorted(best.values(), key=lambda h: h["score"],
+                  reverse=True)[:top]
+
+
+class TestOneProcessManyLookups(unittest.TestCase):
+    """The runner recalls on every turn, from worker threads of one
+    long-lived process, and each lookup read the whole store again:
+    every raw file parsed and chunked, every vector unpacked, both norms
+    of every pair worked out. On a real home of 6,191 chunks that was
+    4.5 to 5.6 s against the runner's 4 s recall budget, and 48 of 77
+    turns went without recall. A lookup now reads again only what
+    changed, sees all of it, and ranks to the last bit as before."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        self.home = _home_with(self.root, {
+            "cousin.toml": '[cousin]\nslug = "wren"\nname = "Wren"\n',
+            "memory/ports.md":
+                "# Ports\n\nThe claimed set excludes every port.\n",
+            "notes/walk.md": "# Walk\n\nWe walked along the harbour wall.\n",
+            "memory/raw/2026-10-25.jsonl": _raw_line(
+                "boiler service", "Mallory services the boiler every March.",
+                "2026-10-25"),
+            "memory/raw/2026-10-26.jsonl": _raw_line(
+                "spare keys", "Toki keeps the spare keys."),
+        })
+        self.config = self._configure(_heron)
+
+    def _configure(self, vector_for):
+        ctx = fake_embedder(vector_for=vector_for)
+        url = ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+        (self.root / "config").mkdir(exist_ok=True)
+        (self.root / "config" / "embedding.toml").write_text(
+            'url = "%s"\nmodel = "m"\ntimeout_s = 5\n' % url)
+        return _cfg(url)
+
+    def _recall(self):
+        return memory_search.recall_hits(self.home, QUERY, root=self.root)[0]
+
+    def _write_raw(self, day, topic, content):
+        with open(self.home / "memory" / "raw" / ("%s.jsonl" % day), "a") as fh:
+            fh.write(_raw_line(topic, content, day))
+
+    def _semantic(self, top=20):
+        return memory_search._semantic_search(QUERY, self.home, top,
+                                              self.config, root=self.root)[0]
+
+    def test_two_lookups_read_the_store_once_and_the_next_sees_a_write(self):
+        # The loops daemon's pass: the store is level with the memory
+        # before the turns begin.
+        memory_search.ensure_index(self.home, self.config, root=self.root)
+        recalled = []
+        reads = _store_reads(self.home, lambda: recalled.extend(
+            [self._recall(), self._recall()]))
+        self.assertEqual(recalled, [[], []],
+                         "nothing in memory is about the heron yet")
+        self.assertEqual(reads, 1, "two lookups over an unchanged memory"
+                                   " read and unpack the store once")
+        self._write_raw("2026-10-26", "heron roost",
+                        "The heron sleeps in the reeds by the sluice.")
+        kept = self._recall()
+        self.assertTrue(any(k.startswith("heron roost (raw:") for k in kept),
+                        kept)
+
+    def test_an_unchanged_raw_file_is_not_read_again(self):
+        raw = self.home / "memory" / "raw"
+        day1, day2 = str(raw / "2026-10-25.jsonl"), str(raw / "2026-10-26.jsonl")
+        self.assertEqual(sorted(_raw_reads(
+            lambda: memory_search._raw_entries(self.home))), [day1, day2])
+        self.assertEqual(_raw_reads(
+            lambda: memory_search._raw_entries(self.home)), [],
+            "a second read over unchanged files opens none of them")
+        self._write_raw("2026-10-26", "heron roost", "The heron sleeps.")
+        rows = []
+        self.assertEqual(_raw_reads(
+            lambda: rows.extend(memory_search._raw_entries(self.home))),
+            [day2], "only the file that changed is read again")
+        self.assertEqual([text.split("\n")[1] for _c, _k, text, _m in rows],
+                         ["boiler service", "spare keys", "heron roost"])
+
+    def test_the_cached_leg_ranks_to_the_last_bit_as_an_uncached_pass(self):
+        self.config = self._configure(_scattered)
+        files = {"memory/long.md": "# Long\n\n" + " ".join(
+                     "word%d" % i for i in range(1500)),
+                 "notes/copy.md":
+                     "# Ports\n\nThe claimed set excludes every port.\n"}
+        for i in range(12):
+            files["notes/n%02d.md" % i] = "# Note %d\n\nheron fact %d\n" % (i, i)
+        for rel, body in files.items():
+            (self.home / rel).write_text(body)
+        for i in range(10):
+            self._write_raw("2026-10-26", "entry %d" % i, "fact number %d" % i)
+        memory_search.ensure_index(self.home, self.config, root=self.root)
+        _cold()
+        expected = _uncached_semantic(memory_search._embed(QUERY, self.config),
+                                      self.home, 20, self.config, self.root)
+        self.assertEqual(len(expected), 20)
+        _cold()
+        self.assertEqual(self._semantic(), expected, "cold")
+        self.assertEqual(self._semantic(), expected, "warm")
+        _cold()
+        first = memory_search.search(QUERY, home=self.home, root=self.root,
+                                     record=False)
+        again = memory_search.search(QUERY, home=self.home, root=self.root,
+                                     record=False)
+        self.assertEqual(first, again)
+
+    def test_a_commit_still_in_the_wal_is_seen(self):
+        store = self.home / "memory" / "vectors.db"
+        memory_search._write_index_atomic(self.home, {"memory:a.md#0": {
+            "mtime": 1.0, "text_hash": "a", "vector": [1.0, 0.0]}})
+        self.assertEqual(set(memory_search._cached_index(self.home).entries),
+                         {"memory:a.md#0"})
+        # Another process commits while a third holds the store open, so
+        # the commit stays in vectors.db-wal: vectors.db is untouched.
+        reader = sqlite3.connect(store)
+        self.addCleanup(reader.close)
+        reader.execute("SELECT count(*) FROM vectors").fetchone()
+        before = store.stat()
+        with contextlib.closing(sqlite3.connect(store)) as writer, writer:
+            writer.execute("INSERT INTO vectors VALUES (?, ?, ?, ?)",
+                           ("memory:b.md#0", 1.0, "b",
+                            memory_search._pack([0.0, 1.0])))
+        after = store.stat()
+        self.assertEqual((before.st_size, before.st_mtime_ns),
+                         (after.st_size, after.st_mtime_ns))
+        self.assertEqual(set(memory_search._cached_index(self.home).entries),
+                         {"memory:a.md#0", "memory:b.md#0"})
+
+    def test_a_reread_unpacks_only_the_rows_that_changed(self):
+        memory_search.ensure_index(self.home, self.config, root=self.root)
+        first = memory_search._cached_index(self.home)
+        memory_search._index_norms(first, list(first.entries))
+        kept = first.entries["memory:ports.md#0"]["vector"]
+        (self.home / "notes" / "walk.md").write_text(
+            "# Walk\n\nThe heron watched us walk.\n")
+        memory_search.ensure_index(self.home, self.config, root=self.root)
+        second = memory_search._cached_index(self.home)
+        self.assertIsNot(second, first, "the store changed: read again")
+        self.assertIs(second.entries["memory:ports.md#0"]["vector"], kept,
+                      "an unchanged row keeps its vector")
+        self.assertIn("memory:ports.md#0", second.norms, "and its norm")
+        self.assertEqual(list(second.entries["notes:walk.md#0"]["vector"]),
+                         [1.0, 0.0, 0.0], "a changed row is read anew")
+        self.assertNotIn("notes:walk.md#0", second.norms)
+
+    def test_lookups_on_threads_at_once_agree(self):
+        memory_search.ensure_index(self.home, self.config, root=self.root)
+        self._write_raw("2026-10-26", "heron roost", "The heron sleeps.")
+        expected = self._semantic(10)
+        self.assertEqual(expected[0]["similarity"], 1.0)
+        _cold()
+        results, errors = [], []
+
+        def lookup():
+            try:
+                results.append(self._semantic(10))
+            except Exception as err:  # noqa: BLE001 - asserted below
+                errors.append(err)
+
+        threads = [threading.Thread(target=lookup) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(results, [expected] * 4)
+
+    def test_a_process_keeps_the_last_homes_only(self):
+        homes = [_home_with(self.root / str(i), {
+            "memory/raw/2026-10-26.jsonl": _raw_line("t", "c")})
+            for i in range(memory_search._CACHE_HOMES + 2)]
+        for home in homes:
+            memory_search._raw_entries(home)
+        self.assertEqual(list(memory_search._CACHES),
+                         [str(h) for h in homes[-memory_search._CACHE_HOMES:]])
+
+
+class TestCosine(unittest.TestCase):
+    def test_the_cosine_is_the_old_arithmetic_to_the_last_bit(self):
+        """The norms are kept and the dot product is map(operator.mul),
+        not zip: still the same products added in the same order, so
+        the same float, to the last bit, for every pair."""
+        def old(a, b):
+            dot = sum(x * y for x, y in zip(a, b))
+            norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(
+                sum(x * x for x in b))
+            return dot / norm if norm else 0.0
+
+        rng = random.Random(467)
+        for _ in range(300):
+            n = rng.choice([3, 64, 768])
+            query = [rng.uniform(-1.0, 1.0) for _ in range(n)]
+            stored = array.array("f", [rng.gauss(0.0, 0.05) for _ in range(n)])
+            want = old(query, list(stored))
+            self.assertEqual(memory_search._cosine(query, list(stored)), want)
+            self.assertEqual(memory_search._cosine_normed(
+                query, memory_search._norm(query),
+                stored, memory_search._norm(stored)), want)
+        for a, b in (([0.0, 0.0], [1.0, 2.0]), ([1, 2, 3], [1.0, 0.5]),
+                     ([], []), ([3, 4], [4, 3])):
+            self.assertEqual(memory_search._cosine(a, b), old(a, b))
 
 
 if __name__ == "__main__":

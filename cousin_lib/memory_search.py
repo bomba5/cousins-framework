@@ -1026,6 +1026,9 @@ def print_results(hits):
 
 RECALL_PREFIX = "[fw-recall] possibly relevant from your memory: "
 RECALL_SUFFIX = " - cousin-memory search for details; ignore if not."
+# the same pointer for a lane whose cousin reaches memory through the
+# memory tool, not the CLI (the runner's hooks)
+RECALL_SUFFIX_TOOL = " - the memory tool's search has the details; ignore if not."
 
 
 def recall_thresholds(root=None):
@@ -1276,13 +1279,15 @@ def receipts(home, *, last=20):
     return out
 
 
-def recall_line(entries):
+def recall_line(entries, suffix=RECALL_SUFFIX):
     """The one-line '[fw-recall] ...' text for `entries`, or None when
     there are none. Single-line by construction (the delivery paste
-    cannot carry a newline)."""
+    cannot carry a newline). `suffix` says where the details are: the
+    CLI (RECALL_SUFFIX) or, for a lane that reaches memory through the
+    tool, the memory tool (RECALL_SUFFIX_TOOL)."""
     if not entries:
         return None
-    return " ".join((RECALL_PREFIX + "; ".join(entries) + RECALL_SUFFIX).split())
+    return " ".join((RECALL_PREFIX + "; ".join(entries) + suffix).split())
 
 
 def recall_context(home, text, *, config=None, root=None):

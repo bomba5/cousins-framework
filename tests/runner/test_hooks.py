@@ -88,6 +88,9 @@ class TestRecall(HooksCase):
         ctx = out.get("hookSpecificOutput", {}).get("additionalContext", "")
         self.assertTrue(ctx.startswith("[fw-recall] "))
         self.assertIn("Router (memory:reference_router.md)", ctx)
+        # this lane reaches memory through the tool, never the CLI
+        self.assertIn("the memory tool's search", ctx)
+        self.assertNotIn("cousin-memory", ctx)
         # the pane is told what the cousin was given: the line and each item
         (recall,) = [e["payload"] for e in self.stream.tail() if e["kind"] == "recall"]
         self.assertEqual(recall["hits"], 1)

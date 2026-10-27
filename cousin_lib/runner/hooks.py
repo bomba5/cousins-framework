@@ -247,7 +247,8 @@ def default_recall(home, root=None):
     def recall(body):
         from cousin_lib import memory_search
         entries, items = memory_search.recall_hits(home, body, root=root)
-        return memory_search.recall_line(entries), len(entries), items
+        return (memory_search.recall_line(entries, memory_search.RECALL_SUFFIX_TOOL),
+                len(entries), items)
     return recall
 
 

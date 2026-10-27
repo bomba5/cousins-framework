@@ -51,8 +51,8 @@ with `send`, never with `reply`.]][[meeting| A meeting line is answered with the
 [[memory|## Memory]]
 
 [[memory|Memory writes default to your own conclusion (L3). What the operator
-told you is operator-stated: `remember` with `level=operator` and a
-`cite` saying where it was said. An unverified guess is
+told you is operator-stated: the `memory` tool's `remember` command, with
+`level=operator` and a `cite` saying where it was said. An unverified guess is
 `level=hypothesis`. Recall arrives on its own; search when you need
 more. When a decision or a fact rests on an entry you recalled or
 found, pass its ref (`raw:<file>#<line>`, or its id) in `derived_from`:

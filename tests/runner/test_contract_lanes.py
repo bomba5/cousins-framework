@@ -29,11 +29,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # and `dry-run` in that tool's description and command list, plus 3.61.0's
 # `check` there, minus 4.0.0's `import` (the operator's act now), plus
 # 4.2.0's skills-hint paragraph in "How messages reach you" (the SDK lane's
-# only, so opencode's bytes did not move with it): the bytes the
+# only, so opencode's bytes did not move with it), plus 4.4.2's Memory
+# wording (the `memory` tool's `remember` command, never a bare one): the bytes the
 # SDK lane's renderer produces. A registry or static-text edit changes it on
 # purpose: update the hash in the same commit, knowing every SDK and
 # opencode cousin's prompt cache resets (the edit moves both lanes' bytes).
-SDK_CONTRACT_SHA256 = "e12f04f96594e6eb7c0605e50af762a737517eebf212ff057a2af18c73483e01"
+SDK_CONTRACT_SHA256 = "4173f84fefa70dbb27f27dea19ef103532ac72c9a920a7f56de822f65964e934"
 
 
 def as_opencode(sdk_text):

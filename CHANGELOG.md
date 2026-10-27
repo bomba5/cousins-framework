@@ -12,6 +12,14 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   sending the cousin to the CLI the contract says never to use for
   memory. It now says the memory tool's search has the details; the
   terminal lane keeps the CLI wording.
+- **The contract names `remember` as the memory tool's command.** Its
+  Memory section said "`remember` with `level=operator`", a bare name a
+  cousin can take for a tool of its own: cousins called a
+  `mcp__cousin__remember_placeholder` or `mcp__cousin__remember` that
+  does not exist, next to their real memory writes. It now says the
+  `memory` tool's `remember` command. The SDK and opencode contract
+  bytes move with it, so each of those cousins' prompt cache starts over
+  once.
 
 ## 4.4.1 - 2026-10-27
 

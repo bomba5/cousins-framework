@@ -2086,7 +2086,9 @@ class TestCliReplayQuirks(HermeticCase):
     def _states(self, r):
         return [e["payload"]["to"] for e in r.events() if e["kind"] == "state"]
 
-    def _closed(self, r, rows, timeout=3.0):
+    def _closed(self, r, rows, timeout=10.0):
+        # wide: the turn's echo handling is what is tested, not its speed,
+        # and a loaded host stretches every step
         return _wait(lambda: all(r.inbox.get(x.inbox_id)["state"] == "done" for x in rows),
                      timeout=timeout)
 
@@ -2155,8 +2157,8 @@ class TestCliReplayQuirks(HermeticCase):
         # longer than carry_idle_s before its result
         r, made = self._runner({"garble": "turn"}, idle_timeout_s=30.0, scripts=[
             [init_msg(), assistant(text="one"), "PAUSE", result(num_turns=1)],
-            [assistant(text="two"), ("SLOW", 1.0), result(num_turns=2)]])
-        r.carry_idle_s = 0.3
+            [assistant(text="two"), ("SLOW", 3.0), result(num_turns=2)]])
+        r.carry_idle_s = 1.0
         r.start()
         first, second = self._fold(r, made, self._op("second, while only the result is left"))
         self.assertTrue(self._closed(r, [first, second], timeout=10.0))

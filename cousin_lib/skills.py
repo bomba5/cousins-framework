@@ -680,9 +680,12 @@ def show_draft(home, name):
 
 
 def write_draft(home, name, *, description, body, context, side_effect,
-                scope="own", metadata=None, license=None):
+                scope="own", metadata=None, license=None, root=None, slug=None):
     """Write or replace a draft's SKILL.md; returns its path. Its other
-    files are the cousin's own to write in the same folder. A metadata
+    files are the cousin's own to write in the same folder. A new draft of
+    a skill already approved at its target starts from that skill's other
+    files (_seed_from_approved), given the install root and the cousin's
+    slug: approval replaces the whole folder with the draft. A metadata
     value of None is left out, and so is "" but for DECLARED_KEYS, where
     "" declares none. Refused when the format or a declared key is
     broken, or the target is not this cousin's to approve into
@@ -706,9 +709,45 @@ def write_draft(home, name, *, description, body, context, side_effect,
         found = topic_problems(home, front)
     if found:
         raise SkillError("; ".join(found))
+    new = not (folder / SKILL_FILE).exists()
     folder.mkdir(parents=True, exist_ok=True)
+    if new and root is not None and slug is not None:
+        _seed_from_approved(root, slug, name, front, folder)
     atomic.write_text(folder / SKILL_FILE, render(front, body or ""))
     return folder / SKILL_FILE
+
+
+def _seed_from_approved(root, slug, name, front, folder):
+    """Put the approved skill's files but SKILL.md into a new draft of
+    it, with their executable bit, so an edit keeps its scripts unless
+    the cousin takes one out, which the diff then shows. A file already
+    in the draft folder is the cousin's and stays as it is."""
+    try:
+        repo, where = target(slug, front)
+    except SkillError:
+        return  # no place to go, so nothing approved there; the listing says why
+    st = state(root, repo)
+    if not st["exists"] or not st["approved"]:
+        return
+    path = repo_dir(root, repo)
+    listing = _git(path, "ls-tree", "-r", "-z", st["approved"], "%s/%s/" % (where, name),
+                   check=False)
+    for entry in listing.split("\0"):
+        info, _tab, f = entry.partition("\t")
+        mode = info.split(" ", 1)[0]
+        rel = f.split("/", 2)[2] if f.count("/") >= 2 else None
+        if not rel or rel == SKILL_FILE or mode not in ("100644", "100755"):
+            continue
+        dest = folder / rel
+        if dest.exists():
+            continue
+        data = _show(path, st["approved"], f)
+        if data is None:
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        if mode == "100755":
+            dest.chmod(0o755)
 
 
 def _approved_files(root, repo, folder, name):
@@ -1929,7 +1968,7 @@ def main(argv=None):
             body = Path(args.body_file).read_text() if args.body_file else sys.stdin.read()
             path = write_draft(home, args.name, description=args.description, body=body,
                                context=args.context, side_effect=args.side_effect,
-                               scope=args.scope, license=args.license,
+                               scope=args.scope, license=args.license, root=root, slug=slug,
                                metadata={"should-trigger": args.should_trigger,
                                          "must-not-trigger": args.must_not_trigger,
                                          "hosts": args.hosts, "reads": args.reads,

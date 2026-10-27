@@ -207,6 +207,11 @@ repository: every commit there is an approval, made by the console as
 the operator, so the house commit rule holds unchanged.
 
 - **A draft never loads.** Only the approved state does.
+- **An edit starts from what is approved.** Approval replaces the whole
+  folder with the draft, so a new draft of a skill approved at its target
+  gets that skill's other files (its scripts, executable bit kept) beside
+  the SKILL.md the cousin writes. A file already in the draft folder stays
+  the cousin's, and one the cousin takes out shows as removed in the diff.
 - **Where it goes** follows its frontmatter: `metadata.context` names the
   repository, and `metadata.scope` is `own` (the default, the cousin's
   folder) or `shared` (`shared/` in `personal`, for a general skill only).

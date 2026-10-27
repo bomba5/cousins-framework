@@ -19,6 +19,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   vector was kept per model name and text, so after the service changed
   the hint compared the new service's message vectors with the old one's
   skill vectors. The cache keys on the service too.
+- **Editing a skill keeps its scripts.** A draft was written as SKILL.md
+  alone and approval replaces the whole folder with the draft, so
+  approving an edit of a skill with scripts deleted them, unless the
+  cousin had copied them in by hand. A new draft of an approved skill now
+  starts with its other files, executable bit kept; a file the cousin
+  takes out shows as removed in the diff.
 
 ## 4.4.0 - 2026-10-27
 

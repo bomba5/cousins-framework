@@ -1086,6 +1086,29 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(r.inbox.get(b.inbox_id)["state"], "queued")
         self.assertEqual(r.state(), "errored")
 
+    def test_a_busy_store_is_waited_out_idle_and_never_errored(self):
+        # a disk saturated by another writer held the inbox past its busy
+        # timeout: each claim failed, and the runner showed errored every 30 s
+        import sqlite3
+        r, _ = self._runner([[init_msg(), result()]])
+        real, fails = r.inbox.claim, [sqlite3.OperationalError("database is locked")] * 2
+
+        def claim(**kw):
+            if fails:
+                raise fails.pop()
+            return real(**kw)
+        r.inbox.claim = claim
+        rec = r.inbox.put(self._op("while the disk is busy"))
+        r.start()
+        self.assertTrue(_wait(lambda: r.inbox.get(rec)["state"] == "done", timeout=10))
+        states = [e["payload"]["to"] for e in r.events() if e["kind"] == "state"]
+        self.assertNotIn("errored", states)
+        busy = [e["payload"] for e in r.events() if e["kind"] == "system"
+                and e["payload"].get("subtype") == "store_busy"]
+        self.assertEqual([b["ongoing"] for b in busy], [True, False])
+        self.assertIn("database is locked", busy[0]["error"])
+        self.assertEqual(_errors(r), [])
+
     # -- a stop claims nothing new --------------------------------------------
     def test_a_runner_asked_to_stop_claims_no_queued_row(self):
         r, _ = self._runner([])

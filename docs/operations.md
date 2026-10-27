@@ -574,6 +574,26 @@ recover.
 - Check: a cousin with no `[agent] runner` is refused by name, and nothing
   is delivered to it ([chat](chat.md#where-a-message-goes)).
 
+**A runner is up but takes nothing (rows queued, its stream quiet)**
+- Check: `cousin-watch <slug>`. A `system` `stall` event names the wait a
+  turn has been in for over 30 s (a send, a [fold](glossary.md#fold), a
+  step after the result, closing the response stream, a reconnect for
+  carried rows); its end is named with how long it took. A `store_busy`
+  event is an inbox another writer holds (a saturated disk): the runner
+  waits it out, idle.
+- Check: `kill -USR1 <runner pid>` (the `runner:<slug>` pid in
+  `cousin-supervisor status`) writes `data/runner-stacks.txt` in the
+  cousin's home: every Python stack in the process, then every asyncio
+  task's stack from the runner's event loop. Take it before a restart,
+  which loses it. Its `stacks` event says `tasks: false` when the loop
+  wrote no task stacks within 5 s: a blocked loop, and the Python stacks
+  above show where it blocks. A second signal waits for the first dump,
+  then writes its own. A loop that wakes after a dump gave up on it still
+  adds that dump's task stacks, so the next file can hold two task
+  blocks: the first one is from the earlier signal.
+- Fix: `cousin-supervisor stop <slug>`, then `start <slug>` (or the
+  console's stop and start); claimed rows go back to the queue.
+
 **The console shows 0 cousins**
 - Check: the console's startup line in `journalctl --user -u
   cousin-supervisor.service` (`console | cousin-console: serving <root>`)

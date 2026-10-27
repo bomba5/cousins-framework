@@ -84,6 +84,8 @@ class TestNoBareAppends(HermeticCase):
         ("cousin_lib/capsule.py", "path"), ("cousin_lib/lifecycle.py", "dst"),
         # a test harness's crash mark: one short line written just before a SIGKILL
         ("cousin_lib/crashpoint.py", "mark"),
+        # the SIGUSR1 stack dump: text for people, the tasks after the thread stacks
+        ("cousin_lib/runner/sdk.py", "stacks_file"),
     }
 
     def test_append_mode_opens_are_the_listed_ones(self):

@@ -1739,6 +1739,8 @@ const RP_SYSTEM_LINES = {
   restart_note: (p) => ["rp-roll", "restart" + (p.why ? " · " + rpCut(p.why, 140) : "")],
   retry: (p) => ["rp-warn", "retry " + (p.attempt || 1) + (p.message ? " · " + rpCut(p.message, 140) : "")],
   stall: (p) => ["rp-warn", "stall · " + (p.site || "?") + (p.seconds != null ? " " + Math.round(p.seconds) + " s" : "") + (p.ongoing ? ", ongoing" : "")],
+  stacks: (p) => ["rp-dim", "stacks written · " + rpCut(p.path || "?", 140)],
+  store_busy: (p) => [p.ongoing ? "rp-warn" : "rp-dim", "store busy" + (p.seconds != null ? " " + Math.round(p.seconds) + " s" : "") + (p.ongoing ? ", waiting" + (p.error ? " · " + rpCut(p.error, 140) : "") : ", claimed again")],
   permission_denied: (p) => ["rp-warn", "permission denied" + (p.tool_name ? " · " + p.tool_name : "")],
   resume_failed: (p) => ["rp-warn", "resume failed" + (p.error ? " · " + rpCut(p.error, 140) : "")],
   connect_failed: (p) => ["rp-err", "connect failed" + (p.error ? " · " + rpCut(p.error, 140) : "")],

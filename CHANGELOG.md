@@ -3,6 +3,23 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.4.0 - 2026-10-26
+
+### Added
+
+- **A runner says where it waits.** A runner was seen idle-hung after a
+  clean turn: its turn never came back after the result, nothing reached
+  its stream for seven minutes, and the rows queued behind it waited for
+  a restart, with no stack to say where (ptrace is off). Every wait after
+  a turn's result (the session file, usage, extraction, the proposal, the
+  context reading, closing the response stream) and the reconnect for
+  carried rows is now a named site: past 30 s the stream gets a `stall`
+  event with its name, and another when it ends. `kill -USR1` on a
+  runner writes `data/runner-stacks.txt` in its home: every thread's
+  Python stack, then, from the event loop's own thread, every asyncio
+  task's stack and the sites the turn waits at. A loop too stuck to run
+  that shows in the thread stacks instead.
+
 ## 4.3.0 - 2026-10-26
 
 ### Added

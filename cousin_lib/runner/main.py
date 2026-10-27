@@ -651,6 +651,45 @@ def _name_lane_gaps(runner):
     print("cousin-runner: %s" % line, file=sys.stderr)
 
 
+STACKS_FILE = "data/runner-stacks.txt"
+
+
+def dump_stacks(runner):
+    """Write where this runner waits to <home>/data/runner-stacks.txt: every
+    thread's Python stack (faulthandler: it shows a blocked event loop's
+    thread too), then, from the loop's own thread, every asyncio task's
+    stack when the runner keeps one (dump_tasks). For a runner that hangs
+    with nothing in its stream, read without ptrace: `kill -USR1 <pid>`.
+    Returns the path, or None when it could not be written."""
+    import faulthandler
+    path = Path(runner.home) / STACKS_FILE
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write("cousin-runner %d stacks at %s\n\n" % (
+                os.getpid(), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+            fh.flush()
+            faulthandler.dump_traceback(file=fh, all_threads=True)
+        tasks = getattr(runner, "dump_tasks", None)
+        if tasks is not None:
+            tasks(path)
+        runner.stream.append("system", {"subtype": "stacks", "path": str(path)})
+    except OSError:
+        return None
+    return path
+
+
+def dump_stacks_soon(runner):
+    """cousin-runner's SIGUSR1: dump_stacks on a thread of its own. A
+    handler runs on the main thread between two of its bytecodes, maybe
+    inside the stream's lock, which is not reentrant: appending there would
+    hang the runner the dump is meant to explain. Returns the thread."""
+    thread = threading.Thread(target=dump_stacks, args=(runner,),
+                              name="cousin-runner-stacks", daemon=True)
+    thread.start()
+    return thread
+
+
 def _serve(runner, once, harness=None):
     stop = threading.Event()
 
@@ -664,10 +703,12 @@ def _serve(runner, once, harness=None):
         if begin is not None:
             begin()
 
-    previous_term = previous_int = _UNSET
+    previous_term = previous_int = previous_usr1 = _UNSET
     try:
         previous_term = signal.signal(signal.SIGTERM, _signal)
         previous_int = signal.signal(signal.SIGINT, _signal)
+        previous_usr1 = signal.signal(signal.SIGUSR1,
+                                      lambda signum, frame: dump_stacks_soon(runner))
         # a claim from a runner that died is ours now (the lock says no
         # other runner is alive on this home). That runner died in a turn:
         # the resumed session is told so (restart_note). A mark a
@@ -727,6 +768,8 @@ def _serve(runner, once, harness=None):
             signal.signal(signal.SIGTERM, previous_term)
         if previous_int is not _UNSET:
             signal.signal(signal.SIGINT, previous_int)
+        if previous_usr1 is not _UNSET:
+            signal.signal(signal.SIGUSR1, previous_usr1)
 
 
 if __name__ == "__main__":

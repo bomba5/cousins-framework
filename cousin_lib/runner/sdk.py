@@ -999,6 +999,29 @@ class SdkRunner:
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
+    def dump_tasks(self, stacks_file):
+        """Append every asyncio task's stack to `stacks_file` (cousin-runner's
+        SIGUSR1 dump). Run on the loop's own thread, where reading tasks is
+        safe; a loop that is blocked never runs it, and the thread stacks
+        written before it show where. Returns whether it was scheduled."""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return False
+
+        def dump():
+            waits = ", ".join("%s for %.0fs" % (m["site"], time.monotonic() - m["since"])
+                              for m in self._waits) or "nothing named"
+            try:
+                with open(stacks_file, "a") as fh:
+                    fh.write("\n--- asyncio tasks; the turn waits at: %s ---\n" % waits)
+                    for task in asyncio.all_tasks(loop):
+                        fh.write("\n%r\n" % task)
+                        task.print_stack(file=fh)
+            except OSError:
+                pass
+        loop.call_soon_threadsafe(dump)
+        return True
+
     def begin_stop(self):
         """A stop was asked for (cousin-runner's signal handler, before
         stop() runs): from now on nothing new is claimed, neither a turn
@@ -2065,8 +2088,12 @@ class SdkRunner:
         try:
             if end in (_CARRY_DROPPED, _CARRY_IDLE) and not self._stop.is_set():
                 resume = self._resume_id
-                await self._disconnect()
-                if await self._connect(resume=resume, why="carried rows never taken up"):
+                with self._waiting_at("carried rows: disconnect"):
+                    await self._disconnect()
+                with self._waiting_at("carried rows: connect"):
+                    connected = await self._connect(resume=resume,
+                                                    why="carried rows never taken up")
+                if connected:
                     self.stream.append("system", {"subtype": "reconnected", "why": why,
                                                   "resumed": resume})
         finally:
@@ -2497,7 +2524,8 @@ class SdkRunner:
                             await self._after_turn(msg)
                             break
                 finally:
-                    await _aclose(responses)
+                    with self._waiting_at("closing the response stream"):
+                        await _aclose(responses)
             await self._close_writer()   # nothing left in it but interrupts: dropped
             if carried:
                 rows, carried[:] = list(carried), []
@@ -2648,13 +2676,20 @@ class SdkRunner:
         session id this result (or its init) named goes to
         runner-session.json, off the loop; not a lost resume's (the fresh
         start after this turn writes it, once the digest is queued)."""
+        # each step named: a wait past STALL_REPORT_S is a `stall` event with
+        # its site, so a turn that never comes back after its result says where
         if not self._resume_lost:
-            await self._flush_session()
-        await self._record_usage(msg)
-        await self._mine(self._resume_id)
-        await self._propose(self._resume_id)
+            with self._waiting_at("after the result: the session file"):
+                await self._flush_session()
+        with self._waiting_at("after the result: usage"):
+            await self._record_usage(msg)
+        with self._waiting_at("after the result: extract"):
+            await self._mine(self._resume_id)
+        with self._waiting_at("after the result: propose"):
+            await self._propose(self._resume_id)
         try:
-            usage_now = await self._context_usage()
+            with self._waiting_at("after the result: context usage"):
+                usage_now = await self._context_usage()
             armed = self.hysteresis.allow(usage_now, self.rollover_at_percent)
             if armed and rollover.pressure_due(usage_now, self.rollover_at_percent):
                 self._request_rollover(_pressure_reason(usage_now))

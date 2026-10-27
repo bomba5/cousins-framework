@@ -306,11 +306,11 @@ class TestReadLive(CheckCase):
         self.assertTrue(all(r["live"] for r in result["items"]))
         self.assertIn("only its presence", result["items"][0]["detail"])
 
-    def test_going_missing_does_and_never_found_is_unknown(self):
+    def test_going_missing_is_shown_but_never_stale_and_never_found_is_unknown(self):
         self.check()
         self.note.unlink()
         result = self.check()
-        self.assertTrue(result["stale"])
+        self.assertFalse(result["stale"])
         states = self.states(result)
         self.assertEqual(states["live: notes/hosts.md"], "missing")
         self.assertEqual(states["live:never written"], "unknown")

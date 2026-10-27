@@ -11,6 +11,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   scheduled `in 2h` on the night summer time ended fired three hours
   later: the add passed a naive local time, so the sum ran on the wall
   clock. The time now carries its offset, and `in` adds real time.
+- **A `live:` item never makes a skill stale.** Since 4.2.0 a `rests-on`
+  item marked `live:` was checked only for being there, but its going
+  missing still flagged the skill as stale. It never does now, not even
+  by going missing; the check still shows whether it is there.
 
 ## 4.4.0 - 2026-10-27
 

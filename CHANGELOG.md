@@ -3,6 +3,29 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.4.1 - 2026-10-27
+
+### Fixed
+
+- **`in 2h` is two real hours across a clock change.** A prompt
+  scheduled `in 2h` on the night summer time ended fired three hours
+  later: the add passed a naive local time, so the sum ran on the wall
+  clock. The time now carries its offset, and `in` adds real time.
+- **A `live:` item never makes a skill stale.** Since 4.2.0 a `rests-on`
+  item marked `live:` was checked only for being there, but its going
+  missing still flagged the skill as stale. It never does now, not even
+  by going missing; the check still shows whether it is there.
+- **The skills hint asks a new embedding service afresh.** A skill's
+  vector was kept per model name and text, so after the service changed
+  the hint compared the new service's message vectors with the old one's
+  skill vectors. The cache keys on the service too.
+- **Editing a skill keeps its scripts.** A draft was written as SKILL.md
+  alone and approval replaces the whole folder with the draft, so
+  approving an edit of a skill with scripts deleted them, unless the
+  cousin had copied them in by hand. A new draft of an approved skill now
+  starts with its other files, executable bit kept; a file the cousin
+  takes out shows as removed in the diff.
+
 ## 4.4.0 - 2026-10-27
 
 ### Added

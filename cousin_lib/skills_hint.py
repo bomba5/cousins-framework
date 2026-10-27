@@ -58,13 +58,15 @@ class Hinter:
 
     def _skill_vectors(self, skills_now, config):
         """[(plugin:name, vector)] for the skills exported now. A vector is
-        kept per model and text, so a skill exported again unchanged is not
-        asked for again, and one that failed is asked at the next message."""
+        kept per service, model and text, so a skill exported again unchanged
+        is not asked for again, one that failed is asked at the next message,
+        and a new service (the same model name can be other weights) is asked
+        afresh."""
         from cousin_lib import memory_search
         with self._lock:
             out = []
             for name, text in skills_now:
-                key = (config.get("model"), text)
+                key = (config.get("url"), config.get("model"), text)
                 if key not in self._vectors:
                     self._vectors[key] = memory_search._embed(text, config)
                 out.append((name, self._vectors[key]))

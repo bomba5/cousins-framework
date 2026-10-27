@@ -91,7 +91,7 @@ differently here and in the agent:
 | `side-effect` | `read-only`, `writes-local`, `outward` | what it can change. An `outward` step (a push, an upload, a message, an order) MUST stop at the operator's go and never carries the go as a step |
 | `reads` | `repo@commit:path` (the full commit) or `path#sha256:<hex>`, comma-separated | what it reads; a change there flags the skill as stale |
 | `hosts` | host names, comma-separated | every host it may contact |
-| `rests-on` | paths, tool versions, memory topics, comma-separated; `live:` before one the skill reads afresh each time it runs | what it depends on, checked for drift; a `live:` item only for being there |
+| `rests-on` | paths, tool versions, memory topics, comma-separated; `live:` before one the skill reads afresh each time it runs | what it depends on, checked for drift; a `live:` item is only shown as there or not, and never makes the skill stale |
 | `should-trigger` | a prompt | one that SHOULD make the cousin use the skill (the trigger test); a draft without it is not approved |
 | `must-not-trigger` | a prompt | one that MUST NOT; a draft without it is not approved |
 | `scope` | `own`, `shared` | the cousin's folder (the default) or `shared/`; `shared` only for a general skill in `personal` |
@@ -207,6 +207,11 @@ repository: every commit there is an approval, made by the console as
 the operator, so the house commit rule holds unchanged.
 
 - **A draft never loads.** Only the approved state does.
+- **An edit starts from what is approved.** Approval replaces the whole
+  folder with the draft, so a new draft of a skill approved at its target
+  gets that skill's other files (its scripts, executable bit kept) beside
+  the SKILL.md the cousin writes. A file already in the draft folder stays
+  the cousin's, and one the cousin takes out shows as removed in the diff.
 - **Where it goes** follows its frontmatter: `metadata.context` names the
   repository, and `metadata.scope` is `own` (the default, the cousin's
   folder) or `shared` (`shared/` in `personal`, for a general skill only).
@@ -433,7 +438,7 @@ multi-step work, it considers a skill. Proposals go **only to the operator**.
   or report a problem to the owner; they never fork it.
 - A change to anything in `reads` or `rests-on` flags the skill as stale,
   but for a `rests-on` item marked `live:`, which the skill reads afresh
-  each time it runs: only its going missing does.
+  each time it runs: that one never does, not even by going missing.
 - A scheduled check is read-only and rate-limited, and names itself to any
   host it calls. It never runs an outward step or a long job.
 - The console shows each skill's last use and its last check result. A skill
@@ -468,7 +473,7 @@ Built in 3.61.0 (`cousin_lib/skills_check.py`).
 | `rests-on` a path | the file's sha256 |
 | `rests-on` a word on PATH | the binary's sha256; a word the baseline read as a tool stays one, whatever a later check's PATH finds |
 | `rests-on` anything else | a memory topic: the id of the newest entry on it in the owning cousin's memory (a shared skill has no owner: unknown) |
-| `rests-on` `live:<item>` | any `rests-on` form above, which the skill reads afresh each time it runs (a host-facts topic, a living note): only whether it is there. A change never makes the skill stale; its going missing does, since the skill would find nothing to read |
+| `rests-on` `live:<item>` | any `rests-on` form above, which the skill reads afresh each time it runs (a host-facts topic, a living note): only whether it is there, which the check shows. It never makes the skill stale, not by changing and not by going missing |
 | `source` | the source folder's tree at upstream's default branch with its tree at the pinned commit |
 
 - **States.** Each item is `same`, `changed`, `missing` or `unknown` (not

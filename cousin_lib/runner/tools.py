@@ -528,6 +528,7 @@ def _sk_draft(ctx, a):
         context=_required(a, "context", "draft"),
         side_effect=_required(a, "side_effect", "draft"),
         scope=_str(a, "scope", "own") or "own", license=_str(a, "license", None),
+        root=ctx.root, slug=ctx.slug,
         metadata={"should-trigger": _str(a, "should_trigger"),
                   "must-not-trigger": _str(a, "must_not_trigger"),
                   # absent is not declared; "" declares none

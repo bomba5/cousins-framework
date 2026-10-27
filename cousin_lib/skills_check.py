@@ -10,8 +10,8 @@ whether the place it was imported from has moved on.
   skill is stale when an item changed or went missing; an unknown item
   never makes it stale.
 - A rests-on item marked `live:` is one the skill reads afresh each time
-  it runs: only whether it is there is checked, so a change to it never
-  makes the skill stale, and its going missing does.
+  it runs: it never makes the skill stale, not by changing and not by
+  going missing. The check only shows whether it is there.
 - A skill from outside also has its source folder compared with
   upstream's default branch: `update` says upstream changed it. That is
   news for the operator, not staleness.
@@ -141,8 +141,8 @@ def items_of(metadata):
 
 def live(of, item):
     """(read live, the item without its mark): a rests-on item marked
-    `live:` is one the skill reads afresh each time it runs, so a change to
-    it is expected and only its going missing counts."""
+    `live:` is one the skill reads afresh each time it runs, so it never
+    makes the skill stale: the check only shows whether it is there."""
     item = str(item).strip()
     if of == "rests-on" and item.startswith(LIVE):
         return True, item[len(LIVE):].strip()
@@ -604,14 +604,16 @@ def _check_skill(root, repo, folder, name, *, remote=None, now=None):
                    "then": then, "now": value, "detail": detail}
             if read_live:
                 row["live"] = True
-                row["detail"] = "read live, only its presence is checked: %s" % detail
+                row["detail"] = ("read live, only its presence is shown and it never makes"
+                                 " the skill stale: %s" % detail)
             rows.append(row)
     finally:
         if own:
             remote.close()
     if adopted:
         _write(baseline_path(root, repo, folder, name), base)
-    stale = any(r["state"] in ("changed", "missing") for r in rows if r["of"] != "source")
+    stale = any(r["state"] in ("changed", "missing") for r in rows
+                if r["of"] != "source" and not r.get("live"))
     update = any(r["state"] in ("changed", "missing") for r in rows if r["of"] == "source")
     result = {"skill": "%s:%s/%s" % (repo, folder, name), "commit": commit, "tree": tree,
               "at": _now_iso(now),

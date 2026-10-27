@@ -47,7 +47,8 @@ class SkillsCase(HermeticCase):
               side_effect="read-only", body=BODY, prompts=True):
         return skills.write_draft(home, name, description="Check a board. Use after a regen.",
                                   body=body, context=context, side_effect=side_effect,
-                                  scope=scope, metadata=PROMPTS if prompts else None)
+                                  scope=scope, metadata=PROMPTS if prompts else None,
+                                  root=self.root, slug=home.name)
 
     def hand_draft(self, home, name="board-check", context="personal", scope="own"):
         """A SKILL.md the cousin wrote with its own file tools, which
@@ -947,6 +948,36 @@ class TestDraftsAndApproval(SkillsCase):
                          self.root / "data" / "skills" / "private" / "trigger-tests" / "kit"
                          / "board-check.json")
 
+
+    def test_an_edit_draft_starts_from_the_approved_skills_other_files(self):
+        self.draft(self.wren)
+        script = self.wren / "skill-drafts" / "board-check" / "scripts" / "check.sh"
+        script.parent.mkdir()
+        script.write_text("#!/bin/sh\necho ok\n")
+        script.chmod(0o755)
+        self.approve(self.wren, "wren")
+        self.draft(self.wren, body=BODY + "\nOne more step.\n")
+        self.assertEqual(script.read_text(), "#!/bin/sh\necho ok\n")
+        self.assertTrue(script.stat().st_mode & stat.S_IXUSR)
+        text, _sha = skills.diff_draft(self.root, self.wren, "wren", "board-check")
+        self.assertIn("One more step.", text)
+        self.assertNotIn("check.sh", text)
+
+    def test_a_file_the_cousin_wrote_or_took_out_of_an_edit_stays_so(self):
+        self.draft(self.wren)
+        script = self.wren / "skill-drafts" / "board-check" / "scripts" / "check.sh"
+        script.parent.mkdir()
+        script.write_text("#!/bin/sh\necho ok\n")
+        self.approve(self.wren, "wren")
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/bin/sh\necho mine\n")
+        self.draft(self.wren, body=BODY + "\nOne more step.\n")
+        self.assertEqual(script.read_text(), "#!/bin/sh\necho mine\n")
+        script.unlink()
+        self.draft(self.wren, body=BODY + "\nTwo more steps.\n")
+        self.assertFalse(script.exists())
+        text, _sha = skills.diff_draft(self.root, self.wren, "wren", "board-check")
+        self.assertIn("approved/personal:wren/board-check/scripts/check.sh", text)
 
 class TestExport(SkillsCase):
     def test_the_export_is_read_only_plugins_named_for_the_repository(self):

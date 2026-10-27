@@ -7,3 +7,4 @@
 # line with the commit that made it.
 3.9.0 0e346e4 an entry added to the released 3.7.0 section after its tag moved under 3.9.0, where the change landed, and a wrong module name in it fixed
 3.42.6 a6edd2d the notify fix's wording made precise with 3.43.0, after v3.42.6 was tagged
+4.3.0 6e4ecd2 dated by its release: v4.3.0 was tagged on 2026-10-27, the section still said 2026-10-26

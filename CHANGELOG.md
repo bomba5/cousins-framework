@@ -15,6 +15,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   item marked `live:` was checked only for being there, but its going
   missing still flagged the skill as stale. It never does now, not even
   by going missing; the check still shows whether it is there.
+- **The skills hint asks a new embedding service afresh.** A skill's
+  vector was kept per model name and text, so after the service changed
+  the hint compared the new service's message vectors with the old one's
+  skill vectors. The cache keys on the service too.
 
 ## 4.4.0 - 2026-10-27
 

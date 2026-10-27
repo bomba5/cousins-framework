@@ -83,6 +83,14 @@ class TestHint(HintCase):
         self.assertEqual(self.asked.count(BOARD), 1)
         self.assertEqual(self.asked.count(DINNER), 1)
 
+    def test_a_new_embedding_service_is_asked_again_for_the_skills(self):
+        self.hinter.hint("please check the regenerated board for wren")
+        moved = dict(CONFIG, url="http://embed-next.test")
+        with mock.patch.object(memory_search, "_embedding_config", return_value=moved):
+            self.hinter.hint("please check the regenerated board for wren")
+        self.assertEqual(self.asked.count(BOARD), 2)
+        self.assertEqual(self.asked.count(DINNER), 2)
+
     def test_a_failing_service_is_asked_again_at_the_next_message(self):
         with mock.patch.object(memory_search, "_embed", side_effect=OSError("down")):
             with self.assertRaises(OSError):

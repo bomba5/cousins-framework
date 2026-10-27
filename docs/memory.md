@@ -471,6 +471,11 @@ fill themselves in:
   close matches). Any later entry on the same topic brings it back. The
   console explorer has the same thing as a "mark obsolete" button on
   each raw entry, and the MCP memory tool has an `obsolete` command.
+  A cleanup retires several topics in one call, all with the same
+  reason, and the distilled files are rebuilt once for the batch
+  (`cousin-memory obsolete "backups" "nas" --why "..."`, or the tool's
+  `topics`). A refused topic stops the batch there; the ones before it
+  stay marked and the error names both.
 
 ## Valid time, tensions and the review gate
 

@@ -46,6 +46,25 @@ class TestValidity(HermeticCase):
         self.assertIsNotNone(row["valid_to"])
         self.assertEqual(memory.live_entries(home), [])
 
+    def test_several_topics_retire_in_one_call_with_one_rebuild_of_the_views(self):
+        # a cleanup of 35 topics used to run 35 full distills
+        home = _home(self)
+        for t in ("boiler", "bins", "gate code"):
+            _cli(home, "remember", t, "A fact about the %s." % t)
+        with mock.patch.object(distill, "distill", wraps=distill.distill) as spy:
+            rc, out = _cli(home, "obsolete", "boiler", "bins", "--why", "the house was sold")
+        self.assertEqual((rc, spy.call_count), (0, 1))
+        self.assertIn("Marked obsolete [boiler]", out)
+        self.assertIn("Marked obsolete [bins]", out)
+        self.assertEqual([r["topic"] for r in memory.live_entries(home)], ["gate code"])
+        # a refused topic stops the batch there: the one before it stays
+        # marked, the views are rebuilt for it, and the exit says it failed
+        with mock.patch.object(distill, "distill", wraps=distill.distill) as spy:
+            rc, out = _cli(home, "obsolete", "gate code", "no such topic", "--why", "moved")
+        self.assertEqual((rc, spy.call_count), (2, 1))
+        self.assertIn("Marked obsolete [gate code]", out)
+        self.assertEqual(memory.live_entries(home), [])
+
     def test_opposite_claims_are_a_tension_and_settling_one_clears_it(self):
         home = _home(self)
         _cli(home, "remember", "bins", "The bins go out on Monday.")

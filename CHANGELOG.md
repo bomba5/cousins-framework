@@ -3,6 +3,28 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.3.0 - 2026-10-26
+
+### Added
+
+- **Several memory topics retire in one call.** A cleanup that marked 35
+  topics obsolete ran 35 full rebuilds of the distilled views, one per
+  call. `cousin-memory obsolete` now takes one or more topics with one
+  reason, and the memory tool's `obsolete` takes `topics` beside
+  `topic`; the views are rebuilt once, after the last mark. A refused
+  topic (no raw entries, no `--force`) stops the batch there: the topics
+  before it stay marked, the views are rebuilt for them, and the error
+  names both. `--entry`, which retires one claim, still takes a single
+  topic.
+
+### Fixed
+
+- **The memory tool says one claim per topic.** The distilled views show
+  the newest entry of a topic, so a topic holding several independent
+  facts showed one and read the rest as superseded. The `topic`
+  description now says so; a home still holding the earlier wording
+  gets it on its next registry sync.
+
 ## 4.2.1 - 2026-10-26
 
 ### Fixed

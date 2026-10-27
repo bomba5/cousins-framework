@@ -129,6 +129,28 @@ class TestCallNeverSpawns(HermeticCase):
             self.assertFalse(err, text)
         self.assertEqual(run.call_count + popen.call_count, 0)
 
+    def test_obsolete_takes_several_topics_and_rebuilds_the_views_once(self):
+        from cousin_lib import distill, memory
+        ctx = _ctx(self)
+        for t in ("boiler", "bins", "gate code"):
+            memory.remember(ctx.home, t, "A fact about the %s." % t)
+        with mock.patch.object(distill, "distill", wraps=distill.distill) as spy:
+            text, err = tools.call(ctx, "memory", {"command": "obsolete", "topic": "boiler",
+                                                   "topics": ["bins"], "why": "the house was sold"})
+        self.assertFalse(err, text)
+        self.assertEqual(spy.call_count, 1)
+        self.assertIn("Marked obsolete [boiler]", text)
+        self.assertIn("Marked obsolete [bins]", text)
+        # a refused topic is an error that still says what was marked
+        with mock.patch.object(distill, "distill", wraps=distill.distill) as spy:
+            text, err = tools.call(ctx, "memory", {"command": "obsolete", "topic": "gate code",
+                                                   "topics": ["no such topic"], "why": "moved"})
+        self.assertTrue(err)
+        self.assertEqual(spy.call_count, 1)
+        self.assertIn("Marked obsolete [gate code]", text)
+        self.assertIn("[no such topic] not marked", text)
+        self.assertEqual(memory.live_entries(ctx.home), [])
+
     def test_an_unknown_command_and_a_bad_enum_are_tool_errors(self):
         ctx = _ctx(self)
         text, err = tools.call(ctx, "memory", {"command": "levitate"})

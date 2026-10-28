@@ -630,11 +630,17 @@ A pass takes the next slice of raw memory: the lines no pass has taken
 yet, oldest first with the monthly archives included, up to 40,000
 characters of claims (about 10k tokens). When raw fold has folded away
 the day file dreaming had got to, the next pass goes on inside that month's
-archive from the line after the last one it took, which the archive's day
-map gives. An archive started before day maps existed (before 4.2.1) has
-none, so there the pass starts at the first line stamped on or after the
-day before (a day of slack: day files are named in local time, lines
-stamped in UTC): at most a day is read again and nothing is skipped. A
+archive from the line after the last one it took. Dreaming keeps a key of
+that line in its ledger and finds the line by it, so it also goes on from
+the right place when a folded day file is written again later (the
+decisions backfill writes old days: the folded copy is read to its end,
+then the new copy), or when a trash removed lines before it. If that line
+itself was trashed, the pass reads its day again from the start. A ledger
+from before 4.4.4 has no key: its pass goes on from the line the archive's
+day map gives, or, in an archive started before day maps existed (before
+4.2.1), from the first line stamped on or after the day before (a day of
+slack: day files are named in local time, lines stamped in UTC): at most
+a day is read again and nothing is skipped. A
 first pass whose starting day was folded early (a compact with fewer hot
 days than 30) starts inside the archive a day early too. Each claim is
 shown on one line with its time, truth level, id and topic, cut at 800
@@ -700,7 +706,9 @@ The record is in the cousin's home:
   to disk as soon as the memory write it describes has landed. This is
   the record of a pass that died before its end line.
 - `memory/.dream-ledger.json`: how far dreaming has got (a raw file name
-  and a line count) and the pass in progress, if any. It lives in
+  and a line count, with the key of the last line taken beside them) and
+  the pass in progress, if any. Older versions read it too and ignore the
+  key. It lives in
   `memory/` so a cousin transplanted with its memory does not dream the
   same memory twice. Do not edit it.
 

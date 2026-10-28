@@ -13,7 +13,7 @@ import pathlib
 import tempfile
 import unittest
 
-from cousin_lib import dream_memory, memory, raw_fold
+from cousin_lib import dream_memory, memory, memory_trash, raw_fold
 
 
 class DreamCase(unittest.TestCase):
@@ -249,6 +249,88 @@ class TestTheCursorIsAStructuralRefusal(DreamCase):
             self.assertIn(left, piece.text)
         dream_memory.commit(self.home, self.pass_id, piece.through)
         self.assertEqual(dream_memory.committed(self.home), {"month": "2026-09", "lines": 11})
+
+    def test_a_day_written_again_after_its_fold_is_read_once_whole(self):
+        # the decisions backfill writes old days: a day file the fold took
+        # comes back holding new lines, while the cursor counted the old copy
+        self.raw("2026-09-23", ("kestrel", "the day before"))
+        self.raw("2026-09-24", *[("kestrel", "line %02d" % n) for n in range(1, 9)])
+        dream_memory.commit(self.home, self.pass_id, self.dream().through)
+        self.raw("2026-09-24", ("kestrel", "line 09"), ("kestrel", "line 10"))
+        raw_fold.fold_raw(self.home, keep_days=0)
+        self.raw("2026-09-24", *[("kestrel", "new %d" % n) for n in range(1, 4)])
+        piece = self.dream(pass_id="20261002T210000-def456")
+        for dreamed in ("the day before", "line 01", "line 08"):
+            self.assertNotIn(dreamed, piece.text)
+        for left in ("line 09", "line 10", "new 1", "new 2", "new 3"):
+            self.assertIn(left, piece.text)
+        # it ends in the new copy: not behind the old cursor's 8 lines,
+        # which counted the folded copy
+        self.assertEqual(piece.through, {"month": "2026-09-24", "lines": 3})
+        dream_memory.commit(self.home, "20261002T210000-def456", piece.through)
+        # and the next pass goes on in the new copy, not back in the archive
+        self.raw("2026-09-24", ("kestrel", "new 4"))
+        again = dream_memory.slice_for(self.home, chars=40000)
+        self.assertEqual(again.coverage["entries"], 1)
+        self.assertIn("new 4", again.text)
+
+    def test_a_day_folded_twice_resumes_after_the_copy_the_cursor_counted(self):
+        self.raw("2026-09-24", *[("kestrel", "line %02d" % n) for n in range(1, 11)])
+        raw_fold.fold_raw(self.home, keep_days=0)
+        self.raw("2026-09-24", ("kestrel", "new 1"), ("kestrel", "new 2"))
+        piece = self.dream()
+        self.assertEqual(piece.through, {"month": "2026-09-24", "lines": 2})
+        dream_memory.commit(self.home, self.pass_id, piece.through)
+        self.raw("2026-09-24", ("kestrel", "new 3"))
+        # the day map keeps where the day landed first, not this copy
+        raw_fold.fold_raw(self.home, keep_days=0)
+        again = dream_memory.slice_for(self.home, chars=40000)
+        self.assertEqual(again.coverage["entries"], 1)
+        self.assertIn("new 3", again.text)
+
+    def test_a_trash_before_the_cursor_skips_no_line(self):
+        self.raw("2026-10-01", ("kestrel", "one"), ("kestrel", "two"), ("kestrel", "three"))
+        dream_memory.commit(self.home, self.pass_id, self.dream().through)
+        self.raw("2026-10-01", ("kestrel", "four"))
+        memory_trash.trash_lines(self.home, [("memory/raw/2026-10-01.jsonl", 1, None)],
+                                 by="test")
+        piece = dream_memory.slice_for(self.home, chars=40000)
+        self.assertEqual(piece.coverage["entries"], 1)
+        self.assertIn("four", piece.text)
+
+    def test_a_cursor_whose_last_line_was_trashed_reads_its_day_again(self):
+        self.raw("2026-10-01", ("kestrel", "one"), ("kestrel", "two"))
+        dream_memory.commit(self.home, self.pass_id, self.dream().through)
+        self.raw("2026-10-01", ("kestrel", "three"))
+        memory_trash.trash_lines(self.home, [("memory/raw/2026-10-01.jsonl", 2, None)],
+                                 by="test")
+        piece = dream_memory.slice_for(self.home, chars=40000)
+        # "three" moved up to the line the cursor counted: the day is read
+        # again from its start rather than skip it
+        self.assertIn("three", piece.text)
+        self.assertIn("one", piece.text)
+
+    def test_a_cursor_kept_without_a_key_counts_the_folded_copy_first(self):
+        # a ledger written before the key: which copy it counted is unknown,
+        # and the folded one comes first
+        self.raw("2026-09-24", *[("kestrel", "line %02d" % n) for n in range(1, 11)])
+        dream_memory._save(self.home, {"schema_version": dream_memory.SCHEMA_VERSION,
+                                       "through": {"month": "2026-09-24", "lines": 8}})
+        raw_fold.fold_raw(self.home, keep_days=0)
+        self.raw("2026-09-24", ("kestrel", "new 1"))
+        piece = dream_memory.slice_for(self.home, chars=40000)
+        self.assertNotIn("line 08", piece.text)
+        for left in ("line 09", "line 10", "new 1"):
+            self.assertIn(left, piece.text)
+
+    def test_the_key_rides_beside_the_cursor_not_in_it(self):
+        self.raw("2026-10-01", ("kestrel", "one"))
+        dream_memory.commit(self.home, self.pass_id, self.dream().through)
+        led = json.loads(dream_memory.ledger_path(self.home).read_text())
+        # the cursor keeps the one shape every version reads
+        self.assertEqual(led["through"], {"month": "2026-10-01", "lines": 1})
+        line = (memory.raw_dir(self.home) / "2026-10-01.jsonl").read_text().splitlines()[0]
+        self.assertEqual(led["through_key"], raw_fold.line_key(line))
 
     def test_a_first_pass_whose_since_was_folded_early_starts_inside_the_archive(self):
         # a compact with fewer hot days than the floor folded days after since

@@ -236,6 +236,14 @@ class OpencodeCase(HermeticCase):
     def prompts(self):
         return [q for q in self.factory.fake.requests if q["path"].endswith("/prompt_async")]
 
+    def release_once_queued(self, r, receipt):
+        """End the running turn's HOLD once `receipt`'s prompt is queued
+        behind it (the server echoed it), so the run goes on into it however
+        slow the host: a fold that never races the turn's own end."""
+        self.assertTrue(_wait(lambda: any(e.get("echo_of") == receipt.inbox_id
+                                          for e in self.payloads(r, "user"))))
+        self.factory.fake.release()
+
 
 class TestConfig(OpencodeCase):
     def test_the_rendered_config_disables_opencodes_own_provider_and_names_the_model(self):
@@ -798,28 +806,30 @@ class TestTurns(OpencodeCase):
         self.assertNotIn("[fw-skills]", body["system"])     # this lane loads no skills
 
     def test_an_operator_message_mid_turn_is_folded_into_the_run(self):
-        r = self.started(self.runner([[("SLOW", 1.0), ("text", "first")], [("text", "second")]]))
+        r = self.started(self.runner([[("HOLD",), ("text", "first")], [("text", "second")]]))
         a = r.enqueue(_op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         b = r.enqueue(_op("second, mid-turn", "sam"))
         self.assertTrue(_wait(lambda: len(self.prompts()) == 2))
+        self.release_once_queued(r, b)
         self.assertTrue(_wait(lambda: self.settled(r, b) is not None))
         time.sleep(0.3)
         results = self.payloads(r, "result")
         self.assertEqual(len(results), 1, "one idle closes both")
         self.assertEqual(sorted(results[0]["inbox_ids"]), sorted([a.inbox_id, b.inbox_id]))
         self.assertEqual((self.outcome(r, a), self.outcome(r, b)), ("delivered", "delivered"))
-        self.assertEqual(r.turn.active, False)
+        self.assertTrue(_wait(lambda: not r.turn.active))    # it ends after its rows close
 
     def test_a_peer_message_mid_turn_is_folded_into_the_run(self):
         """A peer folds as an operator does, its thread in the header."""
-        r = self.started(self.runner([[("SLOW", 1.0), ("text", "first")], [("text", "second")]]))
+        r = self.started(self.runner([[("HOLD",), ("text", "first")], [("text", "second")]]))
         a = r.enqueue(_op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         peer = r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
         self.assertTrue(_wait(lambda: len(self.prompts()) == 2))
         text = self.prompts()[1]["body"]["parts"][0]["text"]
         self.assertTrue(text.startswith("[peer:testa] chat from Testa"), text)
+        self.release_once_queued(r, peer)
         self.assertTrue(_wait(lambda: self.settled(r, peer) is not None))
         time.sleep(0.3)
         results = self.payloads(r, "result")
@@ -828,7 +838,7 @@ class TestTurns(OpencodeCase):
         self.assertEqual((self.outcome(r, a), self.outcome(r, peer)), ("delivered", "delivered"))
 
     def test_meeting_loop_and_schedule_rows_mid_turn_wait_for_their_own_turns(self):
-        r = self.started(self.runner([[("SLOW", 0.8)]]))
+        r = self.started(self.runner([[("HOLD",)]]))
         a = r.enqueue(_op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         # each its own turn, in priority order: meeting, schedule, loop
@@ -837,6 +847,7 @@ class TestTurns(OpencodeCase):
                    r.enqueue(Item("loop:heartbeat", "loop", "beat", sender=""))]
         time.sleep(0.4)
         self.assertEqual(len(self.prompts()), 1, "held, not sent into the busy run")
+        self.factory.fake.release()
         self.assertTrue(_wait(lambda: len(self.payloads(r, "result")) == 4))
         self.assertEqual([x["inbox_ids"] for x in self.payloads(r, "result")],
                          [[a.inbox_id]] + [[w.inbox_id] for w in waiting])

@@ -36,8 +36,19 @@ def _run(coro):
 
 
 class HooksCase(HermeticCase):
+    # The production budgets (2 s to record, 4 s to recall or hint) are what
+    # a slow store on a loaded host runs past, and a hook past one fails
+    # open: never what a test of the fast path reads. A budget test sets its
+    # own budget (self.budgets keeps the production ones).
+    ROOMY_BUDGET_S = 60.0
+
     def setUp(self):
         super().setUp()
+        self.budgets = {}
+        for name in ("RECORD_BUDGET_S", "RECALL_BUDGET_S", "HINT_BUDGET_S"):
+            self.budgets[name] = getattr(hooks, name)
+            patch = mock.patch.object(hooks, name, self.ROOMY_BUDGET_S)
+            patch.start(); self.addCleanup(patch.stop)
         self.root, self.home = _home(self)
         self.stream = EventStream(self.home, "hooks-test")
         self.machine = StateMachine(on_change=lambda o, n, d: self.stream.append(
@@ -337,8 +348,10 @@ class TestRecorderBudget(HooksCase):
                 tool_input={"command": "sleep 2", "run_in_background": True},
                 tool_use_id="tu-locked"), "tu-locked", {})
             return out, time.monotonic() - started
-        out, took = _run(answer())
-        self.assertLess(took, hooks.RECORD_BUDGET_S + 1.0, "the hook waited on the shared db")
+        budget = self.budgets["RECORD_BUDGET_S"]
+        with mock.patch.object(hooks, "RECORD_BUDGET_S", budget):
+            out, took = _run(answer())
+        self.assertLess(took, budget + 1.0, "the hook waited on the shared db")
         self.assertEqual(out, {})                            # fail open: no rewrite
         events = [e["payload"] for e in self.stream.tail() if e["kind"] == "hook"]
         self.assertTrue(any("budget" in e.get("error", "") for e in events), events)

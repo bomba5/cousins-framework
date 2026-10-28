@@ -34,7 +34,10 @@ FAKE_BIN = Path(__file__).with_name("_fake_opencode.py")
 ENDPOINT = "http://127.0.0.1:11434/v1"
 
 
-def _wait(pred, timeout=5.0):
+WAIT_S = 30.0   # a deadline, not a delay: _wait returns as soon as the condition holds
+
+
+def _wait(pred, timeout=WAIT_S):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if pred():
@@ -205,7 +208,7 @@ class OpencodeCase(HermeticCase):
 
     def started(self, r):
         r.start()
-        self.assertTrue(_wait(lambda: r.opencode_session is not None or r.fatal, 10), "no session")
+        self.assertTrue(_wait(lambda: r.opencode_session is not None or r.fatal), "no session")
         self.assertIsNone(r.fatal)
         return r
 
@@ -232,6 +235,14 @@ class OpencodeCase(HermeticCase):
 
     def prompts(self):
         return [q for q in self.factory.fake.requests if q["path"].endswith("/prompt_async")]
+
+    def release_once_queued(self, r, receipt):
+        """End the running turn's HOLD once `receipt`'s prompt is queued
+        behind it (the server echoed it), so the run goes on into it however
+        slow the host: a fold that never races the turn's own end."""
+        self.assertTrue(_wait(lambda: any(e.get("echo_of") == receipt.inbox_id
+                                          for e in self.payloads(r, "user"))))
+        self.factory.fake.release()
 
 
 class TestConfig(OpencodeCase):
@@ -394,7 +405,7 @@ class TestEnvironment(OpencodeCase):
         r.mcp_timeout_s = 0.5
         self.addCleanup(lambda: r.stop(timeout=5))
         r.start()
-        self.assertTrue(_wait(lambda: r.fatal is not None, 25))
+        self.assertTrue(_wait(lambda: r.fatal is not None))
         self.assertIn("cousin MCP server absent", r.fatal)   # the fake binary serves no MCP
         seen = json.loads(dump.read_text())
         for name in self.PLANTED:
@@ -570,7 +581,7 @@ class TestEveryTurnIsGuarded(OpencodeCase):
 
     def assert_refused_before_the_turn(self, r, needle):
         b = r.enqueue(_op("two"))
-        self.assertTrue(_wait(lambda: r.fatal is not None, 8), "the turn ran unguarded")
+        self.assertTrue(_wait(lambda: r.fatal is not None), "the turn ran unguarded")
         self.assertIn(needle, r.fatal)
         self.assertEqual(len(self.prompts()), 1, "no prompt after the check failed")
         self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "queued"))
@@ -625,7 +636,7 @@ class TestEveryTurnIsGuarded(OpencodeCase):
             return real(method, path, *a, **kw)
         r._client.request = flaky
         b = r.enqueue(_op("two"))
-        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8), "the retry never ran")
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None), "the retry never ran")
         self.assertEqual(fails, ["/config"])
         self.assertIsNone(r.fatal)
         # twice in a row is not transient
@@ -633,7 +644,7 @@ class TestEveryTurnIsGuarded(OpencodeCase):
         r._client.request = lambda method, path, *a, **kw: (_ for _ in ()).throw(
             opencode_http.OpencodeError("GET /config: timed out")) \
             if (method, path) == ("GET", "/config") else real(method, path, *a, **kw)
-        self.assertTrue(_wait(lambda: r.fatal is not None, 8))
+        self.assertTrue(_wait(lambda: r.fatal is not None))
         self.assertIn("timed out", r.fatal)
         self.assertTrue(_wait(lambda: r.inbox.get(c.inbox_id)["state"] == "queued"))
 
@@ -744,7 +755,7 @@ class TestTurns(OpencodeCase):
         r.inbox.claim = claim
         self.started(r)
         a = r.enqueue(_op("while the disk is busy"))
-        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 10))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None))
         self.assertEqual(self.outcome(r, a), "delivered")
         self.assertEqual([p["ongoing"] for p in self.payloads(r, "system")
                           if p.get("subtype") == "store_busy"], [True, False])
@@ -795,29 +806,31 @@ class TestTurns(OpencodeCase):
         self.assertNotIn("[fw-skills]", body["system"])     # this lane loads no skills
 
     def test_an_operator_message_mid_turn_is_folded_into_the_run(self):
-        r = self.started(self.runner([[("SLOW", 1.0), ("text", "first")], [("text", "second")]]))
+        r = self.started(self.runner([[("HOLD",), ("text", "first")], [("text", "second")]]))
         a = r.enqueue(_op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         b = r.enqueue(_op("second, mid-turn", "sam"))
         self.assertTrue(_wait(lambda: len(self.prompts()) == 2))
-        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8))
+        self.release_once_queued(r, b)
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None))
         time.sleep(0.3)
         results = self.payloads(r, "result")
         self.assertEqual(len(results), 1, "one idle closes both")
         self.assertEqual(sorted(results[0]["inbox_ids"]), sorted([a.inbox_id, b.inbox_id]))
         self.assertEqual((self.outcome(r, a), self.outcome(r, b)), ("delivered", "delivered"))
-        self.assertEqual(r.turn.active, False)
+        self.assertTrue(_wait(lambda: not r.turn.active))    # it ends after its rows close
 
     def test_a_peer_message_mid_turn_is_folded_into_the_run(self):
         """A peer folds as an operator does, its thread in the header."""
-        r = self.started(self.runner([[("SLOW", 1.0), ("text", "first")], [("text", "second")]]))
+        r = self.started(self.runner([[("HOLD",), ("text", "first")], [("text", "second")]]))
         a = r.enqueue(_op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         peer = r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
         self.assertTrue(_wait(lambda: len(self.prompts()) == 2))
         text = self.prompts()[1]["body"]["parts"][0]["text"]
         self.assertTrue(text.startswith("[peer:testa] chat from Testa"), text)
-        self.assertTrue(_wait(lambda: self.settled(r, peer) is not None, 8))
+        self.release_once_queued(r, peer)
+        self.assertTrue(_wait(lambda: self.settled(r, peer) is not None))
         time.sleep(0.3)
         results = self.payloads(r, "result")
         self.assertEqual(len(results), 1, "one idle closes both")
@@ -825,7 +838,7 @@ class TestTurns(OpencodeCase):
         self.assertEqual((self.outcome(r, a), self.outcome(r, peer)), ("delivered", "delivered"))
 
     def test_meeting_loop_and_schedule_rows_mid_turn_wait_for_their_own_turns(self):
-        r = self.started(self.runner([[("SLOW", 0.8)]]))
+        r = self.started(self.runner([[("HOLD",)]]))
         a = r.enqueue(_op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         # each its own turn, in priority order: meeting, schedule, loop
@@ -834,7 +847,8 @@ class TestTurns(OpencodeCase):
                    r.enqueue(Item("loop:heartbeat", "loop", "beat", sender=""))]
         time.sleep(0.4)
         self.assertEqual(len(self.prompts()), 1, "held, not sent into the busy run")
-        self.assertTrue(_wait(lambda: len(self.payloads(r, "result")) == 4, 10))
+        self.factory.fake.release()
+        self.assertTrue(_wait(lambda: len(self.payloads(r, "result")) == 4))
         self.assertEqual([x["inbox_ids"] for x in self.payloads(r, "result")],
                          [[a.inbox_id]] + [[w.inbox_id] for w in waiting])
 
@@ -851,7 +865,7 @@ class TestTurns(OpencodeCase):
         stop = r.enqueue(Item("system", "interrupt", "stop it", sender="Priya"))
         self.assertTrue(_wait(lambda: self.outcome(r, stop) is not None))
         self.assertEqual(self.outcome(r, stop), "delivered")
-        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None))
         results = self.payloads(r, "result")
         self.assertEqual(results[0]["inbox_ids"], [a.inbox_id])
         self.assertEqual(results[0]["requeued"], [b.inbox_id])
@@ -870,7 +884,7 @@ class TestTurns(OpencodeCase):
         a = r.enqueue(_op("hang"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         self.assertTrue(r.interrupt())
-        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None))
         self.assertTrue(self.payloads(r, "result")[-1]["interrupted"])
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertFalse(r.interrupt())
@@ -884,7 +898,7 @@ class TestTurns(OpencodeCase):
         a = r.enqueue(_op("one"))
         self.assertTrue(_wait(lambda: self.outcome(r, a) is not None))
         b = r.enqueue(_op("two"))
-        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None))
         self.assertEqual((self.outcome(r, a), self.outcome(r, b)), ("failed", "delivered"))
         results = self.payloads(r, "result")
         self.assertEqual([x["inbox_ids"] for x in results], [[a.inbox_id], [b.inbox_id]])
@@ -923,7 +937,7 @@ class TestTurns(OpencodeCase):
         time.sleep(0.5)
         self.assertEqual(len(self.prompts()), 1, "no turn while the login waits")
         (home / "data" / "login-required.json").unlink()   # the operator's manual retry
-        self.assertTrue(_wait(lambda: any(p.get("restored") for p in self.payloads(r, "auth")), 8))
+        self.assertTrue(_wait(lambda: any(p.get("restored") for p in self.payloads(r, "auth"))))
         self.assertEqual(self.outcome(r, a), "delivered")
         self.assertFalse(r.login_required())
         self.assertEqual([p.get("retry") for p in self.payloads(r, "auth")][-2:],
@@ -947,7 +961,7 @@ class TestTurns(OpencodeCase):
         (home / "data" / "login-required.json").unlink()   # the manual retry, or login --via
         # far inside the 300 s backoff; a wall-clock bound tighter than the
         # wait flaked on a loaded CI runner (3.06 s against 2.5)
-        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered", 10))
+        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered"))
         self.assertIn("manual retry", [p.get("retry") for p in self.payloads(r, "auth")])
 
     def test_a_changed_auth_json_retries_on_the_trigger_not_the_backoff(self):
@@ -966,7 +980,7 @@ class TestTurns(OpencodeCase):
         auth_json.write_text(json.dumps({"openai": {"type": "api", "key": "fake-k2"}}))
         # far inside the 300 s backoff; a wall-clock bound tighter than the
         # wait flaked on a loaded CI runner (3.06 s against 2.5)
-        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered", 10))
+        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered"))
         self.assertIn("credentials changed", [p.get("retry") for p in self.payloads(r, "auth")])
 
     def test_a_login_file_left_by_an_earlier_runner_clears_on_the_first_good_result(self):
@@ -975,8 +989,8 @@ class TestTurns(OpencodeCase):
         (home / "data" / "login-required.json").write_text(json.dumps({"reason": "login_required"}))
         r = self.started(self.runner([[("text", "ok")]], home=home))
         a = r.enqueue(_op("one"))
-        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered", 8))
-        self.assertTrue(_wait(lambda: not (home / "data" / "login-required.json").exists(), 8))
+        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered"))
+        self.assertTrue(_wait(lambda: not (home / "data" / "login-required.json").exists()))
         # the file goes first, the event after it
         self.assertTrue(_wait(lambda: any(p.get("restored") for p in self.payloads(r, "auth"))))
 
@@ -999,7 +1013,7 @@ class TestTurns(OpencodeCase):
         auth.write_text(json.dumps({"openai": {"type": "api", "key": "fake-k2"},
                                     "https://corp.example": {"type": "wellknown",
                                                              "key": "fake-wk"}}))
-        self.assertTrue(_wait(lambda: r.fatal is not None, 8), "the retry ran unchecked")
+        self.assertTrue(_wait(lambda: r.fatal is not None), "the retry ran unchecked")
         self.assertIn("wellknown", r.fatal)
         self.assertNotIn("fake-", r.fatal)
         self.assertEqual(len(self.prompts()), 1, "no turn after the refused change")
@@ -1031,7 +1045,7 @@ class TestTurns(OpencodeCase):
         a = r.enqueue(_op("go"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         self.factory.fake.drop_event_streams()
-        self.assertTrue(_wait(lambda: self.outcome(r, a) is not None, 8))
+        self.assertTrue(_wait(lambda: self.outcome(r, a) is not None))
         self.assertEqual(self.outcome(r, a), "delivered")
         gap = [p for p in self.payloads(r, "system") if p.get("subtype") == "event_gap"]
         self.assertEqual(gap, [{"subtype": "event_gap", "settled": True}])
@@ -1047,7 +1061,7 @@ class TestTurns(OpencodeCase):
         self.assertTrue(_wait(lambda: self.payloads(r, "tool")))
         b = r.enqueue(_op("how is it going?", "sam"))
         self.assertTrue(_wait(lambda: len(self.prompts()) == 2))
-        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None))
         self.assertEqual(self.factory.fake.aborts, [])
         self.assertEqual([p["text"] for p in self.payloads(r, "tool_result")], ["OK"])
         result = self.payloads(r, "result")[-1]
@@ -1064,7 +1078,7 @@ class TestTurns(OpencodeCase):
         r.tool_idle_timeout_s = 0.8
         self.started(r)
         a = r.enqueue(_op("sleep"))
-        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None))
         result = self.payloads(r, "result")[-1]
         self.assertTrue(result["is_error"])
         self.assertIn("with a tool call running", result["error"])
@@ -1105,9 +1119,9 @@ class TestTurns(OpencodeCase):
         a = r.enqueue(_op("hang"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         mcp, reader = r._mcp, r._reader
-        t = time.monotonic()
-        r.stop(timeout=5)
-        self.assertLess(time.monotonic() - t, 3.0)
+        # the turn hangs until aborted, so a worker gone when stop() returns
+        # is the bound; a wall-clock one (3 s) read 3.3 on a slowed store
+        r.stop(timeout=WAIT_S)
         self.assertEqual(r.state(), "stopped")
         self.assertFalse(r.worker_alive())
         self.assertTrue(self.factory.servers[0].stopped)
@@ -1136,7 +1150,7 @@ class TestReplyGate(OpencodeCase):
                                                                  peer_gate=peer_gate)))
 
     def finished(self, r, receipt):
-        self.assertTrue(_wait(lambda: self.settled(r, receipt) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, receipt) is not None))
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertTrue(self.factory.fake.settle())
         time.sleep(0.3)                 # long enough for a second send-back to show
@@ -1325,7 +1339,7 @@ class TestRepeatBound(OpencodeCase):
                                         ("text", "sent")],
                                        [("text", "stopping here")]]))
         a = r.enqueue(Item("peer:testa", "chat", "status?", sender="Testa"))
-        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None))
         self.assertTrue(self.factory.fake.settle())
         self.assertEqual(self.nudges(r), [{"gate": "repeat", "tool": "cousin_send", "count": 3,
                                            "action": "nudge"}])
@@ -1342,7 +1356,7 @@ class TestRepeatBound(OpencodeCase):
                                        [SAME_SEND, ("HANG",)],
                                        [("text", "next turn")]]))
         a = r.enqueue(Item("peer:testa", "chat", "status?", sender="Testa"))
-        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None))
         self.assertEqual([p["action"] for p in self.nudges(r)], ["nudge", "end"])
         self.assertEqual(self.nudges(r)[1]["count"], 4)
         self.assertEqual(self.factory.fake.aborts, [r.opencode_session])
@@ -1352,7 +1366,7 @@ class TestRepeatBound(OpencodeCase):
         self.assertEqual(self.outcome(r, a), "delivered")
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         b = r.enqueue(_op("and now?"))                  # the next turn starts afresh
-        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None))
         self.assertEqual(len(self.nudges(r)), 2)
 
     def test_handoff_counts_by_name_whatever_its_arguments(self):
@@ -1361,7 +1375,7 @@ class TestRepeatBound(OpencodeCase):
                  for i in range(3)]
         r = self.started(self.runner([calls + [("text", "done")], [("text", "ok")]]))
         a = r.enqueue(_op("wrap up"))
-        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None))
         self.assertEqual(self.nudges(r), [{"gate": "repeat", "tool": "cousin_handoff",
                                            "count": 3, "action": "nudge"}])
         self.assertEqual(self.sent()[1],
@@ -1376,7 +1390,7 @@ class TestRepeatBound(OpencodeCase):
                                        ("tool", "cousin_send", {"to": "testa", "text": "two"}, "ok"),
                                        ("text", "done")]]))
         a = r.enqueue(_op("fix it"))
-        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None))
         self.assertEqual(self.nudges(r), [])
         self.assertEqual(len(self.prompts()), 1)
 
@@ -1385,7 +1399,7 @@ class TestRepeatBound(OpencodeCase):
         r.repeat_limit = 0
         self.started(r)
         a = r.enqueue(_op("go"))
-        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None))
         self.assertEqual(self.nudges(r), [])
 
 

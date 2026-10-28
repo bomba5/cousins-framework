@@ -15,7 +15,10 @@ from tests.runner._home import temp_home
 LOGGED_OUT = "Not logged in \u00b7 Please run /login"     # the CLI's own text, a middle dot
 
 
-def _wait(pred, timeout=10.0):
+WAIT_S = 30.0   # a deadline, not a delay: _wait returns as soon as the condition holds
+
+
+def _wait(pred, timeout=WAIT_S):
     t = time.monotonic()
     while time.monotonic() - t < timeout:
         if pred():
@@ -267,7 +270,7 @@ class TestRunnerWaitsForALogin(HermeticCase):
                                                 _retry_401(), "WAIT_FOR_INTERRUPT"])
         r.start()
         rec = self.op(r)
-        self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None, 5))
+        self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None))
         self.assertGreaterEqual(self.clients[0].interrupts, 1)     # the runner cut the retries
         # the result is appended, then the row goes back to the queue
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "queued"
@@ -472,20 +475,19 @@ class TestRunnerWaitsForALogin(HermeticCase):
     def retries(self, r):
         return [e["retry"] for e in self.events(r, "auth") if "retry" in e]
 
-    def test_a_changed_credential_retries_within_a_second_whatever_the_backoff(self):
+    def test_a_changed_credential_retries_on_the_trigger_not_the_backoff(self):
         r, rec = self.blocked()
         self.mark = ("m", 2)                              # a login finished between two looks
-        t = time.monotonic()
-        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered", 5))
-        self.assertLess(time.monotonic() - t, 2.5)
+        # far inside the 300 s backoff; a wall-clock bound tighter than the
+        # wait flaked on a loaded host (2.66 s against 2.5)
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
         self.assertEqual(self.retries(r), ["credentials changed"])
 
-    def test_a_deleted_login_file_retries_within_a_second_whatever_the_backoff(self):
+    def test_a_deleted_login_file_retries_on_the_trigger_not_the_backoff(self):
         r, rec = self.blocked()
         auth.clear_login_required(self.home)              # the manual retry, or login --via
-        t = time.monotonic()
-        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered", 5))
-        self.assertLess(time.monotonic() - t, 2.5)
+        # far inside the 300 s backoff, as above
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
         self.assertEqual(self.retries(r), ["manual retry"])
 
     def test_a_retry_that_failed_for_another_reason_waits_for_the_next_change(self):
@@ -504,13 +506,13 @@ class TestRunnerWaitsForALogin(HermeticCase):
             return client
         r.client_factory = factory
         self.mark = ("m", 2)
-        self.assertTrue(_wait(lambda: len(self.clients) == 2, 5))
+        self.assertTrue(_wait(lambda: len(self.clients) == 2))
         time.sleep(2.5)
         self.assertEqual(len(self.clients), 2)            # one retry, then the backoff
         self.assertTrue(r.login_required())
         r.client_factory = inner
         self.mark = ("m", 3)                              # the next change wakes it again
-        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered", 5))
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
 
     def test_the_account_not_taking_effect_is_an_auth_event_not_a_block(self):
         key = accounts.Account("metered", "anthropic-key", None, None, secret_value="k-test")
@@ -565,7 +567,7 @@ class TestRunnerWaitsForALogin(HermeticCase):
         self.assertIn(("errored", auth.LOGIN), self.states(r))
         self.logged_in = True                             # the login is fixed: the rollover runs
         self.assertTrue(_wait(lambda: any(e.get("phase") == "done"
-                                          for e in self.events(r, "rollover")), 15))
+                                          for e in self.events(r, "rollover"))))
         done = [e for e in self.events(r, "rollover") if e.get("phase") == "done"][0]
         self.assertEqual(done["handoff"], "clean")
 
@@ -637,7 +639,7 @@ class TestRunnerWaitsForALogin(HermeticCase):
         self.assertFalse((self.home / "hooks.log").exists())   # nothing rolled over yet
         self.mark = ("m", 2)                              # the operator fixed the login
         self.assertTrue(_wait(lambda: any(e.get("phase") == "done"
-                                          for e in self.events(r, "rollover")), 15))
+                                          for e in self.events(r, "rollover"))))
         self.assertTrue(_wait(lambda: [d["outcome"] for d in self.digests(r)] == ["delivered"]))
         self.assertEqual([row for row in self.rows(r) if row["state"] == "claimed"], [])
         self.assertEqual((self.home / "hooks.log").read_text().split(), ["start"])

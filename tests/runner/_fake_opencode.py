@@ -42,6 +42,9 @@ run out a turn says "ok". Steps:
                                       for POST /permission/{id}/reply
   ("SLOW", seconds)                   silence; ends early on abort
   ("HANG",)                           silence until abort
+  ("HOLD",)                           silence until the test calls release()
+                                      (a turn held open on state, not on a
+                                      clock); ends early on abort
   ("FAIL", error_name, message)       session.error {name, data: {message}}
   ("AUTH_401",)                       the measured APIError 401
   ("COMPACT",)                        session.compacted for the session
@@ -97,7 +100,7 @@ AUTH_401 = {"name": "APIError", "data": {
         "code": "invalid_api_key"}}),
     "metadata": {"url": "http://127.0.0.1:9/v1/chat/completions"}}}
 _ARITY = {"text": 2, "reasoning": 2, "tool": 4, "tool_error": 4, "ASK": 4, "WORK": 5, "SLOW": 2,
-          "HANG": 1, "FAIL": 3, "AUTH_401": 1, "PARTIAL": 2, "PREP": 2, "COMPACT": 1}
+          "HANG": 1, "HOLD": 1, "FAIL": 3, "AUTH_401": 1, "PARTIAL": 2, "PREP": 2, "COMPACT": 1}
 PLUGIN_NAME = "cousin-policy.js"
 POLICY_ENV = "COUSIN_POLICY_FILE"
 _ROUTES = [
@@ -205,6 +208,7 @@ class FakeOpencode:
         self._lock = threading.RLock()
         self._changed = threading.Condition(self._lock)
         self._closing = threading.Event()
+        self._released = threading.Event()
         self._ids = itertools.count(1)
         self._httpd = ThreadingHTTPServer(("127.0.0.1", port), self._handler())
         self._httpd.daemon_threads = True
@@ -387,6 +391,10 @@ class FakeOpencode:
         with self._lock:
             return self._scripts.pop(0) if self._scripts else list(DEFAULT_SCRIPT)
 
+    def release(self):
+        """End every HOLD step: the one playing now and any later one."""
+        self._released.set()
+
     def _sleep(self, state, seconds):
         """Silence for `seconds` (None: forever); True when aborted or closing."""
         deadline = None if seconds is None else time.monotonic() + seconds
@@ -398,6 +406,13 @@ class FakeOpencode:
                 return state.abort.is_set()
             if state.abort.wait(left):
                 return True
+
+    def _hold(self, state):
+        """Silence until release(); True when aborted or closing."""
+        while not self._released.wait(0.05):
+            if self._closing.is_set() or state.abort.is_set():
+                return True
+        return False
 
     def _run(self, sid, user):
         state = self._sessions[sid]
@@ -561,6 +576,9 @@ class FakeOpencode:
                 state.step = None
             elif kind in ("SLOW", "HANG"):
                 if self._sleep(state, step[1] if kind == "SLOW" else None):
+                    break
+            elif kind == "HOLD":
+                if self._hold(state):
                     break
             elif kind == "FAIL":
                 self._fail(sid, state, info, {"name": step[1], "data": {"message": step[2]}})

@@ -330,7 +330,39 @@ class TestTheCursorIsAStructuralRefusal(DreamCase):
         # the cursor keeps the one shape every version reads
         self.assertEqual(led["through"], {"month": "2026-10-01", "lines": 1})
         line = (memory.raw_dir(self.home) / "2026-10-01.jsonl").read_text().splitlines()[0]
-        self.assertEqual(led["through_key"], raw_fold.line_key(line))
+        self.assertEqual(led["through_key"], {"month": "2026-10-01", "lines": 1,
+                                              "key": raw_fold.line_key(line)})
+
+    def test_a_key_an_older_version_left_behind_is_not_believed(self):
+        self.raw("2026-10-01", *[("kestrel", "line %d" % n) for n in range(1, 4)])
+        dream_memory.commit(self.home, self.pass_id, self.dream().through)
+        # an older version commits the next pass: it moves the cursor and
+        # keeps a key it does not know, which names line 3
+        self.raw("2026-10-01", ("kestrel", "line 4"), ("kestrel", "line 5"))
+        led = json.loads(dream_memory.ledger_path(self.home).read_text())
+        dream_memory._save(self.home, dict(led, through={"month": "2026-10-01", "lines": 5}))
+        self.raw("2026-10-01", ("kestrel", "line 6"))
+        piece = dream_memory.slice_for(self.home, chars=40000)
+        self.assertEqual(piece.coverage["entries"], 1)
+        self.assertIn("line 6", piece.text)
+
+    def test_a_copy_of_the_cursors_line_in_a_day_written_again_is_not_taken_for_it(self):
+        self.raw("2026-09-24", *[("kestrel", "line %02d" % n) for n in range(1, 11)])
+        day = memory.raw_dir(self.home) / "2026-09-24.jsonl"
+        eighth = day.read_text().splitlines()[7]
+        dream_memory._save(self.home, {
+            "schema_version": dream_memory.SCHEMA_VERSION,
+            "through": {"month": "2026-09-24", "lines": 8},
+            "through_key": {"month": "2026-09-24", "lines": 8,
+                            "key": raw_fold.line_key(eighth)}})
+        raw_fold.fold_raw(self.home, keep_days=0)
+        # the day file comes back holding an exact copy of the cursor's line
+        self.raw("2026-09-24", ("kestrel", "new 1"))
+        with open(day, "a") as fh:
+            fh.write(eighth + "\n")
+        piece = dream_memory.slice_for(self.home, chars=40000)
+        for left in ("line 09", "line 10", "new 1"):
+            self.assertIn(left, piece.text)
 
     def test_a_first_pass_whose_since_was_folded_early_starts_inside_the_archive(self):
         # a compact with fewer hot days than the floor folded days after since

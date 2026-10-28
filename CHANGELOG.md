@@ -22,7 +22,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   ledger from before this version has no key, and its pass starts a day
   written again after its fold in the archive, where the day map says
   the day landed. The cursor keeps its shape, so an older version still
-  reads the ledger and ignores the key.
+  reads the ledger and ignores the key. The key is kept with the cursor
+  it was taken at, so one an older version left behind is not believed.
 
 ## 4.4.3 - 2026-10-27
 

@@ -42,11 +42,13 @@ A file name stops naming one file once raw_fold has moved the day a
 cursor names into its month's archive, and more so when that day file is
 written again (the decisions backfill writes old days): the cursor may
 have counted either copy of the day. So beside the cursor the ledger
-keeps `through_key`, the key of the last line it took
-(`raw_fold.line_key`), and the cursor resumes after that line wherever
-it is now: on its own line, further up the same file when a trash took
-lines before it, or in the archive. Without a key (a cursor written
-before it was kept), or once that line is gone, the line count decides:
+keeps `through_key`: the key of the last line it took
+(`raw_fold.line_key`), with the cursor it was taken at, since an older
+version of this module moves the cursor and leaves the key. The cursor
+resumes after that line wherever it is now: on its own line, further up
+the same file when a trash took lines before it, or in the archive.
+Without a key (a cursor written before it was kept), a key taken at
+another cursor, or once that line is gone, the line count decides:
 on its own line in the archive where the fold mapped that day
 (`raw_fold.landed`), else a day early. Two cursors are compared by where
 each one resumes. The key rides beside the cursor and not in it, so the
@@ -222,22 +224,57 @@ def _index_of(files, month):
 
 
 def _through_key(record):
-    """The key of the last line a cursor took, kept beside it in `record`
-    (the ledger, its pending slice or its attempt), or None."""
-    key = (record or {}).get("through_key")
-    return key if isinstance(key, str) and _LINE_KEY.match(key) else None
+    """The key of the last line a cursor took, or None. `record` (the
+    ledger, its pending slice or its attempt) keeps it beside the cursor
+    with the cursor it was taken at: an older version of this module moves
+    the cursor and leaves the key, which then names another line."""
+    record = record or {}
+    held = record.get("through_key")
+    if not isinstance(held, dict) or not isinstance(held.get("key"), str) \
+            or not _LINE_KEY.match(held["key"]):
+        return None
+    if {"month": held.get("month"), "lines": held.get("lines")} != record.get("through"):
+        return None
+    return held["key"]
 
 
-def _after(path, key, taken=None):
-    """The line after the one `key` names in the file at `path`: the
-    cursor's own line when it is still there, else wherever that line is
-    now (a trash took lines before it). None when it is not in the file."""
-    lines = _read_lines(path)
-    if taken and taken <= len(lines) and raw_fold.line_key(lines[taken - 1]) == key:
-        return taken
-    for number, line in enumerate(lines):
-        if raw_fold.line_key(line) == key:
-            return number + 1
+def _keyed(through, key):
+    """What `through_key` holds: the key, and the cursor it was taken at."""
+    return dict(through, key=key) if through and key else None
+
+
+def _on(lines, key, number):
+    """True when line `number` (from 1) of `lines` is the one `key` names."""
+    return 0 < number <= len(lines) and raw_fold.line_key(lines[number - 1]) == key
+
+
+def _found(files, through, key, named, archive):
+    """(file index, first line to take) after the line `key` names, or
+    None. Where the line should be, in the file the cursor names and in
+    the archive where the fold mapped its day, before anywhere else in
+    either: a trash moves a line up its file, and a day file written again
+    could hold an exact copy of a line the archive holds."""
+    month, taken = through["month"], through["lines"]
+    read = {}
+
+    def lines(i):
+        if i not in read:
+            read[i] = _read_lines(files[i][2])
+        return read[i]
+
+    if named is not None and _on(lines(named), key, taken):
+        return named, taken
+    if archive is not None:
+        landed = raw_fold.landed(files[archive][2], month)
+        if landed is not None and taken <= landed[1] \
+                and _on(lines(archive), key, landed[0] + taken):
+            return archive, landed[0] + taken
+    for i in (named, archive):
+        if i is None:
+            continue
+        for number, line in enumerate(lines(i)):
+            if raw_fold.line_key(line) == key:
+                return i, number + 1
     return None
 
 
@@ -255,16 +292,12 @@ def _resume(files, through, key=None):
     archive = None
     if len(month) == 10:
         archive = next((i for i, f in enumerate(files) if f[0] == month[:7]), None)
-    if key and named:
-        after = _after(files[index][2], key, taken)
-        if after is not None:
-            return index, after
-    if key and archive is not None:
-        # the copy of the day it counted was folded, whether or not the
-        # day file has been written again since
-        after = _after(files[archive][2], key)
-        if after is not None:
-            return archive, after
+    if key:
+        # in the archive, the copy of the day it counted was folded,
+        # whether or not the day file has been written again since
+        found = _found(files, through, key, index if named else None, archive)
+        if found is not None:
+            return found
     if named:
         landed = None if archive is None else raw_fold.landed(files[archive][2], month)
         if landed is not None:
@@ -400,9 +433,9 @@ def begin(home, pass_id):
         if not pending.get("through"):
             raise ValueError("begin: no slice was taken for this pass; call"
                              " slice_for first")
-        attempt = {"pass_id": pass_id, "started": time.time(),
-                   "through": cursor(pending["through"]),
-                   "through_key": _through_key(pending),
+        through = cursor(pending["through"])
+        attempt = {"pass_id": pass_id, "started": time.time(), "through": through,
+                   "through_key": _keyed(through, _through_key(pending)),
                    "seen": list(pending.get("seen") or [])}
         led["attempt"] = attempt
         led["pending"] = None
@@ -433,7 +466,7 @@ def commit(home, pass_id, through):
                              % (through["month"], through["lines"],
                                 old.get("month"), old.get("lines") or 0))
         led["through"] = through
-        led["through_key"] = key
+        led["through_key"] = _keyed(through, key)
         led["attempt"] = None
         _history(led, {"pass_id": pass_id, "started": attempt.get("started"),
                        "ended": time.time(), "result": "committed",
@@ -644,8 +677,9 @@ def slice_for(home, *, chars=40000, since=None):
             if stop:
                 break
         final = {"month": last[0], "lines": last[1]} if last else through
+        key = raw_fold.line_key(last[2]) if last else key
         pending = {"taken": time.time(), "through": final,
-                   "through_key": raw_fold.line_key(last[2]) if last else key,
+                   "through_key": _keyed(final, key),
                    "seen": sorted(ids),
                    "chars": used, "entries": shown, "cut": cut,
                    "coverage": {"files": stems, "entries": shown,

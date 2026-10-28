@@ -739,8 +739,16 @@ class TestNodeProcess(NodeCase):
         self.assertIn("listening on", proc.stdout.readline())
         proc.send_signal(_signal.SIGTERM)
         # communicate, not wait: it drains both pipes while the node stops,
-        # so a node that logs more than a pipe holds never blocks on a write
-        _out, err = proc.communicate(timeout=30)
+        # so a node that logs more than a pipe holds never blocks on a write.
+        # The bound is past the stop's own caps (5 s a part, about 21 s in
+        # all, 51 with a reply in flight; 30 s ran out on a loaded runner),
+        # and a node still running at it fails with what it said
+        try:
+            _out, err = proc.communicate(timeout=90)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            _out, err = proc.communicate()
+            self.fail("no exit 90 s after SIGTERM; its stderr:\n" + err[-2000:])
         self.assertEqual(proc.returncode, 0, err[-2000:])
         self.assertNotIn("Traceback", err)
 

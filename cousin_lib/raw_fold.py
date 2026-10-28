@@ -48,7 +48,9 @@ def day_map_path(archive):
     return archive.with_name(archive.name.split(".")[0] + ".days.json")
 
 
-def _line_key(line):
+def line_key(line):
+    """A short key of one raw line: a day map's `head`, and the line a
+    dreaming cursor took last, which it finds again by this key."""
     return hashlib.sha1(line.encode("utf-8", "replace")).hexdigest()[:12]
 
 
@@ -102,7 +104,7 @@ def landed(archive, day):
     lines = _archive_lines(Path(archive))
     if lines is None or first < 0 or count < 0 or first + count > len(lines):
         return None
-    if count and _line_key(lines[first]) != head:
+    if count and line_key(lines[first]) != head:
         return None
     return first, count
 
@@ -190,7 +192,7 @@ def _fold_month(home, month, files, report, hidden=frozenset()):
                 # day file written again after its fold lands again, later
                 days.setdefault(path.name[:10], {
                     "first": at, "lines": len(lines),
-                    "head": _line_key(lines[0]) if lines else ""})
+                    "head": line_key(lines[0]) if lines else ""})
                 at += len(lines)
             for line in lines:
                 try:

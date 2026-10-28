@@ -3,6 +3,28 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.4.4 - 2026-10-28
+
+### Fixed
+
+- **Dreaming no longer skips a day file written again after its fold.**
+  Dreaming's cursor is a file name and a line count. When raw fold had
+  moved the day the cursor stood in into its month's archive and that
+  day file was then written again (the decisions backfill writes old
+  days), the next pass took the new file for the one it had counted and
+  resumed on its line count there: the rest of the folded day, the
+  archive's later days and the new file's first lines were never
+  dreamed. The ledger now keeps a key of the last line the cursor took
+  (`through_key`, beside the cursor), and a pass resumes after that line
+  wherever it is now: in its day file, further up it when a trash
+  removed lines before it (which skipped lines too), or in the archive.
+  A pass whose last line was itself trashed reads that day again. A
+  ledger from before this version has no key, and its pass starts a day
+  written again after its fold in the archive, where the day map says
+  the day landed. The cursor keeps its shape, so an older version still
+  reads the ledger and ignores the key. The key is kept with the cursor
+  it was taken at, so one an older version left behind is not believed.
+
 ## 4.4.3 - 2026-10-27
 
 ### Fixed

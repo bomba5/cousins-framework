@@ -9,6 +9,7 @@ import threading
 import time
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 from cousin_lib.console import router, sse
 from cousin_lib.console import stream as console_stream
@@ -18,6 +19,8 @@ from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.stream import EventStream
 from tests._hermetic import HermeticCase
 from tests.console._harness import ConsoleCase
+
+WAIT_S = 30.0   # a deadline, not a delay: each wait ends as soon as its condition holds
 
 
 def _frames(gen, n):
@@ -214,13 +217,13 @@ class RouteCase(HomeCase):
             with main.hold_lock(self.home):
                 runner.start()
                 held.set()
-                release.wait(10)
+                release.wait(WAIT_S)          # the cleanup sets it; a deadline, not a delay
                 runner.stop(timeout=5)
         t = threading.Thread(target=hold)
         t.start()
         self.addCleanup(t.join)
         self.addCleanup(release.set)
-        self.assertTrue(held.wait(5))
+        self.assertTrue(held.wait(WAIT_S))
         return runner
 
 
@@ -237,14 +240,20 @@ class TestRoutes(RouteCase):
         self.assertEqual(status, 400)
 
     def test_interrupt_ends_a_live_turn(self):
-        runner = self._running(turn_seconds=3.0)
+        # a turn longer than any wait here (an interrupt ends it at once), so
+        # the interrupt cannot land after it on a loaded host
+        runner = self._running(turn_seconds=WAIT_S)
         runner.enqueue(__import__("cousin_lib.delivery", fromlist=["Item"]).Item(
             "operator:Priya", "chat", "slow", sender="Priya"))
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + WAIT_S
         while runner.state() != "running" and time.monotonic() < deadline:
             time.sleep(0.02)
-        self.assertEqual(self._post("/api/cousins/wren/interrupt"),
-                         (200, {"ok": True, "outcome": "delivered"}))
+        self.assertEqual(runner.state(), "running")
+        # the route's own wait for the outcome is a production bound, not what
+        # this test reads
+        with mock.patch.object(console_stream, "INTERRUPT_WAIT_S", WAIT_S):
+            self.assertEqual(self._post("/api/cousins/wren/interrupt"),
+                             (200, {"ok": True, "outcome": "delivered"}))
 
     def test_interrupt_with_no_turn_is_failed(self):
         self._running()

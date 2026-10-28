@@ -199,7 +199,10 @@ class ConsoleCase(unittest.TestCase):
         req = urllib.request.Request(url, data=data, method=method,
                                      headers=headers)
         try:
-            with self.opener.open(req, timeout=10) as resp:
+            # a deadline, not a delay: on a loaded host a route can run past
+            # 10 s (the fleet list probes tmux, ps and the supervisor in
+            # series, and a busy store waits), and a test reads the answer
+            with self.opener.open(req, timeout=60) as resp:
                 status, hdrs, body = resp.status, dict(resp.headers), \
                     resp.read()
         except urllib.error.HTTPError as err:

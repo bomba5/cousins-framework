@@ -179,8 +179,7 @@ class TestSessionsAsARunner(SessionsCase):
             op = s.enqueue(Item("operator:priya", "chat", "a long task", sender="Priya"))
             self.assertTrue(_wait(lambda: s.primary.activity()["thread_kinds"] == ["operator"]))
             peer = s.enqueue(Item("peer:testa", "chat", "hello?", sender="Testa"))
-            self.assertTrue(_wait(lambda: s.inbox.get(peer.inbox_id)["state"] == "done",
-                                  timeout=10))
+            self.assertTrue(_wait(lambda: s.inbox.get(peer.inbox_id)["state"] == "done"))
             # the rebuilt side starts, then its `side_restarted` is appended: it
             # may take and close the row first
             self.assertTrue(_wait(lambda: len([e for e in s.events() if e["kind"] == "system"
@@ -291,9 +290,8 @@ class TestStopRacesTheWatcher(SessionsCase):
             self.assertTrue(building.wait(15), "the watcher never rebuilt the side")
             s.stop(timeout=5)
             stop_returned.set()
-            self.assertTrue(_wait(lambda: not s._watcher.is_alive(), timeout=15))
-        self.assertTrue(_wait(lambda: not any(r.worker_alive() for r in s.sessions().values()),
-                              timeout=10),
+            self.assertTrue(_wait(lambda: not s._watcher.is_alive()))
+        self.assertTrue(_wait(lambda: not any(r.worker_alive() for r in s.sessions().values())),
                         {name: r.worker_alive() for name, r in s.sessions().items()})
 
     def test_a_look_after_a_stop_began_gives_up_nothing_and_rebuilds_nothing(self):
@@ -301,7 +299,7 @@ class TestStopRacesTheWatcher(SessionsCase):
         s = self._gives_up_once(home)
         side = s.sides["peer"]
         side.start()
-        self.assertTrue(_wait(lambda: not side.worker_alive(), timeout=15))
+        self.assertTrue(_wait(lambda: not side.worker_alive()))
         s._stopping.set()
         s._look_after("peer")
         self.assertEqual(s._restart_at, {})

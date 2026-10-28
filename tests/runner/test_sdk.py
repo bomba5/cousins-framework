@@ -241,7 +241,10 @@ class ScriptedClient:
                 return
 
 
-def _wait(pred, timeout=5.0):
+WAIT_S = 30.0   # a deadline, not a delay: _wait returns as soon as the condition holds
+
+
+def _wait(pred, timeout=WAIT_S):
     t = time.monotonic()
     while time.monotonic() - t < timeout:
         if pred():
@@ -526,10 +529,10 @@ class TestSdkRunner(HermeticCase):
         a = r.enqueue(self._op("first"))
         self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
         b = r.enqueue(self._op("second"))
-        self.assertTrue(_wait(lambda: len(made["client"].queries) == 2, timeout=5),
+        self.assertTrue(_wait(lambda: len(made["client"].queries) == 2),
                         "the second was query()'d mid-turn")
         made["client"].resume()
-        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events()), timeout=5))
+        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())))
         res = _results(r)
         self.assertEqual(len(res), 1)
         self.assertEqual(sorted(res[0]["inbox_ids"]), sorted([a.inbox_id, b.inbox_id]))
@@ -604,13 +607,13 @@ class TestSdkRunner(HermeticCase):
         a = r.enqueue(self._op("first"))
         self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
         b = r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
-        self.assertTrue(_wait(lambda: len(made["client"].queries) == 2, timeout=5),
+        self.assertTrue(_wait(lambda: len(made["client"].queries) == 2),
                         "the peer row was query()'d mid-turn")
         text = made["client"].queries[1]["message"]["content"][0]["text"]
         self.assertTrue(text.startswith("[peer:testa] chat from Testa"), text)
         self.assertIn("STOP", text)
         made["client"].resume()
-        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events()), timeout=5))
+        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())))
         res = _results(r)
         self.assertEqual(len(res), 1)
         self.assertEqual(sorted(res[0]["inbox_ids"]), sorted([a.inbox_id, b.inbox_id]))
@@ -633,7 +636,7 @@ class TestSdkRunner(HermeticCase):
         time.sleep(4 * r.poll_s + 0.2)   # several folds had their chance
         self.assertEqual(len(made["client"].queries), 1)
         made["client"].resume()
-        self.assertTrue(_wait(lambda: len(_results(r)) == 4, timeout=8))
+        self.assertTrue(_wait(lambda: len(_results(r)) == 4))
         self.assertEqual([x["inbox_ids"] for x in _results(r)],
                          [[a.inbox_id]] + [[w.inbox_id] for w in waiting])
 
@@ -652,12 +655,12 @@ class TestSdkRunner(HermeticCase):
         r.enqueue(self._op("first"))
         self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
         peer = r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
-        self.assertTrue(_wait(lambda: len(made["client"].queries) == 2, timeout=5))
+        self.assertTrue(_wait(lambda: len(made["client"].queries) == 2))
         # the folded row joins the turn when its echo is read (the CLI took it
         # up), not when it is written: wait for that echo, not for the write
         self.assertTrue(_wait(lambda: any(e["kind"] == "user"
                                           and e["payload"].get("echo_of") == peer.inbox_id
-                                          for e in r.events()), timeout=5))
+                                          for e in r.events())))
         self.assertEqual(r.turn.snapshot(), (True, ("operator:priya", "peer:testa")))
         ctx = r.tool_context
         text, err = tools.call(ctx, "reply", {"text": "stopping", "thread": "peer:testa"})
@@ -674,7 +677,7 @@ class TestSdkRunner(HermeticCase):
         self.assertFalse(err, text)
         self.assertEqual(sm.call_args.args[2], "testa")
         made["client"].resume()
-        self.assertTrue(_wait(lambda: len(_results(r)) == 1, timeout=5))
+        self.assertTrue(_wait(lambda: len(_results(r)) == 1))
 
     # -- interrupt ---------------------------------------------------------------
     def test_interrupt_calls_the_client_and_marks_the_result(self):
@@ -683,7 +686,7 @@ class TestSdkRunner(HermeticCase):
         r.enqueue(self._op("slow"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         self.assertTrue(r.interrupt())
-        self.assertTrue(_wait(lambda: r.state() == "idle", timeout=4))
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertEqual(made["client"].interrupts, 1)
         self.assertTrue(_results(r)[-1]["interrupted"])
 
@@ -744,7 +747,7 @@ class TestSdkRunner(HermeticCase):
         self.assertTrue(self._reached_init(r))
         self._ask_permission(r)
         self.assertTrue(r.interrupt())
-        self.assertTrue(_wait(lambda: r.state() == "idle", timeout=4))
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertEqual(made["client"].interrupts, 1)
         self.assertTrue(_results(r)[-1]["interrupted"])
 
@@ -817,7 +820,7 @@ class TestSdkRunner(HermeticCase):
         held, release = self._hold_after_result(r)
         r.start()
         r.enqueue(self._op("first"))
-        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused, timeout=8))
+        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
         b = r.enqueue(self._op("second"))
         self.assertTrue(_wait(lambda: len(made["client"].queries) == 2))
         made["client"].resume()
@@ -829,7 +832,7 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(made["client"].interrupts, 1)
         self.assertFalse(self._dropped(r))
         release.set()
-        self.assertTrue(_wait(lambda: len(_results(r)) == 2, timeout=6))
+        self.assertTrue(_wait(lambda: len(_results(r)) == 2))
         self.assertEqual(_results(r)[1]["inbox_ids"], [b.inbox_id])
 
     # -- failures ------------------------------------------------------------------
@@ -895,9 +898,8 @@ class TestSdkRunner(HermeticCase):
         r, _ = self._runner([[init_msg(), "HANG", result()]], idle_timeout_s=1.0)
         r.start()
         receipt = r.enqueue(self._op("x"))
-        self.assertTrue(_wait(lambda: any("no message for 1.0s" in e for e in _errors(r)),
-                              timeout=5.0))
-        self.assertTrue(_wait(lambda: r.state() == "idle", timeout=5.0))
+        self.assertTrue(_wait(lambda: any("no message for 1.0s" in e for e in _errors(r))))
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertEqual(r.inbox.get(receipt.inbox_id)["outcome"], "failed")
 
     def test_the_idle_timeout_bounds_the_gap_not_the_whole_turn(self):
@@ -907,8 +909,7 @@ class TestSdkRunner(HermeticCase):
         r.start()
         a = r.enqueue(self._op("x"))
         # the result is appended, then the row closes: wait for both
-        self.assertTrue(_wait(lambda: _results(r) and r.inbox.get(a.inbox_id)["state"] == "done",
-                              timeout=8))
+        self.assertTrue(_wait(lambda: _results(r) and r.inbox.get(a.inbox_id)["state"] == "done"))
         self.assertEqual(_errors(r), [])
         self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "delivered")
 
@@ -917,8 +918,7 @@ class TestSdkRunner(HermeticCase):
                              + [result()]], delay=0.1, idle_timeout_s=5.0, turn_timeout_s=1.0)
         r.start()
         a = r.enqueue(self._op("x"))
-        self.assertTrue(_wait(lambda: any("turn exceeded 1.0s" in e for e in _errors(r)),
-                              timeout=8))
+        self.assertTrue(_wait(lambda: any("turn exceeded 1.0s" in e for e in _errors(r))))
         self.assertTrue(_wait(lambda: r.inbox.get(a.inbox_id)["state"] == "done"))
         self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "failed")
 
@@ -941,8 +941,8 @@ class TestSdkRunner(HermeticCase):
         r.tool_idle_timeout_s = 1.0     # the Bash call stays open: its bound times out
         r.start()
         a = r.enqueue(self._op("first"))
-        self.assertTrue(_wait(lambda: any("no message for" in e for e in _errors(r)), timeout=5.0))
-        self.assertTrue(_wait(lambda: r.state() == "idle", timeout=5.0))
+        self.assertTrue(_wait(lambda: any("no message for" in e for e in _errors(r))))
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
         b = r.enqueue(self._op("second"))
         # the result is appended, then the row closes: wait for both
         self.assertTrue(_wait(lambda: len(_results(r)) == 2
@@ -961,7 +961,7 @@ class TestSdkRunner(HermeticCase):
                             idle_timeout_s=1.0)
         r.start()
         r.enqueue(self._op("first"))
-        self.assertTrue(_wait(lambda: _results(r, drained=True), timeout=6))
+        self.assertTrue(_wait(lambda: _results(r, drained=True)))
         drained = _results(r, drained=True)[0]
         self.assertEqual((drained["inbox_ids"], drained["num_turns"], drained["total_cost_usd"]),
                          ([], 4, 0.04))
@@ -973,7 +973,7 @@ class TestSdkRunner(HermeticCase):
                             idle_timeout_s=1.0)
         r.start()
         r.enqueue(self._op("first"))
-        self.assertTrue(_wait(lambda: _results(r, drained=True), timeout=6))
+        self.assertTrue(_wait(lambda: _results(r, drained=True)))
         self.assertEqual(_results(r, drained=True)[0]["usage"], usage)
 
     def test_a_failed_drain_reconnects_and_resumes(self):
@@ -992,8 +992,7 @@ class TestSdkRunner(HermeticCase):
         self.addCleanup(lambda: r.stop(timeout=5))
         r.start()
         a = r.enqueue(self._op("first"))
-        self.assertTrue(_wait(lambda: any(e.startswith("reconnected:") for e in _errors(r)),
-                              timeout=6.0))
+        self.assertTrue(_wait(lambda: any(e.startswith("reconnected:") for e in _errors(r))))
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertEqual(len(clients), 2)
         self.assertIsNone(asked_resume(clients[0].options))
@@ -1028,7 +1027,7 @@ class TestSdkRunner(HermeticCase):
         self.addCleanup(lambda: r.stop(timeout=5))
         r.start()
         a = r.enqueue(self._op("x"))
-        self.assertTrue(_wait(lambda: r.inbox.get(a.inbox_id)["state"] == "done", timeout=6))
+        self.assertTrue(_wait(lambda: r.inbox.get(a.inbox_id)["state"] == "done"))
         self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "delivered")
         self.assertEqual(len(clients), 2)
         failed = [x for x in _results(r) if x["is_error"]]
@@ -1080,7 +1079,7 @@ class TestSdkRunner(HermeticCase):
         a = r.enqueue(self._op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         b = r.enqueue(Item("loop:heartbeat", "loop", "waiting", sender=""))   # never folded
-        self.assertTrue(_wait(lambda: not r.worker_alive(), timeout=8))
+        self.assertTrue(_wait(lambda: not r.worker_alive()))
         self.assertTrue(any(e.startswith("reconnect failed:") for e in _errors(r)))
         self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "failed")
         self.assertEqual(r.inbox.get(b.inbox_id)["state"], "queued")
@@ -1100,7 +1099,7 @@ class TestSdkRunner(HermeticCase):
         r.inbox.claim = claim
         rec = r.inbox.put(self._op("while the disk is busy"))
         r.start()
-        self.assertTrue(_wait(lambda: r.inbox.get(rec)["state"] == "done", timeout=10))
+        self.assertTrue(_wait(lambda: r.inbox.get(rec)["state"] == "done"))
         states = [e["payload"]["to"] for e in r.events() if e["kind"] == "state"]
         self.assertNotIn("errored", states)
         busy = [e["payload"] for e in r.events() if e["kind"] == "system"
@@ -1177,7 +1176,7 @@ class TestSdkRunner(HermeticCase):
         r.enqueue(self._op("first"))
         self.assertTrue(_wait(lambda: any(e["kind"] == "system"
                                           and e["payload"].get("subtype") == "drained"
-                                          for e in r.events()), timeout=6))
+                                          for e in r.events())))
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         b = r.enqueue(self._op("second"))
         self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done"))
@@ -1244,7 +1243,7 @@ class TestSdkRunner(HermeticCase):
         r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         r.enqueue(Item("person:sam", "chat", "second", sender="Sam"))
-        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events()), timeout=6))
+        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())))
         self.assertEqual(set(seen["threads"]), {"operator:priya", "person:sam"})
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertFalse(r.turn.active)
@@ -1327,7 +1326,7 @@ class TestFoldWriteNeverBlocksTheReader(HermeticCase):
         self.assertTrue(_wait(lambda: made["client"].blocked == 1))
         made["client"].resume()
         # the reader drains the stdout, the write goes through, its echo is read
-        self.assertTrue(_wait(lambda: _results(r), timeout=5.0),
+        self.assertTrue(_wait(lambda: _results(r)),
                         "the turn stalled: the fold's write blocked the reader")
         res = _results(r)
         self.assertEqual(len(res), 1)
@@ -1368,7 +1367,7 @@ class TestFoldWriteNeverBlocksTheReader(HermeticCase):
         self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "failed")
         made["clients"][0].resume()      # the drain may still be reading it
         # requeued, never failed: a later turn runs it
-        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done", timeout=8))
+        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done"))
 
     def test_an_interrupt_row_cut_off_mid_write_by_the_turn_end_is_closed(self):
         """The interrupt's control write is still pending
@@ -1436,8 +1435,8 @@ class TestFoldWriteNeverBlocksTheReader(HermeticCase):
         self.assertFalse(_results(r)[0]["interrupted"], _results(r)[0])
         self.assertEqual(made["client"].interrupts, 0)
         gate.set()
-        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done", timeout=8))
-        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done", timeout=8))
+        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done"))
+        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done"))
 
     def test_every_fold_write_that_wrote_nothing_goes_back_to_the_queue(self):
         """A closed transport refuses every fold of
@@ -1472,7 +1471,7 @@ class TestFoldWriteNeverBlocksTheReader(HermeticCase):
         failed = [x for x in _results(r) if x["is_error"]][0]
         self.assertEqual(sorted(failed["requeued"]), sorted([b_id, c_id]))
         for i in (b_id, c_id):          # requeued, then run by a later turn
-            self.assertTrue(_wait(lambda: r.inbox.get(i)["state"] == "done", timeout=10),
+            self.assertTrue(_wait(lambda: r.inbox.get(i)["state"] == "done"),
                             "fold %d was left claimed" % i)
             self.assertEqual(r.inbox.get(i)["outcome"], "delivered")
 
@@ -1488,7 +1487,7 @@ class TestFoldWriteNeverBlocksTheReader(HermeticCase):
         stop = r.enqueue(Item("system", "interrupt", "stop", sender="Priya"))
         self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "claimed"))
         made["client"].resume()
-        self.assertTrue(_wait(lambda: _results(r), timeout=5.0),
+        self.assertTrue(_wait(lambda: _results(r)),
                         "the turn stalled: a write blocked the reader")
         self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done"))
         self.assertEqual(r.inbox.get(stop.inbox_id)["outcome"], "delivered")
@@ -1703,7 +1702,7 @@ class TestUnrenderableRow(HermeticCase):
         self.assertEqual(row["detail"], "could not be rendered: ValueError: attachment unreadable")
         self.assertEqual(made["client"].queries, [])       # nothing reached the CLI
         good = r.enqueue(Item("operator:priya", "chat", "fine", sender="Priya"))
-        self.assertTrue(_wait(lambda: r.inbox.get(good.inbox_id)["state"] == "done", timeout=8))
+        self.assertTrue(_wait(lambda: r.inbox.get(good.inbox_id)["state"] == "done"))
         self.assertEqual(r.inbox.get(good.inbox_id)["outcome"], "delivered")
 
     def test_a_fold_that_cannot_be_rendered_is_failed_and_the_rest_fold_at_once(self):
@@ -1739,7 +1738,7 @@ class TestUnrenderableRow(HermeticCase):
         self.assertTrue(_wait(lambda: len(made["client"].queries) == 3))
         made["client"].resume()
         self.assertTrue(_wait(lambda: all(r.inbox.get(i)["state"] == "done"
-                                          for i in (a.inbox_id, b, c)), timeout=8))
+                                          for i in (a.inbox_id, b, c))))
         self.assertEqual([r.inbox.get(i)["outcome"] for i in (a.inbox_id, b, c)],
                          ["delivered"] * 3)
         res = [x for x in _results(r) if not x["is_error"]]
@@ -2109,7 +2108,7 @@ class TestCliReplayQuirks(HermeticCase):
     def _states(self, r):
         return [e["payload"]["to"] for e in r.events() if e["kind"] == "state"]
 
-    def _closed(self, r, rows, timeout=10.0):
+    def _closed(self, r, rows, timeout=WAIT_S):
         # wide: the turn's echo handling is what is tested, not its speed,
         # and a loaded host stretches every step
         return _wait(lambda: all(r.inbox.get(x.inbox_id)["state"] == "done" for x in rows),

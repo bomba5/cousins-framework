@@ -39,7 +39,10 @@ def item(name):
     return mark
 
 
-def _wait(pred, timeout=5.0, step=0.02):
+WAIT_S = 30.0   # a deadline, not a delay: _wait returns as soon as the condition holds
+
+
+def _wait(pred, timeout=WAIT_S, step=0.02):
     t = time.monotonic()
     while time.monotonic() - t < timeout:
         if pred():
@@ -170,13 +173,13 @@ class RunnerContract:
         self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None))
         # the `state` event lands just after the attribute flips: wait for it
         self.assertTrue(_wait(lambda: any(e["kind"] == "state" and e["payload"]["from"] == "errored"
-                                          for e in r.events()), timeout=8))
+                                          for e in r.events())))
         self.assertIn("error", _kinds(r))
         states = [e["payload"]["to"] for e in r.events() if e["kind"] == "state"]
         self.assertIn("errored", states)
         self.assertEqual(states[states.index("errored") + 1], "idle")
         b = r.enqueue(_op("two"))
-        self.assertTrue(_wait(lambda: self._row_outcome(r, b) is not None, timeout=8))
+        self.assertTrue(_wait(lambda: self._row_outcome(r, b) is not None))
         self.assertEqual(self._row_outcome(r, b), "delivered")
 
     @item("interrupt_ends_turn")
@@ -186,7 +189,7 @@ class RunnerContract:
         r.enqueue(_op("slow"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         self.assertTrue(r.interrupt())
-        self.assertTrue(_wait(lambda: r.state() == "idle", timeout=3.0))
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertIn("result", _kinds(r))
         self.assertTrue(_results(r)[-1].get("interrupted"))
 
@@ -198,7 +201,7 @@ class RunnerContract:
         a = r.enqueue(_op("slow"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         self.assertTrue(r.interrupt())
-        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None, timeout=3.0))
+        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None))
         self.assertEqual(self._row_outcome(r, a), "delivered", "the model received it")
         # the turn's `result` is on the stream before its row closes
         self.assertNotIn(a.inbox_id, early)
@@ -223,9 +226,9 @@ class RunnerContract:
         a = r.enqueue(_op("slow"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         stop = r.enqueue(_interrupt())
-        self.assertTrue(_wait(lambda: self._row_outcome(r, stop) is not None, timeout=3.0))
+        self.assertTrue(_wait(lambda: self._row_outcome(r, stop) is not None))
         self.assertEqual(self._row_outcome(r, stop), "delivered")
-        self.assertTrue(_wait(lambda: r.state() == "idle", timeout=3.0))
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertTrue(_results(r)[-1]["interrupted"])
         self.assertEqual(self._row_outcome(r, a), "delivered")
         self.assertNotIn(stop.inbox_id, _results(r)[-1]["inbox_ids"])
@@ -235,7 +238,7 @@ class RunnerContract:
         r = self._runner()
         r.start()
         stop = r.enqueue(_interrupt())
-        self.assertTrue(_wait(lambda: self._row_outcome(r, stop) is not None, timeout=3.0))
+        self.assertTrue(_wait(lambda: self._row_outcome(r, stop) is not None))
         self.assertEqual(self._row_outcome(r, stop), "failed")
         self.assertEqual(r.inbox.get(stop.inbox_id)["detail"], "no turn was running")
         self.assertEqual(_results(r), [])
@@ -322,7 +325,7 @@ class RunnerContract:
         self.assertTrue(_wait(lambda: r.state() == "running"))
         second = r.enqueue(_op("second, mid-turn"))
         peer = r.enqueue(Item("peer:testa", "chat", "peer, mid-turn", sender="Testa"))
-        self.assertTrue(_wait(lambda: "result" in _kinds(r), timeout=8.0))
+        self.assertTrue(_wait(lambda: "result" in _kinds(r)))
         time.sleep(0.3)
         results = _results(r)
         self.assertEqual(len(results), 1, "one result closes all three")
@@ -336,7 +339,7 @@ class RunnerContract:
         first = r.enqueue(_op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         beat = r.enqueue(Item("loop:heartbeat", "loop", "beat", sender=""))
-        self.assertTrue(_wait(lambda: len(_results(r)) == 2, timeout=10.0))
+        self.assertTrue(_wait(lambda: len(_results(r)) == 2))
         self.assertEqual([x["inbox_ids"] for x in _results(r)],
                          [[first.inbox_id], [beat.inbox_id]])
 

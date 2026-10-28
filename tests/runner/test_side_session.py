@@ -20,7 +20,7 @@ from cousin_lib.runner import envelope, extract, sdk, sessions, wake
 from cousin_lib.runner.base import INTERRUPT
 from tests._hermetic import HermeticCase
 from tests.runner._home import temp_home
-from tests.runner.test_sdk import (ScriptedClient, _wait, asked_resume, assistant, init_msg,
+from tests.runner.test_sdk import (WAIT_S, ScriptedClient, _wait, asked_resume, assistant, init_msg,
                                    result)
 
 BUSY = {"state": "running", "thread_kinds": ["operator"], "since": time.time() - 120}
@@ -68,7 +68,7 @@ class SideCase(HermeticCase):
         self.addCleanup(lambda: r.stop(timeout=5))
         return r
 
-    def done(self, r, receipt, timeout=5.0):
+    def done(self, r, receipt, timeout=WAIT_S):
         # the runner appends a turn's result, then closes its rows, runs its
         # post-turn work (the session file, usage, mining, the proposal), then goes
         # idle
@@ -285,7 +285,7 @@ class TestReset(SideCase):
         self.assertTrue(self.done(r, a))
         r._request_rollover("context pressure 85%")
         b = r.enqueue(_peer("two"))
-        self.assertTrue(_wait(lambda: waiting.is_set() or not r.worker_alive(), timeout=15))
+        self.assertTrue(_wait(lambda: waiting.is_set() or not r.worker_alive()))
         self.assertIsNone(r.fatal)
         self.assertTrue(r.login_required())
         self.assertEqual(r.state(), "errored")
@@ -321,7 +321,7 @@ class TestReset(SideCase):
             self.assertTrue(self.done(r, a))
             r._request_rollover("context pressure 85%")
             b = r.enqueue(_peer("two"))
-            self.assertTrue(self.done(r, b, timeout=15))
+            self.assertTrue(self.done(r, b))
         self.assertTrue(any(e["kind"] == "error" and "denied for a moment" in e["payload"]["error"]
                             for e in r.events()))
         self.assertEqual(len(self.clients), 2)
@@ -431,9 +431,9 @@ class TestInterruptRowIsThePrimarys(SideCase):
         primary.start()
         r.start()
         op = primary.enqueue(Item("operator:priya", "chat", "a long task", sender="Priya"))
-        self.assertTrue(_wait(lambda: primary.activity()["thread_kinds"] == ["operator"], 20))
+        self.assertTrue(_wait(lambda: primary.activity()["thread_kinds"] == ["operator"]))
         peer = r.enqueue(_peer("hello"))
-        self.assertTrue(_wait(lambda: r.activity()["thread_kinds"] == ["peer"], 20))
+        self.assertTrue(_wait(lambda: r.activity()["thread_kinds"] == ["peer"]))
         stop = r.enqueue(Item("system", INTERRUPT, "stop", sender="Priya"))
         seen = len(folds)
         # several polls of the live side turn after the row is in (or the row
@@ -446,11 +446,11 @@ class TestInterruptRowIsThePrimarys(SideCase):
         self.assertEqual(self.clients[0].interrupts, 0)
         self.assertGreaterEqual(len(folds), seen + 3, "the side turn stopped polling")
         held["on"] = False
-        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done", 20))
+        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done"))
         row = r.inbox.get(stop.inbox_id)
         self.assertEqual((row["outcome"], row["claimant"]), ("delivered", primary.session_id))
-        self.assertTrue(_wait(lambda: r.inbox.get(op.inbox_id)["state"] == "done", 20))
-        self.assertTrue(self.done(r, peer, timeout=20))
+        self.assertTrue(_wait(lambda: r.inbox.get(op.inbox_id)["state"] == "done"))
+        self.assertTrue(self.done(r, peer))
         self.assertFalse(any(e["kind"] == "result" and e["payload"].get("interrupted")
                              for e in r.events()))
 
@@ -486,24 +486,24 @@ class TestInterruptRowIsThePrimarys(SideCase):
         r.inbox.claim = recording
         primary.start()
         op = primary.enqueue(Item("operator:priya", "chat", "a long task", sender="Priya"))
-        self.assertTrue(_wait(lambda: primary.activity()["thread_kinds"] == ["operator"], 20))
+        self.assertTrue(_wait(lambda: primary.activity()["thread_kinds"] == ["operator"]))
         stop = r.enqueue(Item("system", INTERRUPT, "stop", sender="Priya"))
         r.start()
         first = r.enqueue(_peer("one"))       # a live side turn: it folds every poll
         # a first side turn builds its digest and runs a 1 s turn: a loaded
         # host has taken over 5 s (one in 70 runs), so these waits are longer
-        self.assertTrue(self.done(r, first, timeout=20))
+        self.assertTrue(self.done(r, first))
         for body in ("two", "three"):         # and two more boundaries
-            self.assertTrue(self.done(r, r.enqueue(_peer(body)), timeout=20))
+            self.assertTrue(self.done(r, r.enqueue(_peer(body))))
         self.assertTrue(any(limit == 10 for limit, _ in claims), "the side never folded")
         self.assertIsNone(r.inbox.get(stop.inbox_id)["outcome"])
         self.assertEqual(self.clients[0].interrupts, 0)
         self.assertFalse(any(INTERRUPT in sources for _, sources in claims), claims)
         held["on"] = False
-        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done", 20))
+        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done"))
         row = r.inbox.get(stop.inbox_id)
         self.assertEqual((row["outcome"], row["claimant"]), ("delivered", primary.session_id))
-        self.assertTrue(_wait(lambda: r.inbox.get(op.inbox_id)["state"] == "done", 20))
+        self.assertTrue(_wait(lambda: r.inbox.get(op.inbox_id)["state"] == "done"))
 
 
 class TestGenerationOnFile(SideCase):

@@ -475,20 +475,19 @@ class TestRunnerWaitsForALogin(HermeticCase):
     def retries(self, r):
         return [e["retry"] for e in self.events(r, "auth") if "retry" in e]
 
-    def test_a_changed_credential_retries_within_a_second_whatever_the_backoff(self):
+    def test_a_changed_credential_retries_on_the_trigger_not_the_backoff(self):
         r, rec = self.blocked()
         self.mark = ("m", 2)                              # a login finished between two looks
-        t = time.monotonic()
+        # far inside the 300 s backoff; a wall-clock bound tighter than the
+        # wait flaked on a loaded host (2.66 s against 2.5)
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
-        self.assertLess(time.monotonic() - t, 2.5)
         self.assertEqual(self.retries(r), ["credentials changed"])
 
-    def test_a_deleted_login_file_retries_within_a_second_whatever_the_backoff(self):
+    def test_a_deleted_login_file_retries_on_the_trigger_not_the_backoff(self):
         r, rec = self.blocked()
         auth.clear_login_required(self.home)              # the manual retry, or login --via
-        t = time.monotonic()
+        # far inside the 300 s backoff, as above
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
-        self.assertLess(time.monotonic() - t, 2.5)
         self.assertEqual(self.retries(r), ["manual retry"])
 
     def test_a_retry_that_failed_for_another_reason_waits_for_the_next_change(self):

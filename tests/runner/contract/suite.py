@@ -245,15 +245,18 @@ class RunnerContract:
         self.assertEqual(r.state(), "idle")
 
     @item("stop_ends_turn")
-    def test_stop_during_a_turn_returns_within_its_timeout(self):
+    def test_stop_during_a_turn_ends_it(self):
         r = self._runner(slow=True)
         r.start()
         r.enqueue(_op("slow"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
-        t = time.monotonic()
-        r.stop(timeout=5)
-        self.assertLess(time.monotonic() - t, 2.5, "the slow turn (3 s) was ended, not waited out")
+        r.stop(timeout=WAIT_S)
         self.assertEqual(r.state(), "stopped")
+        # judged by the turn's own result, not a clock (a 2.5 s bound read
+        # 5.0 on a loaded host): a turn the stop waited out is not interrupted
+        results = _results(r)
+        self.assertTrue(results and results[-1].get("interrupted"),
+                        "the slow turn (3 s) was ended, not waited out")
         r.stop(timeout=5)
         self.assertEqual(r.state(), "stopped")
 

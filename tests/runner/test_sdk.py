@@ -1920,6 +1920,36 @@ class TestIdlePump(HermeticCase):
         self.assertEqual(self._moves(r)[-2:], [("idle", "running", "background turn"),
                                                ("running", "idle", "background turn done")])
 
+    def test_the_stop_button_interrupts_a_cli_turn_of_its_own(self):
+        """An interrupt row (the console's stop button) during a CLI turn
+        of its own interrupts it where it runs: no hand-over, the row is
+        delivered, and the turn's result says interrupted. It was closed
+        "no turn was running" while the turn went on."""
+        r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
+        self._idle_after_one_turn(r)
+        made["client"].stream.extend(_compile([echo("<task-notification>done</task-notification>"),
+                                               assistant(text="on it"), "WAIT_FOR_INTERRUPT"]))
+        self.assertTrue(self._wait(lambda: r.machine.state == "running"))
+        stop = r.enqueue(Item("system", "interrupt", "stop", sender="Priya"))
+        self.assertTrue(self._wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done"))
+        self.assertEqual(r.inbox.get(stop.inbox_id)["outcome"], "delivered")
+        self.assertEqual(made["client"].interrupts, 1)
+        self.assertTrue(self._wait(lambda: any(p.get("background") for p in _results(r))))
+        self.assertTrue([p for p in _results(r) if p.get("background")][-1]["interrupted"])
+        self.assertTrue(self._wait(lambda: r.machine.state == "idle"))
+        self.assertNotIn({"subtype": "background_turn", "phase": "handed_over"},
+                         self._subtypes(r, "background_turn"))
+
+    def test_the_runners_interrupt_reaches_a_cli_turn_of_its_own(self):
+        r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
+        self._idle_after_one_turn(r)
+        made["client"].stream.extend(_compile([assistant(text="on it"), "WAIT_FOR_INTERRUPT"]))
+        self.assertTrue(self._wait(lambda: r.machine.state == "running"))
+        self.assertTrue(r.interrupt())
+        self.assertTrue(self._wait(lambda: made["client"].interrupts == 1))
+        self.assertTrue(self._wait(lambda: r.machine.state == "idle"))
+        self.assertEqual(self._subtypes(r, "interrupt_dropped"), [])
+
     def test_a_background_turn_cut_off_by_a_dead_stream_goes_idle(self):
         r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
         self._idle_after_one_turn(r)

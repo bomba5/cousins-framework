@@ -514,6 +514,7 @@ class SdkRunner:
         # and whether a CLI turn of its own (a task notification) is open
         self._pump = None
         self._pump_turn_open = False
+        self._pump_interrupted = False   # the open CLI turn of its own was interrupted
         self._turn_seq = 0
         self._resume_id = None   # the last session_id an init or result named
         self._client_id = None   # a fresh uuid per connect (usage.record's client key)
@@ -1100,6 +1101,11 @@ class SdkRunner:
         the interrupt then ends."""
         if not self._interrupt_may_go(seq):
             return False
+        if self._pump_turn_open and not (self._live or self._carrying):
+            # a CLI turn of its own: no writer serves it, and the turn's
+            # flags belong to the runner's next turn
+            await self._interrupt_background()
+            return True
         self._interrupt_requested = True
         if self._writer is None:
             self._interrupt_sent = self._interrupted_turn = True
@@ -1124,10 +1130,11 @@ class SdkRunner:
         return True
 
     def _interrupt_may_go(self, seq):
-        """True when turn `seq` is the live one; a stale request is said as
-        `interrupt_dropped` and never reaches the client."""
+        """True when turn `seq` is the live one, or a CLI turn of its own
+        runs between turns; a stale request is said as `interrupt_dropped`
+        and never reaches the client."""
         if seq != self._turn_seq or self.machine.state not in LIVE_STATES \
-                or not (self._live or self._carrying):
+                or not (self._live or self._carrying or self._pump_turn_open):
             self.stream.append("system", {"subtype": "interrupt_dropped",
                                           "turn": seq, "current": self._turn_seq})
             return False
@@ -1599,6 +1606,12 @@ class SdkRunner:
                         self._pump_start()            # the CLI is not always quiet
                         await asyncio.get_running_loop().run_in_executor(
                             None, listener.wait, self.poll_s)
+                        continue
+                    if rows[0]["source"] == INTERRUPT and self._pump_turn_open:
+                        # the stop button during a CLI turn of its own: it is
+                        # interrupted where it runs, and the pump reads on to
+                        # its result (a hand-over would leave it running)
+                        await self._interrupt_background_row(rows[0])
                         continue
                     await self._pump_stop()           # the row's turn reads from here on
                     if rows[0]["source"] == INTERRUPT:
@@ -2313,6 +2326,28 @@ class SdkRunner:
             if self.machine.state in LIVE_STATES:
                 self.machine.to("idle", detail)
 
+    async def _interrupt_background(self):
+        """Interrupt a CLI turn of its own. No writer serves it: the
+        control request goes straight to the client while the pump keeps
+        reading, and the turn's result, `interrupted`, comes back to the
+        pump."""
+        self._pump_interrupted = True
+        await self._client.interrupt()
+
+    async def _interrupt_background_row(self, row):
+        """An interrupt row (the console's stop button) during a CLI turn
+        of its own: DELIVERED once the client took it, FAILED with the
+        refusal otherwise, as a live turn's row closes."""
+        try:
+            await self._interrupt_background()
+        except Exception as exc:  # noqa: BLE001 - a refused interrupt fails its row, never the runner
+            self._pump_interrupted = False
+            message = "interrupt: %s: %s" % (type(exc).__name__, exc)
+            self.stream.append("error", {"error": message})
+            self.inbox.done(row["id"], FAILED, message)
+            return
+        self.inbox.done(row["id"], DELIVERED, "interrupted the CLI's own turn")
+
     async def _pump_run(self):
         """Record every message read between turns, as a turn records its
         own; a CLI turn of its own is a `background_turn` start and a
@@ -2337,6 +2372,7 @@ class SdkRunner:
                             and getattr(msg, "parent_tool_use_id", None) is None
                         if own and not self._pump_turn_open:
                             self._pump_turn_open = True
+                            self._pump_interrupted = False
                             self.stream.append("system", {"subtype": "background_turn",
                                                           "phase": "start"})
                             with self._lock:
@@ -2355,9 +2391,11 @@ class SdkRunner:
                             self._pump_turn_open = False
                             self.stream.append("result", {
                                 "inbox_ids": [], "background": True,
+                                "interrupted": self._pump_interrupted,
                                 "is_error": bool(msg.is_error), "num_turns": msg.num_turns,
                                 "total_cost_usd": msg.total_cost_usd,
                                 "session_id": msg.session_id, "usage": msg.usage})
+                            self._pump_interrupted = False
                             try:
                                 await self._after_turn(msg)
                             finally:

@@ -647,7 +647,8 @@ the say box posts what you type as a normal chat message, stored as the
 composer's are, instead of saying it to the running turn.
 "interrupt", beside the say box
 at the foot of the stream, ends the running turn, past its first answer
-too; the button is live only while a turn runs, and the foot says what came
+too, and a turn the CLI started on its own when a background task
+finished; the button is live only while a turn runs, and the foot says what came
 of it (`delivered`, or `failed` when the turn had already finished or the
 agent refused). The box at the bottom says
 something to the running turn as its operator: the runner writes it into the

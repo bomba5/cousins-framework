@@ -2301,14 +2301,28 @@ class SdkRunner:
         if self._pump_turn_open:
             self._pump_turn_open = False
             self.stream.append("system", {"subtype": "background_turn", "phase": "handed_over"})
+            # idle first: the row's own turn goes to `running` from here
+            self._background_idle("background turn handed over")
+
+    def _background_idle(self, detail):
+        """A CLI turn of its own is over (done, handed over, cut off): back
+        to idle from where it left the state (`running`, or a permission it
+        waited on). `rate_limited` stays: the claim loop ends it when the
+        window reopens."""
+        with self._lock:
+            if self.machine.state in LIVE_STATES:
+                self.machine.to("idle", detail)
 
     async def _pump_run(self):
         """Record every message read between turns, as a turn records its
         own; a CLI turn of its own is a `background_turn` start and a
         `result` with no inbox ids and `background: True`, followed by the
-        usual post-result work (`_after_turn`). Ends when the stream stops
-        without a result (the CLI died: the next turn finds out and
-        recovers) or on a read failure, said as an `error` event."""
+        usual post-result work (`_after_turn`). It is a turn to everyone
+        who reads the state: `running` from its first message to its
+        result, so the console never says idle while the cousin works.
+        Ends when the stream stops without a result (the CLI died: the
+        next turn finds out and recovers) or on a read failure, said as an
+        `error` event."""
         sdk = _sdk()
         try:
             while True:
@@ -2325,6 +2339,16 @@ class SdkRunner:
                             self._pump_turn_open = True
                             self.stream.append("system", {"subtype": "background_turn",
                                                           "phase": "start"})
+                            with self._lock:
+                                if self.machine.state == "idle":
+                                    self.machine.to("running", "background turn")
+                        # a message means the permission was settled, as in a
+                        # turn; a hook's own event is not one
+                        if self._pump_turn_open \
+                                and not isinstance(msg, getattr(sdk, "HookEventMessage", ())):
+                            with self._lock:
+                                if self.machine.state == "waiting_permission":
+                                    self.machine.to("running", "message")
                         self._record(sdk, msg)
                         if isinstance(msg, sdk.ResultMessage):
                             got_result = True
@@ -2334,17 +2358,24 @@ class SdkRunner:
                                 "is_error": bool(msg.is_error), "num_turns": msg.num_turns,
                                 "total_cost_usd": msg.total_cost_usd,
                                 "session_id": msg.session_id, "usage": msg.usage})
-                            await self._after_turn(msg)
+                            try:
+                                await self._after_turn(msg)
+                            finally:
+                                self._background_idle("background turn done")
                 finally:
                     await _aclose(responses)
                 if not got_result:
                     self.stream.append("system", {"subtype": "background_end"})
+                    if self._pump_turn_open:
+                        self._background_idle("background stream ended")
                     return
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - a pump failure is said, never raised
             self.stream.append("error", {"error": "between turns: %s: %s"
                                          % (type(exc).__name__, exc)})
+            if self._pump_turn_open:
+                self._background_idle("background turn failed")
 
     async def _resync(self):
         """After a turn failed mid-stream, the client's one message stream

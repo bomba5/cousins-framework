@@ -24,6 +24,11 @@ function Led({ state, pulse }) {
   const cls = map[state] || "gray";
   return /* @__PURE__ */ React.createElement("span", { className: `led ${cls}${pulse ? " pulse" : ""}` });
 }
+function CousinLed({ c }) {
+  const st = window.fleetState ? fleetState(c) : null;
+  if (!st) return /* @__PURE__ */ React.createElement(Led, { state: c && c.status === "running" ? "idle" : "stopped" });
+  return /* @__PURE__ */ React.createElement("span", { className: `led ${st.tone}${st.pulse ? " pulse" : ""}`, title: st.word });
+}
 function Pill({ tone = "gray", children }) {
   return /* @__PURE__ */ React.createElement("span", { className: `pill ${tone}` }, children);
 }

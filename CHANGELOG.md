@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.5.0 - 2026-10-29
+
+### Changed
+
+- **A cousin's dot says what it is doing, the same everywhere.** Green
+  while it works (the dot pulses), amber idle (rate limited or starting
+  too), red errored or waiting on you, gray stopped. The sidebar, the
+  cards, the inspector and a meeting's pick list drew their dot from the
+  process status alone, so every running cousin was green, idle or not,
+  and could disagree with the chat header beside it. They now read the
+  same state as the header and the overview table (`fleetState`),
+  through one component, `CousinLed`. "Needs you" turns red instead of
+  amber, and idle turns amber instead of green.
+
 ## 4.4.5 - 2026-10-29
 
 ### Fixed

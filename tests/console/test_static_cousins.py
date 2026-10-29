@@ -416,3 +416,24 @@ class CardRemovedKeys(unittest.TestCase):
         self.assertIn("data-removed-keys", self.src)
         self.assertIn("cousin-migrate tidy", self.src)
         self.assertRegex(self.src, r"c\.removedKeys && c\.removedKeys\.length > 0")
+
+
+class CousinDotsReadOneState(unittest.TestCase):
+    """Every dot of a cousin (the sidebar, a card, the inspector, a
+    meeting's pick list) is CousinLed, which reads views.jsx fleetState:
+    green working, amber idle, red errored or waiting on the operator,
+    gray stopped. A dot drawn from `status` alone was green while the
+    cousin sat idle, and disagreed with the header beside it."""
+
+    def test_the_cousin_dots_are_cousin_leds(self):
+        for name, count in (("app.jsx", 1), ("cousins.jsx", 2), ("meetings.jsx", 1)):
+            src = _read(name)
+            self.assertEqual(src.count("<CousinLed c={c} />"), count, name)
+            self.assertNotIn('<Led state={c.status === "running" ? "running" : "stopped"}',
+                             src, name)
+
+    def test_cousin_led_draws_fleet_states_tone_and_pulse(self):
+        src = _component(_read("ui.jsx"), "CousinLed")
+        self.assertIn("fleetState(c)", src)
+        self.assertIn("st.tone", src)
+        self.assertIn("st.pulse", src)

@@ -1473,20 +1473,21 @@ function fleetState(c) {
   if (att && att.level === "needs") {
     return {
       word: c.runner && c.runner.state === "errored" ? "errored" : "needs you",
-      tone: c.runner && c.runner.state === "errored" ? "red" : "amber",
+      tone: "red",
       pulse: false
     };
   }
   if (c.runner) {
     const st = c.runner.state;
+    const busy = st === "running" || st === "rolling_over";
     return {
       word: FLEET_RUNNER_WORDS[st] || st || "starting",
-      tone: st === "rate_limited" ? "amber" : "green",
-      pulse: st === "running" || st === "rolling_over"
+      tone: busy ? "green" : st === "errored" ? "red" : st === "stopped" ? "gray" : "amber",
+      pulse: busy
     };
   }
   if (c.type === "worker") return { word: "enrolled", tone: "green", pulse: false };
-  return c.active ? { word: "working", tone: "green", pulse: true } : { word: "idle", tone: "green", pulse: false };
+  return c.active ? { word: "working", tone: "green", pulse: true } : { word: "idle", tone: "amber", pulse: false };
 }
 function fleetRank(c) {
   const a = fleetAttention(c);

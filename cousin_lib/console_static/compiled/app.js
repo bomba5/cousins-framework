@@ -182,7 +182,7 @@ function SidebarGroups({ cousins, activeCousin, view, showHidden, unread, onPick
         title: stopped ? `@${c.slug} is stopped - start it from the Cousins view first` : `open chat with @${c.slug}` + (n ? ` (${n} unread)` : "") + " (right-click to move)",
         style: stopped || c.hidden ? { opacity: stopped ? 0.5 : 0.7, cursor: stopped ? "not-allowed" : "grab" } : { cursor: "grab" }
       },
-      /* @__PURE__ */ React.createElement(Led, { state: c.status === "running" ? "running" : "stopped", pulse: c.status === "running" }),
+      /* @__PURE__ */ React.createElement(CousinLed, { c }),
       /* @__PURE__ */ React.createElement("span", { style: { fontWeight: n ? 600 : 400 } }, (c.name || c.slug).toLowerCase()),
       n > 0 && /* @__PURE__ */ React.createElement("span", { className: "unread-count", title: `${n} unread repl${n === 1 ? "y" : "ies"}` }, n > 9 ? "9+" : n),
       c.hidden && /* @__PURE__ */ React.createElement("span", { className: "badge", title: "hidden (revealed by Settings: show hidden)", style: { background: "oklch(from var(--fg-3) l c h / 0.25)" } }, "hidden")

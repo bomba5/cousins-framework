@@ -207,7 +207,7 @@ function SidebarGroups({ cousins, activeCousin, view, showHidden, unread, onPick
         title={stopped ? `@${c.slug} is stopped - start it from the Cousins view first` : `open chat with @${c.slug}` + (n ? ` (${n} unread)` : "") + " (right-click to move)"}
         style={(stopped || c.hidden) ? { opacity: stopped ? 0.5 : 0.7, cursor: stopped ? "not-allowed" : "grab" } : { cursor: "grab" }}
       >
-        <Led state={c.status === "running" ? "running" : "stopped"} pulse={c.status === "running"} />
+        <CousinLed c={c} />
         <span style={{ fontWeight: n ? 600 : 400 }}>{(c.name || c.slug).toLowerCase()}</span>
         {n > 0 && (
           <span className="unread-count" title={`${n} unread repl${n === 1 ? "y" : "ies"}`}>

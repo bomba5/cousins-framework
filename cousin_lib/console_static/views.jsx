@@ -2036,7 +2036,9 @@ function fleetLoginWaits(cousins) {
   return (cousins || []).filter(c => !c.remote && c.loginRequired);
 }
 
-// The row's state in words, with the colour that goes with them.
+// The row's state in words, with the colour that goes with them, the same
+// on every dot of the cousin: green working (it pulses), amber idle (rate
+// limited and starting too), red errored or waiting on you, gray stopped.
 function fleetState(c) {
   if (!c) return { word: "-", tone: "gray", pulse: false };
   if (c.remote) {
@@ -2047,16 +2049,17 @@ function fleetState(c) {
   const att = fleetAttention(c);
   if (att && att.level === "needs") {
     return { word: c.runner && c.runner.state === "errored" ? "errored" : "needs you",
-             tone: c.runner && c.runner.state === "errored" ? "red" : "amber", pulse: false };
+             tone: "red", pulse: false };
   }
   if (c.runner) {
     const st = c.runner.state;
+    const busy = st === "running" || st === "rolling_over";
     return { word: FLEET_RUNNER_WORDS[st] || st || "starting",
-             tone: st === "rate_limited" ? "amber" : "green",
-             pulse: st === "running" || st === "rolling_over" };
+             tone: busy ? "green" : st === "errored" ? "red" : st === "stopped" ? "gray" : "amber",
+             pulse: busy };
   }
   if (c.type === "worker") return { word: "enrolled", tone: "green", pulse: false };
-  return c.active ? { word: "working", tone: "green", pulse: true } : { word: "idle", tone: "green", pulse: false };
+  return c.active ? { word: "working", tone: "green", pulse: true } : { word: "idle", tone: "amber", pulse: false };
 }
 
 // Needs-you first, then warnings, then the running, then the rest; the

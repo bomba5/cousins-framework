@@ -451,7 +451,7 @@ function NewMeetingModal({ cousins, onClose, onCreated }) {
                   <label key={c.slug} className={`mt-pick ${ok ? "" : "disabled"}`}
                          title={remote ? "remote cousins cannot join yet" : ok ? "" : "start it first"}>
                     <input type="checkbox" disabled={!ok} checked={idx >= 0} onChange={() => toggle(c.slug)} />
-                    <Led state={c.status === "running" ? "running" : "stopped"} />
+                    <CousinLed c={c} />
                     <span>{c.slug}</span>
                     {idx >= 0 && <span className="mt-pick-order">{idx + 1}</span>}
                     {!ok && <span className="mt-pick-hint">{remote ? "remote cousins cannot join yet" : "start it first"}</span>}

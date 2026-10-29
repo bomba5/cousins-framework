@@ -136,7 +136,7 @@ warnings, then the running ones, then the stopped ones. The columns:
   The dot's colour reads the same wherever a cousin has one (the sidebar,
   the cards, the chat header, this table): green while it works (the dot
   pulses), amber idle (rate limited or starting too), red errored or
-  waiting on you, gray stopped. A turn the CLI starts on its own, when a
+  waiting on you, gray stopped. A [turn](glossary.md#turn) the CLI starts on its own, when a
   background task finishes, counts as working.
 - **cousin**: name, slug and role.
 - **runner**: the [lane](glossary.md#lane), read from the row: the runner's own kind (`sdk`,

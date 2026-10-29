@@ -164,7 +164,7 @@ function CousinCard({ c, onClick, onAct, onChat }) {
   return (
     <div className="cousin-card" onClick={onClick}>
       <div className="name-row">
-        <Led state={c.status === "running" ? "running" : "stopped"} pulse={c.status === "running"} />
+        <CousinLed c={c} />
         <div className="name">{c.name}</div>
         <div className="slug">@{c.slug}</div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
@@ -305,7 +305,7 @@ function Inspector({ cousin: c, onClose, onAct }) {
   return (
     <div className="inspector">
       <div className="hdr">
-        <Led state={c.status === "running" ? "running" : "stopped"} pulse={c.status === "running"} />
+        <CousinLed c={c} />
         <span style={{ color: "var(--fg-0)" }}>{c.name}</span>
         <span style={{ color: "var(--fg-3)" }}>@{c.slug}</span>
         <button className="close" onClick={onClose}>×</button>

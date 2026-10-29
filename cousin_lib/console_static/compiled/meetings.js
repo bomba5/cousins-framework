@@ -362,7 +362,7 @@ function NewMeetingModal({ cousins, onClose, onCreated }) {
         title: remote ? "remote cousins cannot join yet" : ok ? "" : "start it first"
       },
       /* @__PURE__ */ React.createElement("input", { type: "checkbox", disabled: !ok, checked: idx >= 0, onChange: () => toggle(c.slug) }),
-      /* @__PURE__ */ React.createElement(Led, { state: c.status === "running" ? "running" : "stopped" }),
+      /* @__PURE__ */ React.createElement(CousinLed, { c }),
       /* @__PURE__ */ React.createElement("span", null, c.slug),
       idx >= 0 && /* @__PURE__ */ React.createElement("span", { className: "mt-pick-order" }, idx + 1),
       !ok && /* @__PURE__ */ React.createElement("span", { className: "mt-pick-hint" }, remote ? "remote cousins cannot join yet" : "start it first")

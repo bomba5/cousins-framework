@@ -1874,6 +1874,10 @@ class TestIdlePump(HermeticCase):
         return [e["payload"] for e in r.events() if e["kind"] == "system"
                 and e["payload"].get("subtype") == subtype]
 
+    def _moves(self, r):
+        return [(e["payload"]["from"], e["payload"]["to"], e["payload"]["detail"])
+                for e in r.events() if e["kind"] == "state"]
+
     def test_background_progress_is_read_and_recorded_between_turns(self):
         r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
         self._idle_after_one_turn(r)
@@ -1898,6 +1902,31 @@ class TestIdlePump(HermeticCase):
         texts = [e["payload"]["text"] for e in r.events() if e["kind"] == "text"]
         self.assertIn("noted", texts)
         self.assertTrue(self._wait(lambda: len([e for e in r.events() if e["kind"] == "usage"]) == 2))
+
+    def test_a_cli_turn_of_its_own_runs_until_its_result(self):
+        """The state says what the CLI does: a background turn is `running`
+        from its first message to its result. Without it the console read
+        idle while a cousin worked through a whole one."""
+        r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
+        self._idle_after_one_turn(r)
+        made["client"].stream.extend(_compile([echo("<task-notification>done</task-notification>"),
+                                               assistant(text="on it"), "PAUSE",
+                                               assistant(text="done"), result()]))
+        self.assertTrue(self._wait(lambda: r.machine.state == "running"))
+        self.assertEqual(self._moves(r)[-1], ("idle", "running", "background turn"))
+        made["client"].resume()
+        self.assertTrue(self._wait(lambda: any(p.get("background") for p in _results(r))))
+        self.assertTrue(self._wait(lambda: r.machine.state == "idle"))
+        self.assertEqual(self._moves(r)[-2:], [("idle", "running", "background turn"),
+                                               ("running", "idle", "background turn done")])
+
+    def test_a_background_turn_cut_off_by_a_dead_stream_goes_idle(self):
+        r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
+        self._idle_after_one_turn(r)
+        made["client"].stream.extend(_compile([assistant(text="bg"), "END"]))
+        self.assertTrue(self._wait(lambda: self._subtypes(r, "background_end")))
+        self.assertTrue(self._wait(lambda: r.machine.state == "idle"))
+        self.assertIn(("running", "idle", "background stream ended"), self._moves(r))
 
     def test_a_subagents_messages_open_no_background_turn(self):
         r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
@@ -1940,6 +1969,13 @@ class TestIdlePump(HermeticCase):
                       self._subtypes(r, "background_turn"))
         texts = [e["payload"]["text"] for e in r.events() if e["kind"] == "text"]
         self.assertIn("bg done", texts)
+        # running -> running is no legal move: the hand-over goes idle first,
+        # then the row's turn runs
+        moves = self._moves(r)
+        i = moves.index(("running", "idle", "background turn handed over"))
+        self.assertEqual(moves[i - 1], ("idle", "running", "background turn"))
+        self.assertEqual(moves[i + 1], ("idle", "running", "turn"))
+        self.assertTrue(self._wait(lambda: r.machine.state == "idle"))
 
     def test_a_stream_that_ends_between_turns_is_said_once(self):
         r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])

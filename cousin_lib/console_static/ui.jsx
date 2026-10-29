@@ -12,6 +12,14 @@ function Led({ state, pulse }) {
   return <span className={`led ${cls}${pulse ? " pulse" : ""}`} />;
 }
 
+// A cousin's dot: one reading everywhere it has one (views.jsx fleetState),
+// so the sidebar, a card and a header never disagree on working or idle.
+function CousinLed({ c }) {
+  const st = window.fleetState ? fleetState(c) : null;
+  if (!st) return <Led state={c && c.status === "running" ? "idle" : "stopped"} />;
+  return <span className={`led ${st.tone}${st.pulse ? " pulse" : ""}`} title={st.word} />;
+}
+
 function Pill({ tone = "gray", children }) {
   return <span className={`pill ${tone}`}>{children}</span>;
 }

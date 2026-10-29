@@ -3,6 +3,37 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.5.0 - 2026-10-29
+
+### Changed
+
+- **A cousin's dot says what it is doing, the same everywhere.** Green
+  while it works (the dot pulses), amber idle (rate limited or starting
+  too), red errored or waiting on you, gray stopped. The sidebar, the
+  cards, the inspector and a meeting's pick list drew their dot from the
+  process status alone, so every running cousin was green, idle or not,
+  and could disagree with the chat header beside it. They now read the
+  same state as the header and the overview table (`fleetState`),
+  through one component, `CousinLed`. "Needs you" turns red instead of
+  amber, and idle turns amber instead of green.
+
+## 4.4.5 - 2026-10-29
+
+### Fixed
+
+- **A turn the CLI starts on its own counts as running.** When a
+  background task (a background shell, a subagent) finishes, the CLI
+  starts a turn of its own. The SDK runner recorded it (a
+  `background_turn` start, a background result) but left its state
+  `idle`, so the console's header and cards said idle while the cousin
+  worked through the whole turn, and only the reasoning pane's activity
+  line said working. The state now goes `running` at that turn's first
+  message and back to `idle` after its result, or when the stream ends
+  or fails mid-turn. A row that lands mid-turn is handed over as before:
+  the state goes idle first, then the row's own turn runs (running to
+  running is no legal move). A permission the background turn waits on
+  is settled by its next message, as in a turn.
+
 ## 4.4.4 - 2026-10-28
 
 ### Fixed

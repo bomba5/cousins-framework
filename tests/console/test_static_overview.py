@@ -123,20 +123,27 @@ const rows = [
   {status: "running", active: true, tmuxSession: "c"},
   {status: "stopped", chat: "down"},
   {status: "running", type: "worker"},
+  {status: "running", runner: {alive: true, state: "rolling_over"}},
+  {status: "running", runner: {alive: true}},
 ];
 process.stdout.write(JSON.stringify(rows.map(r => [
-  (fleetAttention(r) || {}).level || null, fleetState(r).word, fleetState(r).tone])));""")
+  (fleetAttention(r) || {}).level || null, fleetState(r).word, fleetState(r).tone,
+  fleetState(r).pulse])));""")
+        # green working (it pulses), amber idle, red errored or waiting on
+        # the operator, gray stopped: the operator's reading of a dot
         self.assertEqual(got, [
-            ["needs", "needs you", "amber"],
-            ["needs", "needs you", "amber"],
-            ["needs", "errored", "red"],
-            ["warn", "rate limited", "amber"],
-            [None, "working", "green"],
-            [None, "idle", "green"],
-            ["warn", "idle", "green"],
-            [None, "working", "green"],
-            [None, "stopped", "gray"],
-            [None, "enrolled", "green"],
+            ["needs", "needs you", "red", False],
+            ["needs", "needs you", "red", False],
+            ["needs", "errored", "red", False],
+            ["warn", "rate limited", "amber", False],
+            [None, "working", "green", True],
+            [None, "idle", "amber", False],
+            ["warn", "idle", "amber", False],
+            [None, "working", "green", True],
+            [None, "stopped", "gray", False],
+            [None, "enrolled", "green", False],
+            [None, "rolling over", "green", True],
+            [None, "starting", "amber", False],
         ])
 
     def test_a_login_wait_needs_you_and_says_its_action(self):

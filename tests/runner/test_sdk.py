@@ -1950,6 +1950,26 @@ class TestIdlePump(HermeticCase):
         self.assertTrue(self._wait(lambda: r.machine.state == "idle"))
         self.assertEqual(self._subtypes(r, "interrupt_dropped"), [])
 
+    def test_a_refused_interrupt_leaves_a_cli_turn_of_its_own_unmarked(self):
+        """The client refuses the runner's own interrupt() during a CLI
+        turn of its own: the turn goes on, and its result does not say
+        interrupted."""
+        r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
+        self._idle_after_one_turn(r)
+
+        async def refuse():
+            raise CLIConnectionError("refused")
+        made["client"].interrupt = refuse
+        made["client"].stream.extend(_compile([assistant(text="on it"), "PAUSE", result()]))
+        self.assertTrue(self._wait(lambda: r.machine.state == "running"))
+        self.assertTrue(r.interrupt())
+        self.assertTrue(self._wait(lambda: any(
+            "refused" in e["payload"].get("error", "")
+            for e in r.events() if e["kind"] == "error")))
+        made["client"].resume()
+        self.assertTrue(self._wait(lambda: any(p.get("background") for p in _results(r))))
+        self.assertFalse([p for p in _results(r) if p.get("background")][-1]["interrupted"])
+
     def test_a_background_turn_cut_off_by_a_dead_stream_goes_idle(self):
         r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
         self._idle_after_one_turn(r)

@@ -2330,9 +2330,13 @@ class SdkRunner:
         """Interrupt a CLI turn of its own. No writer serves it: the
         control request goes straight to the client while the pump keeps
         reading, and the turn's result, `interrupted`, comes back to the
-        pump."""
+        pump. A refused interrupt leaves the result unmarked."""
         self._pump_interrupted = True
-        await self._client.interrupt()
+        try:
+            await self._client.interrupt()
+        except BaseException:  # noqa: BLE001 - the caller says the refusal; the flag is ours
+            self._pump_interrupted = False
+            raise
 
     async def _interrupt_background_row(self, row):
         """An interrupt row (the console's stop button) during a CLI turn
@@ -2341,7 +2345,6 @@ class SdkRunner:
         try:
             await self._interrupt_background()
         except Exception as exc:  # noqa: BLE001 - a refused interrupt fails its row, never the runner
-            self._pump_interrupted = False
             message = "interrupt: %s: %s" % (type(exc).__name__, exc)
             self.stream.append("error", {"error": message})
             self.inbox.done(row["id"], FAILED, message)

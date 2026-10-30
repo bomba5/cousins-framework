@@ -2861,6 +2861,16 @@ function contextMenuFromTouch(ev, lastTouchAt, now) {
   return now - lastTouchAt < 1500;
 }
 
+// The top of a long-press menu `h` px tall: above the message, else below
+// it, else (a message taller than the screen) at the screen's edge away
+// from the finger. Never over the text being pressed or selected.
+function placeTouchMenu(anchor, h, viewH, touchY) {
+  const gap = 8;
+  if (anchor.top - gap - h >= gap) return anchor.top - gap - h;
+  if (anchor.bottom + gap + h <= viewH - gap) return anchor.bottom + gap;
+  return touchY > viewH / 2 ? gap : Math.max(gap, viewH - gap - h);
+}
+
 // An attachment is a file the cousin's chat server wrote (the inbox) or a
 // generated asset; the console projects it as `attachment: {url, kind}`
 // on the message. attachmentMedia (media.jsx) resolves it, a `data:`
@@ -2919,6 +2929,33 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
     };
   }, [menu]);
 
+  // A long-press opens the menu next to the message, not under the
+  // finger: it is placed once it has rendered and its size is known
+  // (placeTouchMenu), before the browser paints it. It is measured at the
+  // screen's left edge, where nothing narrows it: a fixed box with no
+  // width shrinks to the room on its right. The screen's bottom is the
+  // visible one, above an open keyboard.
+  const bubbleRef = React.useRef(null);
+  const menuRef = React.useRef(null);
+  const openMenuAtBubble = (touchY) => {
+    const el = bubbleRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setMenu({ x: 8, y: r.top, touchY, placed: false,
+              anchor: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } });
+  };
+  React.useLayoutEffect(() => {
+    if (!menu || !menu.anchor || menu.placed || !menuRef.current) return;
+    const box = menuRef.current.getBoundingClientRect();
+    const a = menu.anchor;
+    const x = Math.max(8, Math.min(isUser ? a.right - box.width : a.left,
+                                   window.innerWidth - box.width - 8));
+    const vv = window.visualViewport;
+    const viewH = vv ? vv.offsetTop + vv.height : window.innerHeight;
+    const y = placeTouchMenu(a, box.height, viewH, menu.touchY);
+    setMenu(m => (m ? { ...m, x, y, placed: true } : m));
+  }, [menu]);
+
   // Long-press detection for touch devices: 500ms hold opens the menu.
   const longPressTimer = React.useRef(null);
   const lastTouchAt = React.useRef(0);
@@ -2927,7 +2964,7 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
     lastTouchAt.current = Date.now();
     longPressTimer.current = setTimeout(() => {
       try { if (navigator.vibrate) navigator.vibrate(15); } catch (_) {}
-      setMenu({ x: t ? t.clientX : 0, y: t ? t.clientY : 0 });
+      openMenuAtBubble(t ? t.clientY : 0);
     }, 500);
   };
   const cancelLongPress = () => {
@@ -2937,12 +2974,14 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
     }
   };
   // A phone reports its long-press as a contextmenu too: that one opens
-  // the menu. A mouse right-click is left to the browser.
+  // the menu. A mouse right-click is left to the browser. On text the
+  // phone keeps its own selection (drag the handles, then its Copy); on a
+  // link or a picture its own menu would cover ours, so it is held back.
   const onContextMenu = (e) => {
     if (!contextMenuFromTouch(e.nativeEvent, lastTouchAt.current, Date.now())) return;
-    e.preventDefault();
+    if (e.target && e.target.closest && e.target.closest("a, img, video")) e.preventDefault();
     cancelLongPress();
-    setMenu({ x: e.clientX, y: e.clientY });
+    openMenuAtBubble(e.clientY);
   };
   // The hover button opens the menu under itself. Its click goes on to
   // the document, which closes any open menu (this one too, so a second
@@ -3098,7 +3137,8 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
       flexDirection: "column",
       alignItems: isUser ? "flex-end" : "flex-start",
     }}>
-      <div className={`chat-bubble ${isUser ? "chat-bubble-user" : "chat-bubble-assistant"} ${streaming ? "chat-streaming" : ""}`}
+      <div ref={bubbleRef}
+           className={`chat-bubble ${isUser ? "chat-bubble-user" : "chat-bubble-assistant"} ${streaming ? "chat-streaming" : ""}`}
            onContextMenu={onContextMenu}
            onTouchStart={startLongPress}
            onTouchEnd={cancelLongPress}
@@ -3169,7 +3209,7 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
         </div>
       )}
       {menu && (
-        <div onClick={e => e.stopPropagation()}
+        <div ref={menuRef} onClick={e => e.stopPropagation()}
              style={{
                position: "fixed", left: menu.x, top: menu.y,
                background: "var(--bg-1)", border: "1px solid var(--line)",

@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.5.3 - 2026-10-30
+
+### Fixed
+
+- **On a phone, the message menu no longer covers the message.** A
+  long-press opened the menu (Reply, Copy, the reactions) where the
+  finger was, over the text, and held back the phone's own text
+  selection. Now the menu opens above the message, below it when there's
+  no room above, or at the screen's edge away from the finger when the
+  message is taller than the screen. A long-press on text keeps the
+  phone's own selection, so part of a message can be selected and copied
+  with the phone's Copy; on a link or a picture the phone's own menu is
+  still held back, so it doesn't cover ours. The menu keeps its full
+  width next to a message on the right, and stays above an open keyboard.
+
 ## 4.5.2 - 2026-10-30
 
 ### Fixed

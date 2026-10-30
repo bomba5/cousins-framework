@@ -491,7 +491,10 @@ older messages; they stay while the poll brings in new ones.
 Hover over a message and click the button in its corner (long-press on a
 phone) to reply to it, copy it or react. Copy takes the whole message as
 written, Markdown included. Right-clicking a message gives the browser's
-own menu, to copy a selection, a link or an image. A reply shows a quote
+own menu, to copy a selection, a link or an image. On a phone the
+long-press menu opens above the message (below it when there's no room
+above), never over its text, and the phone's own text selection still
+works for copying part of a message. A reply shows a quote
 you can click to jump to the original. Clicking an existing reaction taps
 it again; right-clicking it removes yours.
 

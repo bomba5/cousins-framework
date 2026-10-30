@@ -718,6 +718,40 @@ function page(secure, clipboard) {
             True, [["select", "d"], ["exec", "copy"]],
         ])
 
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_long_press_menu_never_sits_over_the_message(self):
+        probe = _function_body(self.chat, "placeTouchMenu") + """
+process.stdout.write(JSON.stringify([
+  placeTouchMenu({top: 400, bottom: 500}, 150, 800, 450),   // room above
+  placeTouchMenu({top: 100, bottom: 200}, 150, 800, 150),   // none above, room below
+  placeTouchMenu({top: -100, bottom: 900}, 150, 800, 600),  // taller than the screen,
+  placeTouchMenu({top: -100, bottom: 900}, 150, 800, 200),  // away from the finger
+  placeTouchMenu({top: -10, bottom: 200}, 150, 100, 20),    // a screen smaller than the menu
+]));
+"""
+        self.assertEqual(self._node(probe), [242, 208, 8, 642, 8])
+
+    def test_a_long_press_opens_the_menu_beside_the_bubble_and_keeps_selection(self):
+        handler = self.bubble[self.bubble.index("const onContextMenu"):]
+        handler = handler[:handler.index("\n  };") + 5]
+        # text keeps the phone's own selection; a link or a picture is held back
+        self.assertIn('if (e.target && e.target.closest && e.target.closest("a, img, video"))'
+                      ' e.preventDefault();', handler)
+        self.assertIn("openMenuAtBubble(e.clientY);", handler)
+        self.assertIn("openMenuAtBubble(t ? t.clientY : 0);", self.bubble)
+        self.assertNotIn("setMenu({ x: t ? t.clientX", self.bubble)
+        self.assertIn("ref={bubbleRef}", self.bubble)
+        self.assertIn("<div ref={menuRef} onClick={e => e.stopPropagation()}", self.bubble)
+        place = self.bubble[self.bubble.index("React.useLayoutEffect(() => {"):]
+        place = place[:place.index("}, [menu]);")]
+        self.assertIn("placed: true", place)
+        # measured at full width: a fixed box at the bubble's left on the
+        # right of a phone would shrink to the room left and wrap tall
+        self.assertIn("setMenu({ x: 8, y: r.top, touchY, placed: false,", self.bubble)
+        # the bottom is the visible one, above an open keyboard
+        self.assertIn("const viewH = vv ? vv.offsetTop + vv.height : window.innerHeight;", place)
+        self.assertIn("placeTouchMenu(a, box.height, viewH, menu.touchY)", place)
+
     def test_the_command_copy_button_shares_the_helper(self):
         button = _function_body((_STATIC / "cousins.jsx").read_text(), "CopyButton")
         self.assertIn("await copyText(text)", button)

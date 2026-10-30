@@ -2525,6 +2525,12 @@ function contextMenuFromTouch(ev, lastTouchAt, now) {
   if (ev && ev.pointerType) return ev.pointerType === "touch";
   return now - lastTouchAt < 1500;
 }
+function placeTouchMenu(anchor, h, viewH, touchY) {
+  const gap = 8;
+  if (anchor.top - gap - h >= gap) return anchor.top - gap - h;
+  if (anchor.bottom + gap + h <= viewH - gap) return anchor.bottom + gap;
+  return touchY > viewH / 2 ? gap : Math.max(gap, viewH - gap - h);
+}
 function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown, onOpenMedia }) {
   const isUser = msg.type === "user";
   let replyQuote = null;
@@ -2571,6 +2577,33 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
       document.removeEventListener("keydown", onKey);
     };
   }, [menu]);
+  const bubbleRef = React.useRef(null);
+  const menuRef = React.useRef(null);
+  const openMenuAtBubble = (touchY) => {
+    const el = bubbleRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setMenu({
+      x: 8,
+      y: r.top,
+      touchY,
+      placed: false,
+      anchor: { top: r.top, bottom: r.bottom, left: r.left, right: r.right }
+    });
+  };
+  React.useLayoutEffect(() => {
+    if (!menu || !menu.anchor || menu.placed || !menuRef.current) return;
+    const box = menuRef.current.getBoundingClientRect();
+    const a = menu.anchor;
+    const x = Math.max(8, Math.min(
+      isUser ? a.right - box.width : a.left,
+      window.innerWidth - box.width - 8
+    ));
+    const vv = window.visualViewport;
+    const viewH = vv ? vv.offsetTop + vv.height : window.innerHeight;
+    const y = placeTouchMenu(a, box.height, viewH, menu.touchY);
+    setMenu((m) => m ? { ...m, x, y, placed: true } : m);
+  }, [menu]);
   const longPressTimer = React.useRef(null);
   const lastTouchAt = React.useRef(0);
   const startLongPress = (e) => {
@@ -2581,7 +2614,7 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
         if (navigator.vibrate) navigator.vibrate(15);
       } catch (_) {
       }
-      setMenu({ x: t ? t.clientX : 0, y: t ? t.clientY : 0 });
+      openMenuAtBubble(t ? t.clientY : 0);
     }, 500);
   };
   const cancelLongPress = () => {
@@ -2592,9 +2625,9 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
   };
   const onContextMenu = (e) => {
     if (!contextMenuFromTouch(e.nativeEvent, lastTouchAt.current, Date.now())) return;
-    e.preventDefault();
+    if (e.target && e.target.closest && e.target.closest("a, img, video")) e.preventDefault();
     cancelLongPress();
-    setMenu({ x: e.clientX, y: e.clientY });
+    openMenuAtBubble(e.clientY);
   };
   const onMoreClick = (e) => {
     if (menu) return;
@@ -2728,6 +2761,7 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
   } }, /* @__PURE__ */ React.createElement(
     "div",
     {
+      ref: bubbleRef,
       className: `chat-bubble ${isUser ? "chat-bubble-user" : "chat-bubble-assistant"} ${streaming ? "chat-streaming" : ""}`,
       onContextMenu,
       onTouchStart: startLongPress,
@@ -2818,6 +2852,7 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
   })), menu && /* @__PURE__ */ React.createElement(
     "div",
     {
+      ref: menuRef,
       onClick: (e) => e.stopPropagation(),
       style: {
         position: "fixed",

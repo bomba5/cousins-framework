@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.5.1 - 2026-10-29
+
+### Fixed
+
+- **The stop button stops a turn the CLI started on its own.** Since
+  4.5.0 such a turn (a background task finished) reads `running`, so the
+  console's interrupt button is live during it, but the runner handed the
+  turn over to the interrupt row and closed the row "no turn was
+  running" while the turn went on; the runner's own `interrupt()` was
+  dropped the same way. Now an interrupt row during that turn sends the
+  interrupt to the client where the turn runs, the between-turns reader
+  goes on to its result, the row closes `delivered` (`failed` with the
+  refusal when the agent refuses), and the turn's result says
+  `interrupted`, as a runner turn's does.
+
 ## 4.5.0 - 2026-10-29
 
 ### Changed

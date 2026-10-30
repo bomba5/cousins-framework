@@ -1529,30 +1529,11 @@ function SpawnModal({ onClose, onSpawn }) {
   );
 }
 
-// Copy a command: the Clipboard API where the page is a secure context,
-// else a hidden textarea and execCommand (a console on plain http over
-// the LAN is not a secure context).
+// Copy a command (copyText, ui.jsx: it works on plain http too).
 function CopyButton({ text }) {
   const [done, setDone] = React.useState(false);
   const copy = async () => {
-    let ok = false;
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        ok = true;
-      }
-    } catch (_e) { ok = false; }
-    if (!ok) {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.setAttribute("readonly", "");
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      try { ok = document.execCommand("copy"); } catch (_e) { ok = false; }
-      document.body.removeChild(ta);
-    }
+    const ok = await copyText(text);
     setDone(ok ? "copied" : "select and copy by hand");
     setTimeout(() => setDone(false), 1800);
   };

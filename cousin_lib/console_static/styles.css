@@ -882,6 +882,7 @@ select.sel-inline:focus { border-color: var(--accent); }
 
 /* Chat bubbles: user on right (hot pink), assistant on left (cool neutral) */
 .chat-bubble {
+  position: relative;                          /* holds .chat-msg-more */
   max-width: 78%;
   padding: 10px 14px 6px;
   border-radius: 14px;
@@ -927,6 +928,34 @@ select.sel-inline:focus { border-color: var(--accent); }
   margin-top: 5px;
   text-align: right;
   user-select: none;
+}
+.chat-copied { margin-right: 8px; color: var(--accent); }
+
+/* The message actions button (Reply, Copy, reactions) in the bubble's
+   corner, shown while a mouse hovers the bubble or the button has the
+   keyboard focus. A touchscreen has no hover: it long-presses instead. */
+.chat-msg-more {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: 14px;
+  line-height: 18px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.chat-msg-more:hover { color: var(--fg-0); }
+.chat-msg-more:focus-visible { opacity: 1; }
+@media (hover: hover) {
+  .chat-bubble:hover .chat-msg-more { opacity: 1; }
+}
+@media (hover: none) {
+  .chat-msg-more { display: none; }
 }
 
 /* Collapsible sidebar with slide animation.

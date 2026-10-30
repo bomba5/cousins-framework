@@ -488,9 +488,12 @@ messages while you're at the bottom and leaves you alone when you've
 scrolled up; "jump to latest" brings you back. Scroll to the top to load
 older messages; they stay while the poll brings in new ones.
 
-Right-click a message (long-press on a phone) to reply to it or react. A
-reply shows a quote you can click to jump to the original. Clicking an
-existing reaction taps it again; right-click removes yours.
+Hover over a message and click the button in its corner (long-press on a
+phone) to reply to it, copy it or react. Copy takes the whole message as
+written, Markdown included. Right-clicking a message gives the browser's
+own menu, to copy a selection, a link or an image. A reply shows a quote
+you can click to jump to the original. Clicking an existing reaction taps
+it again; right-clicking it removes yours.
 
 The message box sends on Enter (Shift+Enter for a new line). On a phone
 the keyboard shows a send key and it always sends; a new line needs a

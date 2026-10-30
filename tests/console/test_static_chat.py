@@ -618,5 +618,111 @@ process.stdout.write(JSON.stringify(cases));
         self.assertIn(".media-viewer-item", phone)
 
 
+class MessageActions(unittest.TestCase):
+    """A mouse right-click on a message is the browser's own menu (copy a
+    selection, a link, an image); Reply, Copy and the reactions open from
+    the bubble's hover button, or from a touch long-press on a phone."""
+
+    def setUp(self):
+        self.chat = (_STATIC / "chat.jsx").read_text()
+        self.ui = (_STATIC / "ui.jsx").read_text()
+        self.css = (_STATIC / "styles.css").read_text()
+        self.bubble = _function_body(self.chat, "ChatBubble")
+
+    def _node(self, probe):
+        out = subprocess.run(["node", "-e", probe], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_only_a_touch_long_press_takes_the_context_menu(self):
+        probe = _function_body(self.chat, "contextMenuFromTouch") + """
+process.stdout.write(JSON.stringify([
+  contextMenuFromTouch({pointerType: "mouse"}, 0, 100000),
+  contextMenuFromTouch({pointerType: "touch"}, 0, 100000),
+  contextMenuFromTouch({pointerType: "pen"}, 0, 100000),
+  contextMenuFromTouch({pointerType: "mouse"}, 99500, 100000),
+  contextMenuFromTouch({}, 99500, 100000),
+  contextMenuFromTouch({}, 1000, 100000),
+  contextMenuFromTouch(null, 99900, 100000),
+]));
+"""
+        self.assertEqual(self._node(probe), [False, True, False, False, True, False, True])
+
+    def test_the_bubble_leaves_a_mouse_right_click_to_the_browser(self):
+        handler = self.bubble[self.bubble.index("const onContextMenu"):]
+        handler = handler[:handler.index("\n  };") + 5]
+        self.assertIn("contextMenuFromTouch(e.nativeEvent, lastTouchAt.current, Date.now())",
+                      handler)
+        self.assertLess(handler.index("return;"), handler.index("e.preventDefault()"))
+        self.assertIn("lastTouchAt.current = Date.now();", self.bubble)
+        self.assertIn("onTouchStart={startLongPress}", self.bubble)
+
+    def test_the_hover_button_opens_the_menu(self):
+        self.assertRegex(self.bubble, r'className="chat-msg-more" aria-label="Message actions"'
+                                      r'\s+title="[^"]+" onClick=\{onMoreClick\}')
+        more = self.bubble[self.bubble.index("const onMoreClick"):]
+        more = more[:more.index("\n  };")]
+        # its click reaches the document (closing any open menu, this one
+        # too) and the menu opens after it, never closed by its own click
+        self.assertNotIn("stopPropagation", more)
+        self.assertIn("if (menu) return;", more)
+        self.assertIn("setTimeout(() => setMenu({ x, y: r.bottom + 4 }), 0);", more)
+        self.assertIn('document.addEventListener("click", close);', self.bubble)
+        self.assertIn("position: relative;", _css_block(self.css, ".chat-bubble"))
+        self.assertIn("opacity: 0;", _css_block(self.css, ".chat-msg-more"))
+        self.assertRegex(self.css, r"@media \(hover: hover\) \{\s*\.chat-bubble:hover "
+                                   r"\.chat-msg-more \{ opacity: 1; \}")
+        self.assertRegex(self.css, r"@media \(hover: none\) \{\s*\.chat-msg-more "
+                                   r"\{ display: none; \}")
+
+    def test_the_menu_copies_the_whole_message(self):
+        menu = self.bubble[self.bubble.index("{menu && ("):]
+        self.assertRegex(menu, r"\{msg\.message && \(\s*<button onClick=\{copyMessage\}")
+        self.assertIn("&#10697; Copy", menu)
+        self.assertIn('await copyText(msg.message || "")', self.bubble)
+        self.assertIn('{copied && <span className="chat-copied">{copied}</span>}', self.bubble)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_copy_text_uses_the_clipboard_api_or_falls_back_by_hand(self):
+        probe = _function_body(self.ui, "copyText") + """
+const calls = [];
+function page(secure, clipboard) {
+  globalThis.window = {isSecureContext: secure};
+  Object.defineProperty(globalThis, "navigator", {configurable: true, writable: true,
+    value: {clipboard: clipboard && {writeText: (t) => {
+      calls.push(["api", t]);
+      return clipboard === "ok" ? Promise.resolve() : Promise.reject(new Error("denied"));
+    }}}});
+  globalThis.document = {
+    body: {appendChild() {}, removeChild() {}},
+    createElement: () => ({style: {}, setAttribute() {},
+                           select() { calls.push(["select", this.value]); }}),
+    execCommand: (c) => { calls.push(["exec", c]); return true; },
+  };
+}
+(async () => {
+  const out = [];
+  page(true, "ok"); out.push(await copyText("a"), calls.splice(0));
+  page(false, "ok"); out.push(await copyText("b"), calls.splice(0));
+  page(true, "denied"); out.push(await copyText("c"), calls.splice(0));
+  page(true, null); out.push(await copyText("d"), calls.splice(0));
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
+        self.assertEqual(self._node(probe), [
+            True, [["api", "a"]],
+            True, [["select", "b"], ["exec", "copy"]],
+            True, [["api", "c"], ["select", "c"], ["exec", "copy"]],
+            True, [["select", "d"], ["exec", "copy"]],
+        ])
+
+    def test_the_command_copy_button_shares_the_helper(self):
+        button = _function_body((_STATIC / "cousins.jsx").read_text(), "CopyButton")
+        self.assertIn("await copyText(text)", button)
+        self.assertNotIn("execCommand", button)
+
+
 if __name__ == "__main__":
     unittest.main()

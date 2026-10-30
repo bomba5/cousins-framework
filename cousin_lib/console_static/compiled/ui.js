@@ -1,4 +1,30 @@
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
+function copyText(text) {
+  const byHand = () => {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch (_e) {
+      ok = false;
+    }
+    document.body.removeChild(ta);
+    return ok;
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      return navigator.clipboard.writeText(text).then(() => true, byHand);
+    } catch (_e) {
+    }
+  }
+  return Promise.resolve(byHand());
+}
 function Led({ state, pulse }) {
   const map = {
     running: "green",

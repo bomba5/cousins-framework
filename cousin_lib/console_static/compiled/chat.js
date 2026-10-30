@@ -2584,7 +2584,7 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
     if (!el) return;
     const r = el.getBoundingClientRect();
     setMenu({
-      x: r.left,
+      x: 8,
       y: r.top,
       touchY,
       placed: false,
@@ -2599,7 +2599,9 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
       isUser ? a.right - box.width : a.left,
       window.innerWidth - box.width - 8
     ));
-    const y = placeTouchMenu(a, box.height, window.innerHeight, menu.touchY);
+    const vv = window.visualViewport;
+    const viewH = vv ? vv.offsetTop + vv.height : window.innerHeight;
+    const y = placeTouchMenu(a, box.height, viewH, menu.touchY);
     setMenu((m) => m ? { ...m, x, y, placed: true } : m);
   }, [menu]);
   const longPressTimer = React.useRef(null);

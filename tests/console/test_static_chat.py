@@ -744,8 +744,13 @@ process.stdout.write(JSON.stringify([
         self.assertIn("<div ref={menuRef} onClick={e => e.stopPropagation()}", self.bubble)
         place = self.bubble[self.bubble.index("React.useLayoutEffect(() => {"):]
         place = place[:place.index("}, [menu]);")]
-        self.assertIn("placeTouchMenu(a, box.height, window.innerHeight, menu.touchY)", place)
         self.assertIn("placed: true", place)
+        # measured at full width: a fixed box at the bubble's left on the
+        # right of a phone would shrink to the room left and wrap tall
+        self.assertIn("setMenu({ x: 8, y: r.top, touchY, placed: false,", self.bubble)
+        # the bottom is the visible one, above an open keyboard
+        self.assertIn("const viewH = vv ? vv.offsetTop + vv.height : window.innerHeight;", place)
+        self.assertIn("placeTouchMenu(a, box.height, viewH, menu.touchY)", place)
 
     def test_the_command_copy_button_shares_the_helper(self):
         button = _function_body((_STATIC / "cousins.jsx").read_text(), "CopyButton")

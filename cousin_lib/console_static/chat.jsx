@@ -2931,14 +2931,17 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
 
   // A long-press opens the menu next to the message, not under the
   // finger: it is placed once it has rendered and its size is known
-  // (placeTouchMenu), before the browser paints it.
+  // (placeTouchMenu), before the browser paints it. It is measured at the
+  // screen's left edge, where nothing narrows it: a fixed box with no
+  // width shrinks to the room on its right. The screen's bottom is the
+  // visible one, above an open keyboard.
   const bubbleRef = React.useRef(null);
   const menuRef = React.useRef(null);
   const openMenuAtBubble = (touchY) => {
     const el = bubbleRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setMenu({ x: r.left, y: r.top, touchY, placed: false,
+    setMenu({ x: 8, y: r.top, touchY, placed: false,
               anchor: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } });
   };
   React.useLayoutEffect(() => {
@@ -2947,7 +2950,9 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
     const a = menu.anchor;
     const x = Math.max(8, Math.min(isUser ? a.right - box.width : a.left,
                                    window.innerWidth - box.width - 8));
-    const y = placeTouchMenu(a, box.height, window.innerHeight, menu.touchY);
+    const vv = window.visualViewport;
+    const viewH = vv ? vv.offsetTop + vv.height : window.innerHeight;
+    const y = placeTouchMenu(a, box.height, viewH, menu.touchY);
     setMenu(m => (m ? { ...m, x, y, placed: true } : m));
   }, [menu]);
 

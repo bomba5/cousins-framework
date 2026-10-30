@@ -15,7 +15,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   message is taller than the screen. A long-press on text keeps the
   phone's own selection, so part of a message can be selected and copied
   with the phone's Copy; on a link or a picture the phone's own menu is
-  still held back, so it doesn't cover ours.
+  still held back, so it doesn't cover ours. The menu keeps its full
+  width next to a message on the right, and stays above an open keyboard.
 
 ## 4.5.2 - 2026-10-30
 

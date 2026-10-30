@@ -1,6 +1,32 @@
 // Shared UI primitives
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
+// Copy text to the clipboard; the promise says whether it took. The
+// Clipboard API where the page is a secure context, else a hidden
+// textarea and execCommand, run inside the click that asked (a console
+// on plain http over the LAN is not a secure context).
+function copyText(text) {
+  const byHand = () => {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (_e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      return navigator.clipboard.writeText(text).then(() => true, byHand);
+    } catch (_e) { /* the textarea below */ }
+  }
+  return Promise.resolve(byHand());
+}
+
 function Led({ state, pulse }) {
   const map = {
     running: "green", healthy: "green", succeeded: "green", done: "green", ok: "green",

@@ -2521,6 +2521,10 @@ function groupReactions(rows) {
   }
   return Array.from(by.values());
 }
+function contextMenuFromTouch(ev, lastTouchAt, now) {
+  if (ev && ev.pointerType) return ev.pointerType === "touch";
+  return now - lastTouchAt < 1500;
+}
 function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown, onOpenMedia }) {
   const isUser = msg.type === "user";
   let replyQuote = null;
@@ -2568,8 +2572,10 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
     };
   }, [menu]);
   const longPressTimer = React.useRef(null);
+  const lastTouchAt = React.useRef(0);
   const startLongPress = (e) => {
     const t = e.touches && e.touches[0];
+    lastTouchAt.current = Date.now();
     longPressTimer.current = setTimeout(() => {
       try {
         if (navigator.vibrate) navigator.vibrate(15);
@@ -2585,8 +2591,23 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
     }
   };
   const onContextMenu = (e) => {
+    if (!contextMenuFromTouch(e.nativeEvent, lastTouchAt.current, Date.now())) return;
     e.preventDefault();
+    cancelLongPress();
     setMenu({ x: e.clientX, y: e.clientY });
+  };
+  const onMoreClick = (e) => {
+    if (menu) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(8, Math.min(r.left, window.innerWidth - 280));
+    setTimeout(() => setMenu({ x, y: r.bottom + 4 }), 0);
+  };
+  const [copied, setCopied] = React.useState(null);
+  const copyMessage = async () => {
+    setMenu(null);
+    const ok = await copyText(msg.message || "");
+    setCopied(ok ? "copied" : "copy failed");
+    setTimeout(() => setCopied(null), 1500);
   };
   const fullText = msg.message || "";
   const streamSpeed = window.__fwSettings && window.__fwSettings.chatStreamSpeed || "normal";
@@ -2714,6 +2735,17 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
       onTouchMove: cancelLongPress,
       onTouchCancel: cancelLongPress
     },
+    /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "chat-msg-more",
+        "aria-label": "Message actions",
+        title: "Reply, copy, react",
+        onClick: onMoreClick
+      },
+      "⋯"
+    ),
     replyQuote && /* @__PURE__ */ React.createElement(
       "div",
       {
@@ -2747,7 +2779,7 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
       }
     )),
     /* @__PURE__ */ React.createElement("div", { ref: divRef, className: "chat-md", dangerouslySetInnerHTML: { __html: rendered } }),
-    /* @__PURE__ */ React.createElement("div", { className: "chat-meta" }, fmtShortTime(msg.timestamp))
+    /* @__PURE__ */ React.createElement("div", { className: "chat-meta" }, copied && /* @__PURE__ */ React.createElement("span", { className: "chat-copied" }, copied), fmtShortTime(msg.timestamp))
   ), chips.length > 0 && /* @__PURE__ */ React.createElement("div", { style: {
     marginTop: 4,
     display: "flex",
@@ -2814,6 +2846,15 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
         style: { fontSize: 12, padding: "4px 10px", textAlign: "left" }
       },
       "↩ Reply"
+    ),
+    msg.message && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: copyMessage,
+        className: "btn ghost",
+        style: { fontSize: 12, padding: "4px 10px", textAlign: "left" }
+      },
+      "⧉ Copy"
     ),
     /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 2, flexWrap: "wrap", maxWidth: 260 } }, REACTION_EMOJIS.map((e) => /* @__PURE__ */ React.createElement(
       "button",

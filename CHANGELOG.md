@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.5.2 - 2026-10-30
+
+### Fixed
+
+- **Right-clicking a chat message gives the browser's menu again.** The
+  console took every right-click on a message for its own popup (Reply
+  and the reactions), so there was no way to copy a selection, a link or
+  an image from a message. Now a mouse right-click is left to the
+  browser. The popup opens from a small button in the message's corner,
+  shown while the mouse is over the message, and on a phone from a
+  long-press as before (a long-press the phone reports as a right-click
+  still opens the popup). The popup has a new **Copy** item, which copies
+  the whole message as written, Markdown included, and works on a console
+  served over plain http too.
+
 ## 4.5.1 - 2026-10-29
 
 ### Fixed

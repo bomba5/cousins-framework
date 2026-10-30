@@ -2852,6 +2852,15 @@ function groupReactions(rows) {
   return Array.from(by.values());
 }
 
+// Whether a contextmenu event came from a touch long-press, which takes
+// it for the message menu. Chromium says so in the event's pointerType;
+// without one, a touchstart in the last 1.5 s decides. A mouse
+// right-click keeps the browser's own menu (copy, copy link, open image).
+function contextMenuFromTouch(ev, lastTouchAt, now) {
+  if (ev && ev.pointerType) return ev.pointerType === "touch";
+  return now - lastTouchAt < 1500;
+}
+
 // An attachment is a file the cousin's chat server wrote (the inbox) or a
 // generated asset; the console projects it as `attachment: {url, kind}`
 // on the message. attachmentMedia (media.jsx) resolves it, a `data:`
@@ -2895,7 +2904,8 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
     } catch (_) {}
   };
 
-  // Action menu (right-click / long-press): floating popover at cursor.
+  // Action menu (the hover button / a touch long-press): a floating
+  // popover with Reply, Copy and the reactions.
   const [menu, setMenu] = React.useState(null); // {x, y}
   React.useEffect(() => {
     if (!menu) return;
@@ -2911,8 +2921,10 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
 
   // Long-press detection for touch devices: 500ms hold opens the menu.
   const longPressTimer = React.useRef(null);
+  const lastTouchAt = React.useRef(0);
   const startLongPress = (e) => {
     const t = e.touches && e.touches[0];
+    lastTouchAt.current = Date.now();
     longPressTimer.current = setTimeout(() => {
       try { if (navigator.vibrate) navigator.vibrate(15); } catch (_) {}
       setMenu({ x: t ? t.clientX : 0, y: t ? t.clientY : 0 });
@@ -2924,9 +2936,32 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
       longPressTimer.current = null;
     }
   };
+  // A phone reports its long-press as a contextmenu too: that one opens
+  // the menu. A mouse right-click is left to the browser.
   const onContextMenu = (e) => {
+    if (!contextMenuFromTouch(e.nativeEvent, lastTouchAt.current, Date.now())) return;
     e.preventDefault();
+    cancelLongPress();
     setMenu({ x: e.clientX, y: e.clientY });
+  };
+  // The hover button opens the menu under itself. Its click goes on to
+  // the document, which closes any open menu (this one too, so a second
+  // click closes it); the menu opens once that click is done, so it is
+  // not closed by the click that opened it.
+  const onMoreClick = (e) => {
+    if (menu) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(8, Math.min(r.left, window.innerWidth - 280));
+    setTimeout(() => setMenu({ x, y: r.bottom + 4 }), 0);
+  };
+  // Copy takes the whole message as written (its Markdown), and the
+  // time line says for a moment whether it took.
+  const [copied, setCopied] = React.useState(null);
+  const copyMessage = async () => {
+    setMenu(null);
+    const ok = await copyText(msg.message || "");
+    setCopied(ok ? "copied" : "copy failed");
+    setTimeout(() => setCopied(null), 1500);
   };
   const fullText = msg.message || "";
   const streamSpeed = (window.__fwSettings && window.__fwSettings.chatStreamSpeed) || "normal";
@@ -3069,6 +3104,8 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
            onTouchEnd={cancelLongPress}
            onTouchMove={cancelLongPress}
            onTouchCancel={cancelLongPress}>
+        <button type="button" className="chat-msg-more" aria-label="Message actions"
+                title="Reply, copy, react" onClick={onMoreClick}>&#8943;</button>
         {replyQuote && (
           <div style={{
             marginBottom: 6, padding: "4px 8px",
@@ -3100,7 +3137,10 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
           </div>
         )}
         <div ref={divRef} className="chat-md" dangerouslySetInnerHTML={{ __html: rendered }} />
-        <div className="chat-meta">{fmtShortTime(msg.timestamp)}</div>
+        <div className="chat-meta">
+          {copied && <span className="chat-copied">{copied}</span>}
+          {fmtShortTime(msg.timestamp)}
+        </div>
       </div>
       {chips.length > 0 && (
         <div style={{
@@ -3142,6 +3182,12 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
             <button onClick={() => { onReply(); setMenu(null); }}
                     className="btn ghost" style={{ fontSize: 12, padding: "4px 10px", textAlign: "left" }}>
               &#8617; Reply
+            </button>
+          )}
+          {msg.message && (
+            <button onClick={copyMessage}
+                    className="btn ghost" style={{ fontSize: 12, padding: "4px 10px", textAlign: "left" }}>
+              &#10697; Copy
             </button>
           )}
           <div style={{ display: "flex", gap: 2, flexWrap: "wrap", maxWidth: 260 }}>

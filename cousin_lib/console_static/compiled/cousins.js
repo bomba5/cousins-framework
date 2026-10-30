@@ -1119,30 +1119,7 @@ function SpawnModal({ onClose, onSpawn }) {
 function CopyButton({ text }) {
   const [done, setDone] = React.useState(false);
   const copy = async () => {
-    let ok = false;
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        ok = true;
-      }
-    } catch (_e) {
-      ok = false;
-    }
-    if (!ok) {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.setAttribute("readonly", "");
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        ok = document.execCommand("copy");
-      } catch (_e) {
-        ok = false;
-      }
-      document.body.removeChild(ta);
-    }
+    const ok = await copyText(text);
     setDone(ok ? "copied" : "select and copy by hand");
     setTimeout(() => setDone(false), 1800);
   };

@@ -122,6 +122,21 @@ class TestDismissCousin(StopCase):
         self.assertIn("inside", str(ctx.exception))
         self.assertTrue(home.exists())
 
+    def test_refuses_a_symlinked_home_before_the_stop(self):
+        # the archive would hold only the link; and the delete must
+        # not open up the modes of the tree the link points at
+        real = self._cousin(slug="real")
+        real.chmod(0o750)
+        (self.root / "cousins" / "wren").symlink_to(real)
+        stop = mock.Mock()
+        with self.assertRaises(DismissRefused) as ctx:
+            dismiss_cousin(self.root, slug="wren", stop=stop)
+        self.assertIn("symlink", str(ctx.exception))
+        stop.assert_not_called()
+        self.assertEqual(stat.S_IMODE(real.stat().st_mode), 0o750)
+        self.assertTrue((real / "notes" / "untracked.md").is_file())
+        self.assertFalse((self.root / "data" / "dismissed").exists())
+
     def test_unknown_cousin_is_a_spawn_error(self):
         with self.assertRaises(SpawnError):
             dismiss_cousin(self.root, slug="nobody", tmux_bin=str(self.tmux))

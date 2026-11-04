@@ -15,6 +15,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   child, counted as failing in the console's health badge until the next
   reload. The delete now makes every directory in the home writable
   first (a symlink is never followed), then removes it and rescans.
+  A home that is itself a symlink is refused before the cousin is
+  stopped: its archive would hold only the link.
 
 ## 4.5.3 - 2026-10-30
 

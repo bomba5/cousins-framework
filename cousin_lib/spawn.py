@@ -690,6 +690,10 @@ def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
     home = root / "cousins" / slug
     if not (home / "cousin.toml").is_file():
         raise SpawnError("no cousin %r under %s" % (slug, root / "cousins"))
+    if home.is_symlink():
+        # the archive would hold only the link, and rmtree refuses one
+        raise DismissRefused(
+            "refusing to delete: %s is a symlink; home kept" % home)
     archive_dir = root / "data" / "dismissed"
     if archive_dir.resolve().is_relative_to(home.resolve()):
         raise DismissRefused(

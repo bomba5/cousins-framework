@@ -440,6 +440,39 @@ class TestBackgroundCommand(JobsCase):
         job = self._wait_status(int(out.strip()), ("failed",))
         self.assertEqual(job["exit_code"], 7)
 
+    def test_a_busy_store_at_the_close_is_retried_not_lost(self):
+        """#478: the runner's close met a locked store once; the row must
+        still end done with the exit code, not stay running for reap_lost
+        to call lost. The fork inherits the patch."""
+        import sqlite3
+        from cousin_lib import jobs
+        real, calls = jobs.finish_job, []
+
+        def busy_once(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                raise sqlite3.OperationalError("database is locked")
+            return real(*args, **kwargs)
+
+        with mock.patch.object(jobs, "finish_job", busy_once):
+            _, out, _ = self._main(["start", "shell", "quick", "--", "true"])
+        job = self._wait_status(int(out.strip()), ("done",))
+        self.assertEqual(job["exit_code"], 0)
+
+    def test_a_close_that_never_lands_leaves_the_exit_code_in_the_log(self):
+        import sqlite3
+        from cousin_lib import jobs
+        locked = mock.Mock(side_effect=sqlite3.OperationalError("database is locked"))
+        with mock.patch.object(jobs, "finish_job", locked), \
+                mock.patch.object(jobs, "CLOSE_RETRY_S", 0):
+            _, out, _ = self._main(["start", "shell", "quick", "--", "sh", "-c", "exit 3"])
+        log = pathlib.Path(get_job(int(out.strip()))["log_path"])
+        deadline = time.time() + 10
+        while time.time() < deadline and "not recorded" not in log.read_text():
+            time.sleep(0.05)
+        self.assertIn("[cousin-job] exit 3, not recorded: database is locked",
+                      log.read_text())
+
     def test_cancel_kills_the_running_process(self):
         _, out, _ = self._main([
             "start", "shell", "sleeper", "--", "sleep", "30",

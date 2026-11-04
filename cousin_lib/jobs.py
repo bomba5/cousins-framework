@@ -772,9 +772,9 @@ def _spawn_tracked(cmd, log_path, job_id, *, artifacts=(), commit=None, owner=No
         except Exception as err:
             rc = 127
             sys.stderr.write("[cousin-job] exec error: %s\n" % err)
-        # The rc lands in the store directly - if this write is what
-        # fails, the row stays 'running' and `list --active` shows it,
-        # which is the loud version of that failure.
+        # The rc lands in the store directly. A close that still fails
+        # after _close_own_row's retries puts the rc in the log, and the
+        # row, left running, is marked lost once this process is gone.
         crashpoint("job.exited")
         status = "done" if rc == 0 else "failed"
         # read before the artifact lines go in: the command's own last word
@@ -786,12 +786,50 @@ def _spawn_tracked(cmd, log_path, job_id, *, artifacts=(), commit=None, owner=No
                 # exit 0 without the output it named is not a build to show
                 status = "failed"
                 summary = "exit 0, but not recorded: " + "; ".join(missing)
-        current = get_job(job_id)
-        # a row a reader wrongly marked lost is still this runner's to close
-        if current and current["status"] in ("running", "lost"):
-            finish_job(job_id, status=status, summary=summary, exit_code=rc)
+        _close_own_row(job_id, status, summary, rc)
     finally:
         os._exit(0)
+
+
+# How long a runner keeps trying to close its row while the store is
+# busy. The store's own 5 s wait can run out on a loaded host, and a
+# close that never lands leaves a running row for reap_lost, which then
+# calls a normal exit lost (#478).
+CLOSE_RETRY_S = 60
+
+
+def _close_own_row(job_id, status, summary, rc):
+    """The runner's close of its own row, retried with backoff while the
+    store says it is busy or locked. A close that still fails, or fails
+    another way, writes the exit code and the error into the job's log:
+    the runner exits right after, so the log is the one record left. A
+    retry after finish_job's own write landed (its memory entry or close
+    notice raised) finds the row closed and stops."""
+    deadline = time.monotonic() + CLOSE_RETRY_S
+    delay = 0.5
+    while True:
+        try:
+            current = get_job(job_id)
+            # a row a reader wrongly marked lost is still this runner's to close
+            if current and current["status"] in ("running", "lost"):
+                finish_job(job_id, status=status, summary=summary, exit_code=rc)
+            return True
+        except sqlite3.OperationalError as err:
+            if time.monotonic() + delay <= deadline:
+                time.sleep(delay)
+                delay = min(delay * 2, 8)
+                continue
+            failure = err
+        except Exception as err:
+            failure = err
+        try:
+            closed = (get_job(job_id) or {}).get("status") not in ("running", "lost")
+        except Exception:
+            closed = False
+        _log_line("[cousin-job] exit %d, %s: %s"
+                  % (rc, "recorded, but closing failed after" if closed
+                     else "not recorded", failure))
+        return closed
 
 
 LAST_LINE_PREFIX = "last log line: "

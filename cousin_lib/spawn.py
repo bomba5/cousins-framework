@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -654,6 +655,21 @@ def _skip_secrets(info):
     return info
 
 
+def _writable_dirs(home):
+    """Give the owner rwx on every directory under home, so rmtree can
+    unlink what a read-only one holds: the skills export under run/skills/
+    is 0555 by design. A symlink is never followed, so nothing outside the
+    home changes mode."""
+    home = Path(home)
+    os.chmod(home, stat.S_IMODE(home.lstat().st_mode) | stat.S_IRWXU)
+    for dirpath, dirnames, _ in os.walk(home):
+        for name in dirnames:
+            path = os.path.join(dirpath, name)
+            mode = os.lstat(path).st_mode
+            if not stat.S_ISLNK(mode):
+                os.chmod(path, stat.S_IMODE(mode) | stat.S_IRWXU)
+
+
 def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
                    stop=None):
     """Stop, archive the whole home to <root>/data/dismissed/
@@ -702,6 +718,7 @@ def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
             pass
         raise DismissRefused(
             "refusing to delete: archive failed (%s); home kept" % err)
+    _writable_dirs(home)
     shutil.rmtree(home)
     left = []
     try:

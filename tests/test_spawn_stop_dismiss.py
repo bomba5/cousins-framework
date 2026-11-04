@@ -134,6 +134,35 @@ class TestDismissCousin(StopCase):
         self.assertEqual(len(out["left_in_place"]), 1)
         self.assertIn(re.sub(r"[^A-Za-z0-9]", "-", str(home)), out["left_in_place"][0])
 
+    def test_a_read_only_skills_export_is_removed_with_the_home(self):
+        # skills.export_plugins leaves run/skills/<plugin> 0555 with
+        # 0444 files: rmtree cannot unlink in it, and a delete that
+        # stops halfway leaves the home and skips the supervisor's
+        # rescan, so the runner stays a stopped child.
+        home = self._cousin()
+        skill = home / "run" / "skills" / "shared" / "skills" / "long-job"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("steps\n")
+        outside = self.root / "outside"
+        outside.mkdir()
+        outside.chmod(0o555)
+        self.addCleanup(outside.chmod, 0o755)
+        (home / "run" / "outside").symlink_to(outside)
+        for path in (skill / "SKILL.md", skill, skill.parent, skill.parent.parent):
+            path.chmod(0o444 if path.is_file() else 0o555)
+        rescans = []
+        with mock.patch("cousin_lib.spawn._rescan_supervisor",
+                        lambda root: rescans.append(root) or "rescanned"):
+            out = dismiss_cousin(self.root, slug="wren", tmux_bin=str(self.tmux))
+        self.assertEqual(out["status"], "deleted")
+        self.assertEqual(out["supervisor"], "rescanned")
+        self.assertEqual(len(rescans), 1)
+        self.assertFalse(home.exists())
+        self.assertEqual(stat.S_IMODE(outside.stat().st_mode), 0o555)
+        with tarfile.open(out["archive"]) as tf:
+            self.assertIn("wren/run/skills/shared/skills/long-job/SKILL.md",
+                          tf.getnames())
+
 
 class TestDismissACousinWithNoRunner(StopCase):
     """A cousin with no [agent] runner is dismissed (archived, removed)

@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.5.4 - 2026-11-04
+
+### Fixed
+
+- **Deleting a cousin removes its whole home again.** The skills a
+  cousin loads are exported read-only under `run/skills/`, so the delete
+  stopped halfway on them: the archive was written and `cousin.toml` was
+  gone, but the rest of the home stayed on disk, and the supervisor was
+  never asked to rescan. The cousin's runner then stayed as a stopped
+  child, counted as failing in the console's health badge until the next
+  reload. The delete now makes every directory in the home writable
+  first (a symlink is never followed), then removes it and rescans.
+
 ## 4.5.3 - 2026-10-30
 
 ### Fixed

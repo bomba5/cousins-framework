@@ -90,9 +90,12 @@ def models_for(root, name, lane):
 
 def summary(root, name):
     """For a list of accounts: {"lanes": {lane: count}, "fetched_at",
-    "checked_at", "error"}; None when the account was never fetched."""
+    "checked_at", "error"}; None when the account was never fetched: no
+    file, or only the one mark_stale writes when a key is saved first (no
+    list, no try, no error)."""
     data = read(root, name)
-    if data is None:
+    if data is None or (data.get("fetched_at") is None and data.get("checked_at") is None
+                        and not data.get("error")):
         return None
     lanes = data.get("lanes") if isinstance(data.get("lanes"), dict) else {}
     return {"lanes": {lane: len(ids) for lane, ids in lanes.items() if isinstance(ids, list)},

@@ -186,11 +186,14 @@ def _where(root, account):
 
 
 def _lanes(account):
+    """The runner kinds the account runs on, as the runner decides it
+    (agent_settings.check_lane: the tmux kind refuses a key or token
+    account too)."""
     from cousin_lib import agent_settings
     out = []
     for kind in agent_settings.kinds():
         try:
-            accounts.check_lane(account, kind)
+            agent_settings.check_lane(account, kind)
         except accounts.AccountsError:
             continue
         out.append(kind)
@@ -665,9 +668,10 @@ def register():
                         % (name, ", ".join(slug for slug, _ in users)))
                 return
             _confine(root, account)
+            from cousin_lib import agent_settings
             for slug, lane in users:
                 try:
-                    accounts.check_lane(account, lane)
+                    agent_settings.check_lane(account, lane)
                 except accounts.AccountsError as err:
                     raise accounts.AccountsError("cousin %s runs on account %s: %s"
                                                  % (slug, name, err))

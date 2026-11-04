@@ -173,6 +173,9 @@ class List(AccountsCase):
         self.assertEqual(rows["fleet"]["cousins"], ["wren"])
         self.assertEqual(rows["fleet"]["lanes"], ["sdk", "fake", "tmux"])
         self.assertEqual(rows["keyed"]["lanes"], ["opencode"])
+        # the tmux kind refuses a key or token account (#446 N2)
+        self.assertEqual(rows["metered"]["lanes"], ["sdk", "fake"])
+        self.assertEqual(rows["nightly"]["lanes"], ["sdk", "fake"])
         self.assertEqual(rows["keyed"]["entry"]["providers"], ["openai", "mistral"])
         self.assertEqual(rows["metered"]["where"], ".secrets/accounts/metered")
         self.assertEqual(rows["metered"]["secret"], {"set": True, "last4": KEY[-4:], "error": None})
@@ -324,6 +327,13 @@ class Write(AccountsCase):
         status, body = self.post("/api/accounts/fleet", {"entry": {"kind": "opencode",
                                                                    "providers": ["openai"]}})
         self.assertEqual(status, 400)
+        self.assertIn("wren", body["error"])
+        self.assertEqual(self.accounts_text(), TOML)
+
+    def test_an_edit_the_tmux_kind_would_refuse_is_refused(self):
+        self.runner_cousin("wren", runner="tmux", account="fleet")
+        status, body = self.post("/api/accounts/fleet", {"entry": {"kind": "claude-token"}})
+        self.assertEqual(status, 400, body)
         self.assertIn("wren", body["error"])
         self.assertEqual(self.accounts_text(), TOML)
 

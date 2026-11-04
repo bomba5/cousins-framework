@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.5.6 - 2026-11-04
+
+### Fixed
+
+- **Dreaming no longer stops for good on an undated raw file.** The
+  decisions backfill puts a decision with no valid day into
+  `memory/raw/undated.jsonl`. That file sorted after every day, so a
+  pass that reached the end of the store ended in it, and the next pass
+  refused its position, and so on forever. A pass now leaves out every
+  raw file whose name is not a day or a month, as it already did for the
+  monthly digests. No home on the fleet had such a file.
+
 ## 4.5.5 - 2026-11-04
 
 ### Fixed

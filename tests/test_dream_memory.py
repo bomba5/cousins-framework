@@ -127,6 +127,24 @@ class TestSlice(DreamCase):
         self.assertNotIn("a summary", piece.text)
         self.assertEqual(piece.through, {"month": "2026-10-01", "lines": 1})
 
+    def test_an_undated_raw_file_never_stalls_a_pass(self):
+        # backfill_decisions writes decisions with no valid day to
+        # undated.jsonl; it sorts after every day, and a slice ending in
+        # it would carry a cursor begin refuses on every pass (#475)
+        self.raw("2026-10-01", ("kestrel", "a claim"))
+        with open(memory.raw_dir(self.home) / "undated.jsonl", "a") as fh:
+            fh.write(json.dumps({"timestamp": "", "topic": "kestrel",
+                                 "content": "an undated decision",
+                                 "truth_level": "L3_COUSIN_CONCLUSION",
+                                 "source": "decision"}) + "\n")
+        piece = self.dream()
+        self.assertEqual(piece.through, {"month": "2026-10-01", "lines": 1})
+        self.assertNotIn("an undated decision", piece.text)
+        dream_memory.commit(self.home, self.pass_id, piece.through)
+        self.raw("2026-10-02", ("kestrel", "a later claim"))
+        second = self.dream(pass_id="20261002T210000-def456")
+        self.assertEqual(second.through, {"month": "2026-10-02", "lines": 1})
+
     def test_a_claim_longer_than_the_budget_is_taken_alone_and_flagged(self):
         self.raw("2026-10-01", ("kestrel", "x" * 900))
         piece = self.dream(chars=200)

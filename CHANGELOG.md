@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.5.5 - 2026-11-04
+
+### Fixed
+
+- **A job that ends normally is no longer closed as lost.** When its
+  command exits, a job's runner records the exit code in the job store.
+  On a loaded host that write could find the store locked past its
+  5-second wait, and the error was dropped silently: the row stayed
+  running, and the next reader marked it lost ("its process is gone",
+  no exit code). The runner now retries the close for up to a minute.
+  If it still can't record the exit code, it writes the code and the
+  error into the job's log.
+
 ## 4.5.4 - 2026-11-04
 
 ### Fixed

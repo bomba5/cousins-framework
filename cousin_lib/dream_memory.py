@@ -158,12 +158,16 @@ def _rel(home, path):
 def _files(home):
     """The raw files a pass reads, oldest first (`_key`), minus the
     digests: a digest summarises claims that already live in an archive,
-    is not a claim, and carries no id a claim could be named by.
+    is not a claim, and carries no id a claim could be named by. A file
+    whose stem is not a day or a month (`undated.jsonl`, where
+    backfill_decisions puts decisions with no valid day) is left out too:
+    a cursor cannot name it, so a slice that ended in it would be refused
+    by begin on every pass, and dreaming would stop for the home (#475).
     [(stem, home-relative path, path)]"""
     from cousin_lib import memory_search
     out = []
     for path in memory_search._raw_files(Path(home)):
-        if path.name.endswith("-digest.jsonl"):
+        if path.name.endswith("-digest.jsonl") or not _STEM.match(_stem(path)):
             continue
         out.append((_stem(path), _rel(home, path), path))
     return sorted(out, key=lambda f: _key(f[0]))

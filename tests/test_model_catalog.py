@@ -170,6 +170,17 @@ class Cache(CatalogCase):
                          {"lanes": {"sdk": 3}, "fetched_at": 1000.0, "checked_at": 1000.0,
                           "error": None})
 
+    def test_a_key_saved_before_any_fetch_still_reads_never_fetched(self):
+        # mark_stale writes {account, lanes: {}, checked_at: null}: that is
+        # not a fetch, so the summary stays null as documented (#446 N5)
+        model_catalog.mark_stale(self.root, "host", now=1000.0)
+        self.assertIsNone(model_catalog.summary(self.root, "host"))
+        model_catalog.update(self.root, self.host, now=2000.0, cli_models=lambda a, r: CLI_LIST)
+        model_catalog.mark_stale(self.root, "host", now=3000.0)
+        self.assertEqual(model_catalog.summary(self.root, "host"),
+                         {"lanes": {"sdk": 3}, "fetched_at": 2000.0, "checked_at": None,
+                          "error": None})
+
     def test_a_failed_fetch_keeps_the_last_lists_and_says_why(self):
         model_catalog.update(self.root, self.host, now=1000.0, cli_models=lambda a, r: CLI_LIST)
 

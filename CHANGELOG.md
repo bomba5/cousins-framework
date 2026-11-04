@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.5.7 - 2026-11-04
+
+### Fixed
+
+- **The accounts tab lists the lanes an account really runs on.** A
+  token or API-key account showed the tmux lane, which the tmux kind
+  refuses. The list now uses the runner's own check, and so does an
+  account edit: changing an account to a kind that a cousin on it can't
+  run on is refused, the tmux kind included.
+- **An account's models read "not fetched" until the first fetch.**
+  Saving a key before any fetch left a models summary with no lists in
+  `GET /api/accounts`, where the docs say null. It is null now.
+
 ## 4.5.6 - 2026-11-04
 
 ### Fixed

@@ -772,9 +772,9 @@ def _spawn_tracked(cmd, log_path, job_id, *, artifacts=(), commit=None, owner=No
         except Exception as err:
             rc = 127
             sys.stderr.write("[cousin-job] exec error: %s\n" % err)
-        # The rc lands in the store directly - if this write is what
-        # fails, the row stays 'running' and `list --active` shows it,
-        # which is the loud version of that failure.
+        # The rc lands in the store directly. A close that still fails
+        # after _close_own_row's retries puts the rc in the log, and the
+        # row, left running, is marked lost once this process is gone.
         crashpoint("job.exited")
         status = "done" if rc == 0 else "failed"
         # read before the artifact lines go in: the command's own last word

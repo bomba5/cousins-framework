@@ -113,9 +113,12 @@ start time and the boot it ran in, and the runner closes its own row
 when the command exits. While the job store is busy or locked, the
 runner retries that close for up to a minute. If the close still fails,
 the runner writes `[cousin-job] exit <code>, not recorded: <error>` into
-the job's log before it exits, so the exit code is kept somewhere. So a row still `running` whose runner is gone,
-and whose process group has nothing left running, means it died without
-closing it (killed, out of memory, the machine rebooted). Such a row is
+the job's log before it exits, so the exit code is kept somewhere
+(`recorded, but closing failed after: <error>` when the row did close
+and only what follows the close failed). So a row still `running` whose
+runner is gone, and whose process group has nothing left running, means
+it died without closing it (killed, out of memory, the machine
+rebooted). Such a row is
 marked `lost`, with `[lost: its process is gone]` on its summary, by
 `cousin-job list`, `show` and `tail -f`, by the `job` tool's `list` and
 `show`, and by the console: while the console runs, its event [stream](glossary.md#stream)

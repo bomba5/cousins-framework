@@ -1090,6 +1090,23 @@ Body `{"reason"}` (optional). Moves the draft to `<home>/skill-drafts/.rejected/
 
 Runs the draft's trigger test in a child process (up to 300 s): its `should-trigger` and `must-not-trigger` prompts, each one turn on the cousin's own account and model, whose only tool is `Skill`, with what the cousin loads plus the draft as `draft:<name>`. `{"ok": true, "trigger": {"should-trigger": {"prompt", "fired", "detail", "pass"}, "must-not-trigger": {...}, "pass", "model", "at", "diff_sha256"}}`, also kept in `<install>/data/skills/trigger-tests/<slug>/<name>.json` (under `data/skills/private/` for a cousin that loads `private`). `409` when the draft lacks either prompt, `504` past the time limit.
 
+## Tool faults
+
+The failed or odd tool calls each `sdk` cousin on this host logged in
+`data/tool-faults.jsonl` ([the runners reference](runners.md) lists the kinds).
+Read-only.
+
+### `GET /api/tool-faults`
+
+Query: `days` (1 to 90, default 7), `cousin` (a slug, default every cousin),
+`kind` (default every kind) and `limit` (1 to 1000, default 200). Returns
+`{"days", "kinds", "totals", "matched", "rows"}`: `totals` is each cousin's
+count by kind over the days, whatever the `kind` filter; `rows` is the newest
+`limit` rows that match, each with `cousin` added, and `matched` how many
+matched before the limit. A row has `ts`, `kind`, `tool`, `agent`, `parent`,
+`model`, `stream`, `id`, `seconds`, `input`, `keys` and `error`. An unknown
+`kind` or a value out of range is a 400, an unknown cousin a 404.
+
 ## System (the System view)
 
 The supervisor, the outbox, one-shot schedules, console users, backup and the install-wide config (`console/routes_system.py`, the view in `system.jsx`). Every change is a `POST`; a refusal is `{"ok": false, "error"}` with the status named below, and nothing is written.

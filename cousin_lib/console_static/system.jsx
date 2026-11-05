@@ -773,6 +773,67 @@ function SysConfigEditors() {
 
 // ---- the view -------------------------------------------------------------------------
 
+// The calls the runners logged as failed or odd (runner/tool_faults.py),
+// across the host's cousins: counts by cousin and kind, then the newest rows.
+function ToolFaultsPanel({ cousins }) {
+  const [days, setDays] = React.useState(7);
+  const [cousin, setCousin] = React.useState("");
+  const [kind, setKind] = React.useState("");
+  const [d, setD] = React.useState(null);
+  React.useEffect(() => {
+    const q = new URLSearchParams({ days });
+    if (cousin) q.set("cousin", cousin);
+    if (kind) q.set("kind", kind);
+    let live = true;
+    apiGet("/api/tool-faults?" + q).then(r => { if (live && r) setD(r); });
+    return () => { live = false; };
+  }, [days, cousin, kind]);
+  const kinds = d ? d.kinds : [];
+  const slugs = d ? Object.keys(d.totals).sort() : [];
+  const local = (cousins || []).filter(c => !c.remote && c.type !== "remote");
+  return <SysPanel title="tool faults" sub="failed or odd tool calls of the sdk cousins on this host"
+                   right={<span style={{ display: "flex", gap: 6 }}>
+                     <select className="sel-inline" value={days} onChange={e => setDays(Number(e.target.value))}>
+                       {[1, 7, 30, 90].map(n => <option key={n} value={n}>{n} days</option>)}
+                     </select>
+                     <select className="sel-inline" value={cousin} onChange={e => setCousin(e.target.value)}>
+                       <option value="">all cousins</option>
+                       {local.map(c => <option key={c.slug} value={c.slug}>{c.slug}</option>)}
+                     </select>
+                     <select className="sel-inline" value={kind} onChange={e => setKind(e.target.value)}>
+                       <option value="">all kinds</option>
+                       {kinds.map(k => <option key={k} value={k}>{k}</option>)}
+                     </select>
+                   </span>}>
+    {slugs.length === 0 ? <span className="muted" style={{ fontSize: 12 }}>none in the last {days} days</span> : <>
+      <div className="table-scroll">
+        <table className="data">
+          <thead><tr><th>cousin</th>{kinds.map(k => <th key={k} className="num">{k}</th>)}</tr></thead>
+          <tbody>{slugs.map(s => <tr key={s}>
+            <td className="mono">{s}</td>
+            {kinds.map(k => <td key={k} className="num">{d.totals[s][k] || 0}</td>)}
+          </tr>)}</tbody>
+        </table>
+      </div>
+      <div className="table-scroll">
+        <table className="data">
+          <thead><tr><th>when</th><th>cousin</th><th>agent</th><th>model</th><th>kind</th><th>tool</th><th>call</th></tr></thead>
+          <tbody>{d.rows.map(row => <tr key={row.cousin + row.id + row.ts}>
+            <td className="mono">{row.ts}</td>
+            <td className="mono">{row.cousin}</td>
+            <td>{row.agent}</td>
+            <td className="mono">{row.model}</td>
+            <td><Pill tone={row.kind === "failed" ? "gray" : "amber"}>{row.kind}</Pill></td>
+            <td className="mono">{row.tool}</td>
+            <td style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{row.input}{row.seconds >= 60 ? ` (${row.seconds}s)` : ""}{row.error ? "\n" + row.error : ""}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+      {d.matched > d.rows.length && <span className="muted" style={{ fontSize: 12 }}>newest {d.rows.length} of {d.matched}</span>}
+    </>}
+  </SysPanel>;
+}
+
 // The tabs, in order. Loops and Settings were sidebar views and Accounts a
 // package view of its own until 3.57.0; a package adds a tab through
 // the system.tabs slot (ui.jsx), as accounts.jsx does at order 40.
@@ -780,6 +841,7 @@ const SYSTEM_TABS = [
   { id: "services", label: "supervisor", order: 10 },
   { id: "loops", label: "loops", order: 20 },
   { id: "schedules", label: "schedules", order: 30 },
+  { id: "faults", label: "tool faults", order: 35 },
   { id: "users", label: "users", order: 50 },
   { id: "agent", label: "agent defaults", order: 60 },
   { id: "config", label: "install config", order: 70 },
@@ -835,6 +897,7 @@ function SystemView({ cousins, sessionUser, onOpen, loops, auth, setAuth }) {
       </div>
       {tab === "services" && <SysSupervisorPanel />}
       {tab === "schedules" && <SchedulesPanel cousins={cousins} />}
+      {tab === "faults" && <ToolFaultsPanel cousins={cousins} />}
       {tab === "users" && <SysUsersPanel />}
       {tab === "backup" && <SysBackupPanel cousins={cousins} />}
       {tab === "agent" && <SysAgentDefaultsPanel />}

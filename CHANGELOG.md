@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.6.0 - 2026-11-05
+
+### Added
+
+- **A log of failed and odd tool calls.** The `sdk` kind now writes one
+  row to `data/tool-faults.jsonl` for each tool name that does not
+  exist, each ToolSearch call sent under another tool's name, each call
+  refused by its schema, each other failed call and each foreground
+  shell wait of a minute or more. A subagent's calls count too, and every
+  row says which agent and model made the call, which the stream does
+  not. The System page has a tool faults tab, with counts by cousin and
+  kind and the newest rows, and `GET /api/tool-faults` serves the same.
+
 ## 4.5.7 - 2026-11-04
 
 ### Fixed

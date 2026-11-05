@@ -81,6 +81,7 @@ built from it.
 | `data/runner-session.json` | transactional | each runner's `_save_session` | the session to resume, and the snapshot it started with |
 | `data/usage.db` | raw event | `usage` | one cost row per [turn](../glossary.md#turn) |
 | `data/turn-tools.jsonl` | transactional | `runner/tool_ledger` | the live turn's tool calls, reset each turn |
+| `data/tool-faults.jsonl`, `data/tool-faults.jsonl.1` | raw event | `runner/tool_faults` | one row per failed or odd tool call, with its agent and model; rolls at 16 MiB |
 | `data/activity/*.log` | raw event | `activity.record` | one line per tool call |
 | `data/artifacts-private.json` | transactional | `artifacts` | the private rows' paths, for their owner only |
 | `data/telegram-bridge.json`, `data/telegram-pending.json` | transactional | `telegram`, `telegram_admin` | offsets and cursors, and senders waiting for approval; chat.db owns the messages |

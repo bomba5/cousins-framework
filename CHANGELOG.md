@@ -3,6 +3,14 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.6.1 - 2026-11-05
+
+### Fixed
+
+- **The tool faults tab leaves out a cousin it cannot check.** A cousin
+  whose `[skills] repos` list does not parse may still load the private
+  repository, so it no longer shows on the tab.
+
 ## 4.6.0 - 2026-11-05
 
 ### Added

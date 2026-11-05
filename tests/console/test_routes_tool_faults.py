@@ -39,6 +39,12 @@ class TestToolFaultsRoute(ConsoleCase):
         self.assertNotIn("s1", [r["id"] for r in body["rows"]])
         self.assertEqual(self.get("/api/tool-faults?cousin=kit")[0], 404)
 
+    def test_a_cousin_whose_repository_list_does_not_parse_is_left_out(self):
+        broken = self.cousin("kit", extra='\n[skills]\nrepos = ["private", "typo"]\n')
+        tool_faults.Watch(broken, "sdk-s").finished("s1", True, "boom")
+        _, body = self.get("/api/tool-faults")
+        self.assertEqual(body["cousins"], ["kestrel", "wren"])
+
     def test_a_query_out_of_range_is_refused(self):
         for query in ("days=0", "days=91", "limit=0", "limit=1001", "kind=nope", "days=x"):
             status, body = self.get("/api/tool-faults?" + query)

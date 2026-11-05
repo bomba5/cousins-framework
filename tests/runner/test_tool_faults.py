@@ -169,9 +169,6 @@ class TestRunnerWritesTheLog(HermeticCase):
         self.addCleanup(lambda: r.stop(timeout=5))
         r.start()
         r.enqueue(Item("operator:priya", "chat", "go", sender="Priya"))
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and not tool_faults.path(self.home).exists():
-            time.sleep(0.02)
         return r
 
     def test_a_log_that_breaks_does_not_fail_the_turn(self):

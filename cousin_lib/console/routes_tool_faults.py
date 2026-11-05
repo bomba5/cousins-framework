@@ -23,11 +23,10 @@ def _homes(server):
     out = {}
     for config in FrameworkConfig(server.root).list_cousins():
         try:
-            repos = skills.cousin_repos(config.home)
+            if "private" not in skills.cousin_repos(config.home):
+                out[config.slug] = config.home
         except SkillError:
-            repos = []
-        if "private" not in repos:
-            out[config.slug] = config.home
+            continue        # its list does not parse: it may name the private repository
     return out
 
 

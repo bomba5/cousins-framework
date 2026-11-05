@@ -205,8 +205,8 @@ failed the tool's schema), `failed` (any other error) or `long_wait` (a
 foreground shell wait of a minute or more: a sleep in a loop or one sleep of
 30 seconds or more). The first three are read only from the CLI's own refusal,
 not from a failed command's output. A call cut with no result leaves
-no row. The file rolls once at 16 MiB to `data/tool-faults.jsonl.1`. The other
-kinds do not write it. The System page's tool faults tab reads it.
+no row. The file rolls once at 16 MiB to `data/tool-faults.jsonl.1`. The `tmux`
+and `opencode` kinds do not write it. The System page's tool faults tab reads it.
 
 ## The kinds
 

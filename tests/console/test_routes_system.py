@@ -822,6 +822,21 @@ class AgentDefaults(ConsoleCase):
         self.assertEqual(body["values"]["commit_attribution"]["value"], True)
         self.assertIn("built-in", body["values"]["commit_attribution"]["source"])
 
+    def test_thinking_display_is_summarized_until_set(self):
+        path = self.root / "config" / "harness.toml"
+        path.write_text("[agent]\n")
+        self.serve()
+        _, body = self.get("/api/system/agent-defaults")
+        self.assertEqual(body["values"]["thinking_display"]["value"], "summarized")
+        self.assertIn("built-in", body["values"]["thinking_display"]["source"])
+        self.assertEqual(body["choices"]["thinking_display"], ["summarized", "omitted"])
+        status, body = self.post("/api/system/agent-defaults", {"thinking_display": "omitted"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["values"]["thinking_display"],
+                         {"value": "omitted", "source": "config/harness.toml [agent]"})
+        status, _ = self.post("/api/system/agent-defaults", {"thinking_display": "raw"})
+        self.assertEqual(status, 400)
+
     def test_set_and_unset_keep_the_rest_of_the_file(self):
         path = self.root / "config" / "harness.toml"
         path.write_text(self.HARNESS)

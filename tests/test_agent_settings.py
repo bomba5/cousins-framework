@@ -132,6 +132,20 @@ class Describe(_Case):
                          {"lane": "tmux-legacy", "account": None, "autoStart": None})
 
 
+class ThinkingDisplay(_Case):
+    def test_the_sdk_lane_offers_the_two_values_and_refuses_another(self):
+        self.assertIn("thinking_display", agent_settings.lane_keys("sdk"))
+        self.assertNotIn("thinking_display", agent_settings.lane_keys("opencode"))
+        home = self.cousin('runner = "sdk"\n')
+        row = agent_settings.describe(home, self.root)["settings"]["thinking_display"]
+        self.assertEqual(row["choices"], ["summarized", "omitted"])
+        self.assertEqual(agent_settings.validate(home, self.root, {"thinking_display": "omitted"}),
+                         {"thinking_display": "omitted"})
+        with self.assertRaises(agent_settings.SettingsError) as ctx:
+            agent_settings.validate(home, self.root, {"thinking_display": "raw"})
+        self.assertIn("thinking_display", ctx.exception.errors)
+
+
 class CommitAttribution(_Case):
     """Every kind reads [agent] commit_attribution (runner/main
     commit_attribution_of), so every lane lists it, a bool or unset."""

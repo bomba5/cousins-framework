@@ -409,6 +409,7 @@ function SysAgentDefaultsPanel() {
       default_model: d.values.default_model.source.startsWith("config") ? d.values.default_model.value : "",
       default_effort: d.values.default_effort.source.startsWith("config") ? d.values.default_effort.value : "",
       commit_attribution: d.values.commit_attribution.source.startsWith("config") ? String(d.values.commit_attribution.value) : "",
+      thinking_display: d.values.thinking_display.source.startsWith("config") ? d.values.thinking_display.value : ""
     });
   }, []);
   React.useEffect(() => { load(); }, [load]);
@@ -422,6 +423,7 @@ function SysAgentDefaultsPanel() {
     if (draft.default_effort) body.default_effort = draft.default_effort; else body.remove.push("default_effort");
     if (draft.commit_attribution !== "") body.commit_attribution = draft.commit_attribution === "true";
     else body.remove.push("commit_attribution");
+    if (draft.thinking_display) body.thinking_display = draft.thinking_display; else body.remove.push("thinking_display");
     const res = await sysSend("POST", "/api/system/agent-defaults", body);
     setMsg(res.ok ? { ok: true, text: "saved to config/harness.toml" } : { ok: false, text: res.d.error || `HTTP ${res.status}` });
     if (res.ok) load();
@@ -454,6 +456,15 @@ function SysAgentDefaultsPanel() {
       </select>
       {src("commit_attribution")}
       <span className="hint">a cousin's own cousin.toml [agent] commit_attribution overrides this.</span>
+    </div>
+    <div className="field">
+      <label>thinking_display</label>
+      <select className="sel" value={draft.thinking_display || ""} onChange={e => setDraft({ ...draft, thinking_display: e.target.value })}>
+        <option value="">unset (built-in: summarized)</option>
+        {st.choices.thinking_display.map(t => <option key={t} value={t}>{t}</option>)}
+      </select>
+      {src("thinking_display")}
+      <span className="hint">sdk cousins: summarized shows a summary of the reasoning, omitted only the notes between tool calls. The billing is the same. A cousin's own setting overrides this.</span>
     </div>
     <div><button className="btn primary" style={{ fontSize: 10, padding: "2px 8px", minHeight: 18 }} disabled={!st.exists} onClick={save}>save</button></div>
     <SysNote msg={msg} />

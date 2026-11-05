@@ -187,6 +187,35 @@ class AgentDefaultsSeam(unittest.TestCase):
             config.agent_config(self._root('[agent]\nmodels = [1, 2]\n'))
 
 
+class ThinkingDisplaySeam(unittest.TestCase):
+    """config/harness.toml [agent] thinking_display, overridden by a cousin's
+    own cousin.toml [agent] thinking_display. Unset anywhere: summarized."""
+
+    def _root(self, text=None):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        if text is not None:
+            (root / "config").mkdir()
+            (root / "config" / "harness.toml").write_text(text)
+        return root
+
+    def test_unset_is_summarized(self):
+        self.assertEqual(config.thinking_display(self._root()), "summarized")
+
+    def test_the_install_and_then_the_cousin_decide(self):
+        root = self._root('[agent]\nthinking_display = "omitted"\n')
+        self.assertEqual(config.thinking_display(root), "omitted")
+        self.assertEqual(config.thinking_display(root, {"thinking_display": "summarized"}),
+                         "summarized")
+
+    def test_a_value_outside_the_list_is_loud_at_either_level(self):
+        with self.assertRaises(config.MissingConfigError):
+            config.thinking_display(self._root('[agent]\nthinking_display = "raw"\n'))
+        with self.assertRaises(config.MissingConfigError):
+            config.thinking_display(self._root(), {"thinking_display": "updates"})
+
+
 class CommitAttributionSeam(unittest.TestCase):
     """config/harness.toml [agent] commit_attribution, overridden by a
     cousin's own cousin.toml [agent] commit_attribution:

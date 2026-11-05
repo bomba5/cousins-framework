@@ -81,3 +81,10 @@
 # policy on every install. Set it false to have the SDK runner and the
 # tmux lane's <home>/.claude/settings.json both turn it off.
 #commit_attribution = true
+#
+# What an sdk cousin's thinking blocks show in the reasoning pane:
+# "summarized", a summary of its reasoning, or "omitted", only the short
+# notes between tool calls. The billing is the same. A cousin's own
+# cousin.toml [agent] thinking_display overrides this. Absent in both:
+# "summarized".
+#thinking_display = "summarized"

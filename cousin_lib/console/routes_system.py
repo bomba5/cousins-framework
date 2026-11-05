@@ -900,12 +900,15 @@ def _harness_values(server):
     agent = data.get("agent") if isinstance(data.get("agent"), dict) else {}
     src = "config/harness.toml [agent]"
     values = {}
-    for key in ("default_model", "default_effort", "commit_attribution"):
+    for key in ("default_model", "default_effort", "commit_attribution", "thinking_display"):
         if key in agent:
             values[key] = {"value": agent[key], "source": src}
         elif key == "commit_attribution":
             values[key] = {"value": True, "source": "built-in default (the harness's stock"
                                                     " attribution)"}
+        elif key == "thinking_display":
+            values[key] = {"value": fwconfig.THINKING_DISPLAYS[0],
+                           "source": "built-in default"}
         else:
             values[key] = {"value": None, "source": "unset: each cousin's own value, else"
                                                     " a spawn error for a {%s} placeholder"
@@ -915,6 +918,7 @@ def _harness_values(server):
         try:
             catalogue = fwconfig.agent_config(server.root)["models"]
             fwconfig.commit_attribution(server.root)
+            fwconfig.thinking_display(server.root)
         except fwconfig.MissingConfigError as err:
             error = str(err)
     # the host login's own list, when one is fetched (model_catalog): what a
@@ -925,7 +929,8 @@ def _harness_values(server):
     kick_model_lists(server, [accounts.HOST])
     return {"ok": True, "path": "config/harness.toml", "exists": exists, "error": error,
             "values": values, "choices": {"effort": list(fwconfig.EFFORT_LEVELS),
-                                          "models": catalogue},
+                                          "models": catalogue,
+                                          "thinking_display": list(fwconfig.THINKING_DISPLAYS)},
             "applies": "read when a cousin starts or is spawned: a running cousin keeps"
                        " what it started with; restart it from its inspector"}
 
@@ -936,6 +941,7 @@ def _check_harness(text):
     def run(root):
         fwconfig.agent_config(root)
         fwconfig.commit_attribution(root)
+        fwconfig.thinking_display(root)
         fwconfig.harness_config(root)
     try:
         _with_config(text, "harness.toml", run)
@@ -1271,7 +1277,7 @@ def register():
         if not path.is_file():
             raise _err(409, "config/harness.toml is absent: copy one of the"
                             " config/harness.toml*.example files first")
-        keys = ("default_model", "default_effort", "commit_attribution")
+        keys = ("default_model", "default_effort", "commit_attribution", "thinking_display")
         removes = req.body.get("remove", [])
         if not isinstance(removes, list) or not all(k in keys for k in removes):
             raise _err(400, "remove is a list of %s" % ", ".join(keys))
@@ -1294,6 +1300,11 @@ def register():
                 if value not in fwconfig.EFFORT_LEVELS:
                     raise _err(400, "default_effort must be one of %s"
                                % ", ".join(fwconfig.EFFORT_LEVELS))
+                changes.append(("agent", key, value))
+            elif key == "thinking_display":
+                if value not in fwconfig.THINKING_DISPLAYS:
+                    raise _err(400, "thinking_display must be one of %s"
+                               % ", ".join(fwconfig.THINKING_DISPLAYS))
                 changes.append(("agent", key, value))
             else:
                 if not isinstance(value, bool):

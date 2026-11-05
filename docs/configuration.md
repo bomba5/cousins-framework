@@ -447,6 +447,7 @@ ASCII letter or digit becomes `-`, so `/a/b` is `-a-b` and `/tmp/x_/w.v2` is
 | `default_effort` | none | the effort it preselects; one of `low`, `medium`, `high`, `xhigh`, `max` (`EFFORT_LEVELS` in `cousin_lib/config.py`, the one list every command, route and doc follows) |
 | `models` | a built-in list | the models the console's spawn dialog offers. Leave it unset to get the built-in list (`DEFAULT_MODELS` in `cousin_lib/config.py`, its first entry the fallback default), which follows code updates. |
 | `commit_attribution` | `true` | whether a commit or pull request a cousin makes carries the harness's own injected attribution (a Co-Authored-By trailer, a "Generated with Claude Code" line). A cousin's own `cousin.toml` `[agent] commit_attribution` overrides this. `true` keeps the harness's stock behaviour, since the framework is public and does not impose one operator's policy on every install; `false` turns it off for the SDK runner (`options.settings`, composed with anything else `options()` passes) and for the tmux kind (`includeCoAuthoredBy: false` and an empty `attribution` object written into `<home>/.claude/settings.json` by `apply_project_settings`, idempotently and without touching an operator's own keys in that file). The resolved value also rides the SDK runner's head `runner` [stream](glossary.md#stream) event, so it is observable without reading either toml file. |
+| `thinking_display` | `summarized` | what an `sdk` cousin's thinking blocks show in the reasoning pane: `summarized`, a summary of its reasoning, or `omitted`, only the short notes between tool calls. Anthropic bills the same for both, and no value returns the raw reasoning. A cousin's own `[agent] thinking_display` overrides it. The value is fixed when a session starts, because a thinking configuration change starts the prompt cache over |
 
 ## console-users.json
 
@@ -951,6 +952,9 @@ commit_attribution` for this cousin alone (see the table
 above): `false` turns off the CLI's own injected attribution on this
 cousin's commits and PRs, whatever the install default says; `true` or
 absent falls back to the install default (itself `true` when unset).
+
+`thinking_display` overrides `config/harness.toml [agent]
+thinking_display` for this cousin alone (see the table above).
 The resolved value composes into the SDK runner's `options()` (and
 `validate_account`'s), and into the tmux kind's
 `<home>/.claude/settings.json` (`apply_project_settings`), and rides

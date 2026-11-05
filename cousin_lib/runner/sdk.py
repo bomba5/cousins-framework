@@ -445,7 +445,7 @@ class SdkRunner:
                  effort=None, cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
                  drain_timeout_s=30.0, policy=None, registry=None, handoff_deadline_s=None,
                  session=PRIMARY, claim_kinds=None, exclude_kinds=(), memory_reviewer=None,
-                 commit_attribution=None):
+                 commit_attribution=None, thinking_display=None):
         self.home = Path(home)
         # Which rows this session claims: claim_kinds None is every
         # kind but exclude_kinds; a side session names its own kind.
@@ -584,6 +584,9 @@ class SdkRunner:
         # unset and gets it resolved from cousin.toml / config/harness.toml.
         self.commit_attribution = (self._commit_attribution() if commit_attribution is None
                                    else bool(commit_attribution))
+        # [agent] thinking_display: the same, and fixed for the session, since
+        # a change to the thinking configuration starts the prompt cache over
+        self.thinking_display = thinking_display or self._thinking_display()
         self.tool_context = tools.ToolContext(home=self.home, slug=slug, name=name,
                                               root=self.root, turn=self.turn,
                                               policy=self.policy, stream=self.stream,
@@ -644,6 +647,12 @@ class SdkRunner:
     def _agent_value(self, key, default):
         """A value from cousin.toml [agent], else default."""
         return self._agent_table().get(key, default)
+
+    def _thinking_display(self):
+        """config.thinking_display, resolved for this cousin as
+        _commit_attribution is."""
+        from cousin_lib.config import thinking_display as resolve_thinking_display
+        return resolve_thinking_display(self.root, self._agent_table())
 
     def _commit_attribution(self):
         """config.commit_attribution, resolved for this cousin: its own
@@ -707,6 +716,8 @@ class SdkRunner:
             store_resume = None
         return sdk.ClaudeAgentOptions(cwd=str(self.cwd), model=self.model, env=env,
                                       effort=self.effort,
+                                      thinking={"type": "adaptive",
+                                                "display": self.thinking_display},
                                       permission_mode="bypassPermissions",
                                       setting_sources=[], resume=store_resume,
                                       settings=_attribution_settings(self.commit_attribution),

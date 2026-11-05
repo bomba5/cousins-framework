@@ -82,6 +82,10 @@ SCHEMA = {
     "commit_attribution": {"type": "bool", "lanes": ALL, "default": None,
                            "hint": "the harness's own attribution on commits and PRs;"
                                    " unset is the install default"},
+    # unset is config/harness.toml [agent]'s install default
+    "thinking_display": {"type": "choice", "lanes": ("sdk",), "default": None,
+                         "hint": "summarized shows a summary of the reasoning, omitted only"
+                                 " the notes between tool calls; unset is the install default"},
     # runner/main.harness_at_start: a harness that is not
     # config/harness.lock.toml's refuses the start instead of warning
     "strict_harness": {"type": "bool", "lanes": ("sdk", "opencode", "tmux"), "default": False,
@@ -397,6 +401,9 @@ def _choices(key, lane, root):
     if key == "effort":
         from cousin_lib.config import EFFORT_LEVELS
         return list(EFFORT_LEVELS)
+    if key == "thinking_display":
+        from cousin_lib.config import THINKING_DISPLAYS
+        return list(THINKING_DISPLAYS)
     if key == "account":
         try:
             known = accounts.load(root)

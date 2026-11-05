@@ -24,6 +24,9 @@ class MissingConfigError(Exception):
 # default that ever reaches an agent: a {model} placeholder with no
 # value configured anywhere is a spawn error (cousin_lib.spawn).
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+# What a thinking block shows: the model's reasoning as a summary, or nothing
+# but the short notes it writes between tool calls. The billing is the same.
+THINKING_DISPLAYS = ("summarized", "omitted")
 MEMORY_SCOPES = ("private", "shared")
 # Retired scope names, still read so an older cousin.toml keeps working:
 # "both" behaved exactly like "shared" (may nominate to the shared tier)
@@ -366,6 +369,34 @@ def commit_attribution(root, agent_table=None):
                 " true or false, got %r" % (install,))
         return install
     return True
+
+
+def thinking_display(root, agent_table=None):
+    """What a cousin's thinking blocks show on the sdk kind: a cousin's own
+    cousin.toml [agent] thinking_display, else config/harness.toml [agent]
+    thinking_display, else "summarized", so the reasoning pane has something
+    to read. A value outside THINKING_DISPLAYS at either level is loud, as
+    commit_attribution's is."""
+    agent_table = agent_table or {}
+    if "thinking_display" in agent_table:
+        return _check_thinking_display(agent_table["thinking_display"],
+                                       "cousin.toml [agent] thinking_display")
+    data = _read_harness_toml(root) or {}
+    agent = data.get("agent") or {}
+    if not isinstance(agent, dict):
+        raise MissingConfigError(
+            "config/harness.toml [agent] must be a table")
+    if "thinking_display" in agent:
+        return _check_thinking_display(agent["thinking_display"],
+                                       "config/harness.toml [agent] thinking_display")
+    return THINKING_DISPLAYS[0]
+
+
+def _check_thinking_display(value, where):
+    if value not in THINKING_DISPLAYS:
+        raise MissingConfigError("%s must be one of %s, got %r"
+                                 % (where, ", ".join(THINKING_DISPLAYS), value))
+    return value
 
 
 def harness_config(root):

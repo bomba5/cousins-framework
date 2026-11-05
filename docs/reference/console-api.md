@@ -1213,7 +1213,7 @@ Removes the key from the file and deletes the secret file when it is the one thi
 
 ### `POST /api/system/agent-defaults`
 
-Any of `default_model` (one word, as the agent command renders it), `default_effort` (one of the levels), `commit_attribution` (a boolean), `thinking_display` (`summarized` or `omitted`), and `"remove": [keys]` to drop keys; a `null` or empty value is `400`. Checked by `config.agent_config`, `commit_attribution` and `harness_config` on the edited text, then written through `toml_edit`. `200` the new values; `400` a bad value; `409` no `config/harness.toml` (the route never creates it). A cousin reads these when it starts or is spawned.
+Any of `default_model` (one word, as the agent command renders it), `default_effort` (one of the levels), `commit_attribution` (a boolean), `thinking_display` (`summarized` or `omitted`), and `"remove": [keys]` to drop keys; a `null` or empty value is `400`. Checked by `config.agent_config`, `commit_attribution`, `thinking_display` and `harness_config` on the edited text, then written through `toml_edit`. `200` the new values; `400` a bad value; `409` no `config/harness.toml` (the route never creates it). A cousin reads these when it starts or is spawned.
 
 ## `GET /api/events`
 

@@ -26,7 +26,8 @@ What each part calls, never re-implements:
 - the install config: every TOML edit through toml_edit.write_file_keys,
   checked first by the file's own loader against the edited text
   (hive.hive_config, chat.load_external_peers, memory_search's embedding
-  reader, config.agent_config / commit_attribution / harness_config); a
+  reader, config.agent_config / commit_attribution / thinking_display /
+  harness_config); a
   key file or a peer token only ever through secrets.write_secret_file,
   at a path this module picks, so a path field is never free text. The
   JSON and Markdown files (outbound-filter.json, net-allowlist.json,

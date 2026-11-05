@@ -1,5 +1,6 @@
 """SdkRunner against a scripted client: the whole loop, no model."""
 import asyncio
+import dataclasses
 import json
 import os
 import threading
@@ -366,6 +367,11 @@ class TestSdkRunner(HermeticCase):
             (self.home / "cousin.toml").read_text() + 'thinking_display = "omitted"\n')
         r, _ = self._runner([])
         self.assertEqual(r.options().thinking, {"type": "adaptive", "display": "omitted"})
+
+    def test_an_openrouter_account_keeps_the_clis_own_display(self):
+        r, _ = self._runner([])
+        r.account = dataclasses.replace(r.account, kind="openrouter")
+        self.assertIsNone(r._thinking())
 
     def test_the_display_stays_put_when_cousin_toml_changes_mid_session(self):
         r, _ = self._runner([])

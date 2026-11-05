@@ -648,6 +648,14 @@ class SdkRunner:
         """A value from cousin.toml [agent], else default."""
         return self._agent_table().get(key, default)
 
+    def _thinking(self):
+        """The options' thinking: the display this cousin asks for. An
+        openrouter account keeps the CLI's own: it may refuse the field,
+        and the CLI has no fallback for `summarized`."""
+        if self.account.kind == "openrouter":
+            return None
+        return {"type": "adaptive", "display": self.thinking_display}
+
     def _thinking_display(self):
         """config.thinking_display, resolved for this cousin as
         _commit_attribution is."""
@@ -716,8 +724,7 @@ class SdkRunner:
             store_resume = None
         return sdk.ClaudeAgentOptions(cwd=str(self.cwd), model=self.model, env=env,
                                       effort=self.effort,
-                                      thinking={"type": "adaptive",
-                                                "display": self.thinking_display},
+                                      thinking=self._thinking(),
                                       permission_mode="bypassPermissions",
                                       setting_sources=[], resume=store_resume,
                                       settings=_attribution_settings(self.commit_attribution),

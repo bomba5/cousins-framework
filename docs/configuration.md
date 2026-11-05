@@ -953,12 +953,15 @@ above): `false` turns off the CLI's own injected attribution on this
 cousin's commits and PRs, whatever the install default says; `true` or
 absent falls back to the install default (itself `true` when unset).
 
-`thinking_display` overrides `config/harness.toml [agent]
-thinking_display` for this cousin alone (see the table above).
 The resolved value composes into the SDK runner's `options()` (and
 `validate_account`'s), and into the tmux kind's
 `<home>/.claude/settings.json` (`apply_project_settings`), and rides
 the runner's head `runner` stream event.
+
+`thinking_display` overrides `config/harness.toml [agent]
+thinking_display` for this cousin alone (see the table above). It reaches a
+foreground subagent's thinking too, and a cousin on an `openrouter` account
+keeps the CLI's own display whatever it says.
 
 `rollover_at_percent` (number, default 80) applies to the `sdk` and `opencode`
 lanes only; the `tmux` kind has no automatic context-pressure rollover (only

@@ -37,7 +37,7 @@ class SystemView(unittest.TestCase):
     def test_loops_settings_and_accounts_are_its_tabs(self):
         tabs = self.src[self.src.index("const SYSTEM_TABS = ["):self.src.index("];", self.src.index("const SYSTEM_TABS = ["))]
         ids = re.findall(r'id: "([a-z]+)"', tabs)
-        self.assertEqual(ids, ["services", "loops", "schedules", "users", "agent", "config",
+        self.assertEqual(ids, ["services", "loops", "schedules", "faults", "users", "agent", "config",
                                "backup", "settings"])
         self.assertIn('slotEntries("system.tabs")', self.src)
         self.assertIn("<LoopsView loops={loops || []} />", self.src)

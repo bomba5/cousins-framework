@@ -46,7 +46,8 @@ from cousin_lib import accounts, boot, handover, review_gate, session, skills, s
 from cousin_lib.crashpoint import crashpoint
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
 from cousin_lib.runner import (auth, config_watch, cost_cap, envelope, extract, hooks,
-                               memory_watch, restart_note, rollover, tool_ledger, tools, wake)
+                               memory_watch, restart_note, rollover, tool_faults, tool_ledger,
+                               tools, wake)
 from cousin_lib.runner.base import (INTERRUPT, NO_TURN, SURFACE_KINDS, Receipt, RunnerError, StoreBusy,
                                      folds_into_turn)
 from cousin_lib.runner.inbox import Inbox
@@ -479,6 +480,7 @@ class SdkRunner:
                                         uuid.uuid4().hex[:8])
         self.inbox = Inbox(self.home)
         self.stream = EventStream(self.home, self.session_id)
+        self._faults = tool_faults.Watch(self.home, self.session_id)
         self._store_busy = StoreBusy(self.stream)
         self.machine = StateMachine(on_change=self._on_state)
         self.turn = Turn()
@@ -2196,6 +2198,14 @@ class SdkRunner:
         except OSError as exc:
             self.stream.append("error", {"error": "tool ledger: %s" % exc})
 
+    def _fault(self, block, text, parent):
+        """A failed or odd call into the log (tool_faults). A diagnostic log
+        never fails a turn: a write that fails is recorded and the turn goes on."""
+        try:
+            self._faults.finished(block.tool_use_id, bool(block.is_error), text, parent=parent)
+        except Exception as exc:  # noqa: BLE001 - see above
+            self.stream.append("error", {"error": "tool faults: %s" % exc})
+
     def _match_echoes(self, sdk, msg, open_rows, echoed):
         """The open rows this UserMessage echoes, in the order written; []
         when it echoes none. The CLI does not replay a row byte for byte:
@@ -3370,6 +3380,9 @@ class SdkRunner:
                 elif isinstance(block, sdk.ToolUseBlock):
                     self.stream.append("tool", {"id": block.id, "name": block.name,
                                                 "input": block.input})
+                    self._faults.started(block.id, block.name, block.input,
+                                         model=getattr(msg, "model", None),
+                                         parent=getattr(msg, "parent_tool_use_id", None))
                 elif isinstance(block, sdk.ThinkingBlock):
                     self.stream.append("thinking", _thinking_payload(block.thinking or ""))
                 else:
@@ -3384,9 +3397,11 @@ class SdkRunner:
             texts, recorded = [], 0
             for block in msg.content:
                 if isinstance(block, sdk.ToolResultBlock):
+                    text = _tool_result_text(block.content)
                     self.stream.append("tool_result", {
                         "tool_use_id": block.tool_use_id, "is_error": bool(block.is_error),
-                        "text": _tool_result_text(block.content)[:2000]})
+                        "text": text[:2000]})
+                    self._fault(block, text, getattr(msg, "parent_tool_use_id", None))
                     recorded += 1
                 elif isinstance(block, sdk.TextBlock):
                     texts.append(block.text)

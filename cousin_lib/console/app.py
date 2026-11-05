@@ -68,6 +68,7 @@ ROUTE_MODULES = [
     "cousin_lib.console.routes_meetings",
     "cousin_lib.console.routes_telegram",
     "cousin_lib.console.routes_health",
+    "cousin_lib.console.routes_tool_faults",
     "cousin_lib.console.hive",
     "cousin_lib.console.proxy",
     "cousin_lib.console.pane",

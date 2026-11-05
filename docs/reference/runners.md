@@ -169,17 +169,6 @@ starts and one when its result comes. Read-only tools (`Read`, `Grep`,
 turn's result, since an interrupted turn ends in one too; the next start
 empties it after using it.
 
-The `sdk` kind also keeps a log of the calls that went wrong, in
-`data/tool-faults.jsonl`, a subagent's included. The stream records every
-call but not who made it, so each row here carries `agent` (`main` or
-`subagent`), `parent` (the tool call that started the subagent) and `model`.
-Its `kind` is one of `unknown_tool` (the name does not exist), `misnamed` (a
-ToolSearch call sent under another tool's name), `bad_input` (the arguments
-failed the tool's schema), `failed` (any other error) or `long_wait` (a
-foreground shell wait of a minute or more). A call cut with no result leaves
-no row. The file rolls once at 16 MiB to `data/tool-faults.jsonl.1`. The other
-kinds do not write it. The System page's tool faults tab reads it.
-
 The next start appends those calls to its line: the last 12, with how many
 came before, each cut to 160 characters. A call is `finished`, `failed`, or
 `STARTED, NO RESULT: it may or may not have happened` when it was cut in
@@ -205,6 +194,19 @@ The stream's `system` event with subtype `restart_note` says whether the
 session was resumed and how many calls were recorded. Side sessions keep no
 list and get no line. The `tmux` kind writes the same mark and has its own
 restart line, with no list of calls; the `opencode` kind gives no line.
+
+The `sdk` kind also keeps a log of the calls that went wrong, in
+`data/tool-faults.jsonl`, a subagent's included. The stream records every
+call but not who made it, so each row here carries `agent` (`main` or
+`subagent`), `parent` (the tool call that started the subagent) and `model`.
+Its `kind` is one of `unknown_tool` (the name does not exist), `misnamed` (a
+ToolSearch call sent under another tool's name), `bad_input` (the arguments
+failed the tool's schema), `failed` (any other error) or `long_wait` (a
+foreground shell wait of a minute or more: a sleep in a loop or one sleep of
+30 seconds or more). The first three are read only from the CLI's own refusal,
+not from a failed command's output. A call cut with no result leaves
+no row. The file rolls once at 16 MiB to `data/tool-faults.jsonl.1`. The other
+kinds do not write it. The System page's tool faults tab reads it.
 
 ## The kinds
 

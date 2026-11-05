@@ -2198,12 +2198,12 @@ class SdkRunner:
         except OSError as exc:
             self.stream.append("error", {"error": "tool ledger: %s" % exc})
 
-    def _fault(self, block, text):
-        """A failed or odd call into the log (tool_faults). A write that
-        fails is recorded and the turn goes on."""
+    def _fault(self, block, text, parent):
+        """A failed or odd call into the log (tool_faults). A diagnostic log
+        never fails a turn: a write that fails is recorded and the turn goes on."""
         try:
-            self._faults.finished(block.tool_use_id, bool(block.is_error), text)
-        except OSError as exc:
+            self._faults.finished(block.tool_use_id, bool(block.is_error), text, parent=parent)
+        except Exception as exc:  # noqa: BLE001 - see above
             self.stream.append("error", {"error": "tool faults: %s" % exc})
 
     def _match_echoes(self, sdk, msg, open_rows, echoed):
@@ -3401,7 +3401,7 @@ class SdkRunner:
                     self.stream.append("tool_result", {
                         "tool_use_id": block.tool_use_id, "is_error": bool(block.is_error),
                         "text": text[:2000]})
-                    self._fault(block, text)
+                    self._fault(block, text, getattr(msg, "parent_tool_use_id", None))
                     recorded += 1
                 elif isinstance(block, sdk.TextBlock):
                     texts.append(block.text)

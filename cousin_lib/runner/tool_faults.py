@@ -30,11 +30,18 @@ from cousin_lib.runner.tool_ledger import _summary
 FILE = ("data", "tool-faults.jsonl")
 KINDS = ("unknown_tool", "misnamed", "bad_input", "failed", "long_wait")
 LONG_WAIT_SECONDS = 60
+LONG_SLEEP_SECONDS = 30
+WAIT_CHARS = 4096       # of a command, enough for any wait: the search runs on the event loop
 ERROR_CHARS = 300
 MAX_KEYS = 12
 MAX_OPEN = 1000         # calls with no result yet; an interrupted one never gets one
 MAX_BYTES = 16 * 1024 * 1024
-_WAIT = re.compile(r"\b(?:until|while)\b.*\bsleep\b|^\s*sleep\s+\d", re.S)
+# The CLI's own refusal opens with this. A failed command's output can quote
+# the same words, so only a refusal is read for them.
+REFUSAL = "<tool_use_error>"
+# `sleep` where a command starts: `time.sleep` or the word in a message is not one.
+_SLEEP = re.compile(r"(?:^|[;&|(\n]|\bdo\b|\bthen\b)\s*sleep\s+(\d+)")
+_LOOP = re.compile(r"\bdo\b")
 
 
 def path(home):
@@ -49,22 +56,30 @@ def _stamp(when):
     return datetime.fromtimestamp(when, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _waits(command):
+    """A command that waits: a sleep inside a loop, or one long sleep. A short
+    sleep before real work (`sleep 5 && make test`) is not a wait."""
+    text = str(command)[:WAIT_CHARS]
+    return any(int(m.group(1)) >= LONG_SLEEP_SECONDS or _LOOP.search(text, 0, m.end())
+               for m in _SLEEP.finditer(text))
+
+
 def classify(name, tool_input, is_error, text, seconds):
     """The call's kind, None for an ordinary one. A wait is told first: one
     that hits the tool's time limit also comes back as an error."""
     data = tool_input if isinstance(tool_input, dict) else {}
     if name == "Bash" and seconds >= LONG_WAIT_SECONDS \
-            and not data.get("run_in_background") \
-            and _WAIT.search(str(data.get("command", ""))):
+            and not data.get("run_in_background") and _waits(data.get("command", "")):
         return "long_wait"
     if not is_error:
         return None
-    if name != "ToolSearch" and str(data.get("query", "")).startswith("select:"):
-        return "misnamed"
-    if "No such tool available" in text:
-        return "unknown_tool"
-    if "InputValidationError" in text:
-        return "bad_input"
+    if text.startswith(REFUSAL):
+        if name != "ToolSearch" and str(data.get("query", "")).startswith("select:"):
+            return "misnamed"
+        if "No such tool available" in text:
+            return "unknown_tool"
+        if "InputValidationError" in text:
+            return "bad_input"
     return "failed"
 
 
@@ -129,12 +144,13 @@ class Watch:
         self._open[tool_id] = (name, tool_input, model, parent,
                                time.time() if now is None else now)
 
-    def finished(self, tool_id, is_error, text, *, now=None):
+    def finished(self, tool_id, is_error, text, *, parent=None, now=None):
         """The row for this result, written, or None for an ordinary call.
         A result whose call was not seen (a restart between them) still
-        counts when it is an error."""
-        name, tool_input, model, parent, began = self._open.pop(
+        counts when it is an error, with the `parent` its message carries."""
+        name, tool_input, model, seen_parent, began = self._open.pop(
             tool_id, (None, None, None, None, None))
+        parent = seen_parent or parent
         now = time.time() if now is None else now
         seconds = now - began if began is not None else 0
         kind = classify(name, tool_input, is_error, text, seconds)

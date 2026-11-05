@@ -54,6 +54,31 @@ class TestClassify(unittest.TestCase):
         self.assertIsNone(self.kind("Bash", wait, is_error=False, seconds=300))
         self.assertIsNone(self.kind("Bash", {"command": "make"}, is_error=False, seconds=300))
 
+    def test_a_sleep_anywhere_a_command_can_start(self):
+        for command in ("cd x && sleep 120", "a; sleep 75; b", "sleep 45",
+                        "for i in $(seq 60); do curl x; sleep 5; done",
+                        "while true\ndo\n  sleep 5\ndone",
+                        "timeout 580 bash -c 'until [ -f /tmp/x ]; do sleep 20; done'"):
+            self.assertEqual(self.kind("Bash", {"command": command}, is_error=False, seconds=90),
+                             "long_wait", command)
+
+    def test_a_short_sleep_or_the_word_is_not_a_wait(self):
+        for command in ("sleep 5 && make test", "git commit -m 'while sleep 5 runs'",
+                        "python3 -c 'import time; time.sleep(90)'"):
+            self.assertIsNone(self.kind("Bash", {"command": command}, is_error=False, seconds=90),
+                              command)
+
+    def test_a_long_command_stays_cheap(self):
+        command = "while true; " * 100_000
+        started = time.monotonic()
+        self.assertIsNone(self.kind("Bash", {"command": command}, is_error=False, seconds=90))
+        self.assertLess(time.monotonic() - started, 0.5)
+
+    def test_a_failed_commands_output_is_not_a_refusal(self):
+        for text in ("Exit code 1\nAssertionError: " + NO_TOOL, "log: InputValidationError: x"):
+            self.assertEqual(self.kind("Bash", {"command": "make test"}, text=text), "failed")
+        self.assertEqual(self.kind("Search", {"query": "select: x"}, text="Exit code 1"), "failed")
+
 
 class TestLog(unittest.TestCase):
     def setUp(self):
@@ -80,6 +105,10 @@ class TestLog(unittest.TestCase):
     def test_a_result_whose_call_was_not_seen_counts_when_it_failed(self):
         self.assertIsNone(self.watch.finished("gone", False, "ok"))
         self.assertEqual(self.watch.finished("gone", True, "boom")["kind"], "failed")
+
+    def test_a_result_whose_call_was_not_seen_keeps_its_agent(self):
+        row = self.watch.finished("gone", True, "boom", parent="tu-agent")
+        self.assertEqual((row["agent"], row["parent"]), ("subagent", "tu-agent"))
 
     def test_only_the_owner_reads_the_file(self):
         self.watch.finished("t1", True, "token=abc")
@@ -144,6 +173,24 @@ class TestRunnerWritesTheLog(HermeticCase):
         while time.monotonic() < deadline and not tool_faults.path(self.home).exists():
             time.sleep(0.02)
         return r
+
+    def test_a_log_that_breaks_does_not_fail_the_turn(self):
+        from claude_agent_sdk import AssistantMessage, ToolResultBlock, ToolUseBlock, UserMessage
+        call = AssistantMessage(content=[ToolUseBlock(id="t1", name="Bash", input={"command": "false"})],
+                                model="claude-main")
+        done = UserMessage(content=[ToolResultBlock(tool_use_id="t1", content="exit 1", is_error=True)])
+        with mock.patch.object(tool_faults, "append", side_effect=UnicodeEncodeError(
+                "utf-8", "x", 0, 1, "surrogate")):
+            r = self.run_turn([init_msg(session="s1"), call, done, assistant(text="done"),
+                               result(session="s1")])
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and not [
+                    e for e in r.stream.tail() if e.get("kind") == "result"]:
+                time.sleep(0.02)
+        events = list(r.stream.tail())
+        self.assertTrue([e for e in events if e.get("kind") == "result"], events[-5:])
+        self.assertTrue([e for e in events if e.get("kind") == "error"
+                         and "tool faults" in str(e.get("payload"))])
 
     def test_a_subagents_failed_call_and_the_cousins_own(self):
         from claude_agent_sdk import AssistantMessage, ToolResultBlock, ToolUseBlock, UserMessage

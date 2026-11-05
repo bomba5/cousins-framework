@@ -1100,12 +1100,15 @@ Read-only.
 
 Query: `days` (1 to 90, default 7), `cousin` (a slug, default every cousin),
 `kind` (default every kind) and `limit` (1 to 1000, default 200). Returns
-`{"days", "kinds", "totals", "matched", "rows"}`: `totals` is each cousin's
+`{"days", "kinds", "cousins", "totals", "matched", "rows"}`: `cousins` is the
+slugs the route may show, `totals` each cousin's
 count by kind over the days, whatever the `kind` filter; `rows` is the newest
 `limit` rows that match, each with `cousin` added, and `matched` how many
 matched before the limit. A row has `ts`, `kind`, `tool`, `agent`, `parent`,
 `model`, `stream`, `id`, `seconds`, `input`, `keys` and `error`. An unknown
-`kind` or a value out of range is a 400, an unknown cousin a 404.
+`kind` or a value out of range is a 400, an unknown cousin a 404. As on the
+skills routes, a cousin that loads the `private` repository is never shown: it
+reads as unknown.
 
 ## System (the System view)
 

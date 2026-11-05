@@ -13,7 +13,7 @@ class TestToolFaultsRoute(ConsoleCase):
         self.kestrel = self.cousin("kestrel")
         tool_faults.Watch(self.wren, "sdk-w").finished("w1", True, "boom")
         tool_faults.Watch(self.kestrel, "sdk-k").finished(
-            "k1", True, "Error: No such tool available: bash")
+            "k1", True, "<tool_use_error>Error: No such tool available: bash</tool_use_error>")
         self.serve()
 
     def test_every_cousin_with_its_counts_and_rows(self):
@@ -29,6 +29,15 @@ class TestToolFaultsRoute(ConsoleCase):
         self.assertEqual(list(body["totals"]), ["wren"])
         _, body = self.get("/api/tool-faults?kind=unknown_tool")
         self.assertEqual([r["cousin"] for r in body["rows"]], ["kestrel"])
+
+    def test_a_cousin_on_the_private_repository_is_never_shown(self):
+        secret = self.cousin("kit", extra='\n[skills]\nrepos = ["private"]\n')
+        tool_faults.Watch(secret, "sdk-s").finished("s1", True, "boom")
+        _, body = self.get("/api/tool-faults")
+        self.assertEqual(sorted(body["totals"]), ["kestrel", "wren"])
+        self.assertEqual(body["cousins"], ["kestrel", "wren"])
+        self.assertNotIn("s1", [r["id"] for r in body["rows"]])
+        self.assertEqual(self.get("/api/tool-faults?cousin=kit")[0], 404)
 
     def test_a_query_out_of_range_is_refused(self):
         for query in ("days=0", "days=91", "limit=0", "limit=1001", "kind=nope", "days=x"):

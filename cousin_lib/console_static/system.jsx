@@ -775,22 +775,22 @@ function SysConfigEditors() {
 
 // The calls the runners logged as failed or odd (runner/tool_faults.py),
 // across the host's cousins: counts by cousin and kind, then the newest rows.
-function ToolFaultsPanel({ cousins }) {
+function ToolFaultsPanel() {
   const [days, setDays] = React.useState(7);
   const [cousin, setCousin] = React.useState("");
   const [kind, setKind] = React.useState("");
   const [d, setD] = React.useState(null);
+  const [read, setRead] = React.useState(false);
   React.useEffect(() => {
     const q = new URLSearchParams({ days });
     if (cousin) q.set("cousin", cousin);
     if (kind) q.set("kind", kind);
     let live = true;
-    apiGet("/api/tool-faults?" + q).then(r => { if (live && r) setD(r); });
+    apiGet("/api/tool-faults?" + q).then(r => { if (live) { setD(r); setRead(true); } });
     return () => { live = false; };
   }, [days, cousin, kind]);
   const kinds = d ? d.kinds : [];
   const slugs = d ? Object.keys(d.totals).sort() : [];
-  const local = (cousins || []).filter(c => !c.remote && c.type !== "remote");
   return <SysPanel title="tool faults" sub="failed or odd tool calls of the sdk cousins on this host"
                    right={<span style={{ display: "flex", gap: 6 }}>
                      <select className="sel-inline" value={days} onChange={e => setDays(Number(e.target.value))}>
@@ -798,14 +798,16 @@ function ToolFaultsPanel({ cousins }) {
                      </select>
                      <select className="sel-inline" value={cousin} onChange={e => setCousin(e.target.value)}>
                        <option value="">all cousins</option>
-                       {local.map(c => <option key={c.slug} value={c.slug}>{c.slug}</option>)}
+                       {(d ? d.cousins : []).map(s => <option key={s} value={s}>{s}</option>)}
                      </select>
                      <select className="sel-inline" value={kind} onChange={e => setKind(e.target.value)}>
                        <option value="">all kinds</option>
                        {kinds.map(k => <option key={k} value={k}>{k}</option>)}
                      </select>
                    </span>}>
-    {slugs.length === 0 ? <span className="muted" style={{ fontSize: 12 }}>none in the last {days} days</span> : <>
+    {!read ? <span className="muted" style={{ fontSize: 12 }}>reading</span>
+      : !d ? <span className="muted" style={{ fontSize: 12 }}>could not read the log</span>
+      : slugs.length === 0 ? <span className="muted" style={{ fontSize: 12 }}>none in the last {days} days</span> : <>
       <div className="table-scroll">
         <table className="data">
           <thead><tr><th>cousin</th>{kinds.map(k => <th key={k} className="num">{k}</th>)}</tr></thead>
@@ -897,7 +899,7 @@ function SystemView({ cousins, sessionUser, onOpen, loops, auth, setAuth }) {
       </div>
       {tab === "services" && <SysSupervisorPanel />}
       {tab === "schedules" && <SchedulesPanel cousins={cousins} />}
-      {tab === "faults" && <ToolFaultsPanel cousins={cousins} />}
+      {tab === "faults" && <ToolFaultsPanel />}
       {tab === "users" && <SysUsersPanel />}
       {tab === "backup" && <SysBackupPanel cousins={cousins} />}
       {tab === "agent" && <SysAgentDefaultsPanel />}

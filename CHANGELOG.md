@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.7.0 - 2026-11-05
+
+### Added
+
+- **The reasoning pane shows a summary of the reasoning.** An `sdk`
+  cousin's thinking blocks used to come back empty, apart from short
+  notes between tool calls. A new `[agent] thinking_display` setting
+  asks for summaries, and `summarized` is now the default. Anthropic
+  bills the same either way. Set it to `omitted` for the notes alone,
+  for the install on the System page's agent defaults tab or for one
+  cousin in its inspector. A foreground subagent's thinking shows too,
+  and reads as the cousin's own in the pane. An `openrouter` account
+  keeps the CLI's own display.
+
 ## 4.6.1 - 2026-11-05
 
 ### Fixed

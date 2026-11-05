@@ -131,6 +131,18 @@ def commit_attribution_of(agent, root):
         raise RunnerError(str(err))
 
 
+def thinking_display_of(agent, root):
+    """config.thinking_display, checked at runner start like
+    commit_attribution_of: a bad value is configuration (RunnerError,
+    exit 2)."""
+    from cousin_lib.config import MissingConfigError
+    from cousin_lib.config import thinking_display as resolve
+    try:
+        return resolve(root, agent)
+    except MissingConfigError as err:
+        raise RunnerError(str(err))
+
+
 def strict_harness_of(agent):
     """[agent] strict_harness, checked like reply_gate: a value that is
     not true or false is configuration (RunnerError, exit 2)."""
@@ -292,6 +304,7 @@ def runner_for(home, *, kind=None):
         from cousin_lib.runner.sdk import SdkRunner
         common = dict(account=account, model=agent.get("model"),
                       effort=effort_of(agent), commit_attribution=commit_attribution,
+                      thinking_display=thinking_display_of(agent, root_for(home)),
                       policy=policy)
         if side:
             return sessions.Sessions(home, kinds=side, **common)

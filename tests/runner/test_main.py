@@ -393,6 +393,14 @@ class TestAuthLane(HermeticCase):
         self.assertEqual(rc, 2)
         self.assertIn("effort", err)
 
+    def test_a_thinking_display_the_cli_would_refuse_is_exit_2_at_start(self):
+        home = temp_home(self, runner="sdk")
+        (home / "cousin.toml").write_text(
+            (home / "cousin.toml").read_text() + 'thinking_display = "raw"\n')
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn("thinking_display", err)
+
     def test_a_non_boolean_cousin_commit_attribution_is_exit_2_at_start(self):
         # bool("false") is True, so this must
         # be refused, not silently accepted, at the same runner-start

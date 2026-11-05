@@ -1209,11 +1209,11 @@ Removes the key from the file and deletes the secret file when it is the one thi
 
 ### `GET /api/system/agent-defaults`
 
-`config/harness.toml [agent]`: `{"values": {"default_model", "default_effort", "commit_attribution": {"value", "source"}}, "choices": {"effort", "models"}, "exists", "error", "applies"}`. `source` is `config/harness.toml [agent]`, the built-in default (`commit_attribution` true) or unset. `choices.models` is the host login's own model list when one is fetched ([model_catalog](../configuration.md#datamodelsaccountjson)), else the harness catalogue.
+`config/harness.toml [agent]`: `{"values": {"default_model", "default_effort", "commit_attribution", "thinking_display": {"value", "source"}}, "choices": {"effort", "models", "thinking_display"}, "exists", "error", "applies"}`. `source` is `config/harness.toml [agent]`, the built-in default (`commit_attribution` true) or unset. `choices.models` is the host login's own model list when one is fetched ([model_catalog](../configuration.md#datamodelsaccountjson)), else the harness catalogue.
 
 ### `POST /api/system/agent-defaults`
 
-Any of `default_model` (one word, as the agent command renders it), `default_effort` (one of the levels), `commit_attribution` (a boolean), and `"remove": [keys]` to drop keys; a `null` or empty value is `400`. Checked by `config.agent_config`, `commit_attribution` and `harness_config` on the edited text, then written through `toml_edit`. `200` the new values; `400` a bad value; `409` no `config/harness.toml` (the route never creates it). A cousin reads these when it starts or is spawned.
+Any of `default_model` (one word, as the agent command renders it), `default_effort` (one of the levels), `commit_attribution` (a boolean), `thinking_display` (`summarized` or `omitted`), and `"remove": [keys]` to drop keys; a `null` or empty value is `400`. Checked by `config.agent_config`, `commit_attribution`, `thinking_display` and `harness_config` on the edited text, then written through `toml_edit`. `200` the new values; `400` a bad value; `409` no `config/harness.toml` (the route never creates it). A cousin reads these when it starts or is spawned.
 
 ## `GET /api/events`
 

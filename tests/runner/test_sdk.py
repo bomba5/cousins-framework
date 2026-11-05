@@ -1,5 +1,6 @@
 """SdkRunner against a scripted client: the whole loop, no model."""
 import asyncio
+import dataclasses
 import json
 import os
 import threading
@@ -357,6 +358,27 @@ class TestSdkRunner(HermeticCase):
         self.assertIsNone(r.options().extra_args["replay-user-messages"])
 
     # -- commit attribution ---------------------------------------------
+    def test_options_ask_for_summarized_thinking_by_default(self):
+        r, _ = self._runner([])
+        self.assertEqual(r.options().thinking, {"type": "adaptive", "display": "summarized"})
+
+    def test_a_cousin_can_turn_the_summaries_off(self):
+        (self.home / "cousin.toml").write_text(
+            (self.home / "cousin.toml").read_text() + 'thinking_display = "omitted"\n')
+        r, _ = self._runner([])
+        self.assertEqual(r.options().thinking, {"type": "adaptive", "display": "omitted"})
+
+    def test_an_openrouter_account_keeps_the_clis_own_display(self):
+        r, _ = self._runner([])
+        r.account = dataclasses.replace(r.account, kind="openrouter")
+        self.assertIsNone(r._thinking())
+
+    def test_the_display_stays_put_when_cousin_toml_changes_mid_session(self):
+        r, _ = self._runner([])
+        (self.home / "cousin.toml").write_text(
+            (self.home / "cousin.toml").read_text() + 'thinking_display = "omitted"\n')
+        self.assertEqual(r.options().thinking["display"], "summarized")
+
     def test_options_carry_no_settings_by_default(self):
         r, _ = self._runner([])
         self.assertIsNone(r.options().settings)
@@ -392,6 +414,15 @@ class TestSdkRunner(HermeticCase):
         settings = json.loads(argv[argv.index("--settings") + 1])
         self.assertIs(settings["includeCoAuthoredBy"], False)
         self.assertEqual(settings["attribution"], {"commit": "", "pr": ""})
+
+    def test_the_real_transport_puts_the_thinking_display_on_the_cli_argv(self):
+        from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+        r, _ = self._runner([])
+        transport = SubprocessCLITransport("hi", r.options())
+        transport._cli_path = "/bin/true"
+        argv = transport._build_command()
+        self.assertEqual(argv[argv.index("--thinking") + 1], "adaptive")
+        self.assertEqual(argv[argv.index("--thinking-display") + 1], "summarized")
 
     # -- the system prompt never on the argv (#154) ----------------------------
     def test_the_real_argv_names_the_prompt_file_and_never_holds_its_text(self):

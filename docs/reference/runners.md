@@ -375,7 +375,11 @@ runs), which the contract does not cover.
   prompt names them that way. It also has one paragraph the SDK lane's
   has not, after "How you answer": a tool is called, never written out,
   so a line like `cousin_reply({text: "..."})` in the model's text sends
-  nothing (`contract.CALL_FORM`).
+  nothing (`contract.CALL_FORM`). It leaves out one the SDK lane has,
+  before "Generations": shell commands run through the `Bash` tool, with
+  its capital B (`contract.SHELL_TOOL`), since opencode's own shell tool
+  is lowercase. On the SDK lane the same line also opens every subagent,
+  through a `SubagentStart` hook.
 - The composed system prompt is appended to opencode's own agent prompt,
   which the model also sees.
 - `policy.toml` is enforced by the plugin pack in opencode's

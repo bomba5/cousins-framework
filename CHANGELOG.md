@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.7.1 - 2026-11-08
+
+### Fixed
+
+- **Sonnet cousins call the shell by its right name.** A Sonnet model
+  sometimes called the shell tool `bash`, lowercase, or by a placeholder
+  name, right after a thinking block, and the CLI refused the call: 41
+  of the tool faults log's `unknown_tool` rows in three days, none on
+  Opus. The contract on the SDK lane and in the tmux pane now says
+  shell commands run through `Bash`, with its capital B, and a
+  `SubagentStart` hook opens every subagent with the same line, since a
+  subagent never sees the contract. The opencode lane, whose shell tool
+  is lowercase, is unchanged. The contract's bytes move once, so each
+  `sdk` cousin starts one cold prompt cache at its next start.
+
 ## 4.7.0 - 2026-11-05
 
 ### Added

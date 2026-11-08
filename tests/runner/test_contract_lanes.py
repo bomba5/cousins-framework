@@ -30,11 +30,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # `check` there, minus 4.0.0's `import` (the operator's act now), plus
 # 4.2.0's skills-hint paragraph in "How messages reach you" (the SDK lane's
 # only, so opencode's bytes did not move with it), plus 4.4.2's Memory
-# wording (the `memory` tool's `remember` command, never a bare one): the bytes the
+# wording (the `memory` tool's `remember` command, never a bare one), plus
+# 4.7.1's SHELL_TOOL paragraph before "Generations" (the SDK lane's and the
+# tmux pane's, so opencode's bytes did not move with it): the bytes the
 # SDK lane's renderer produces. A registry or static-text edit changes it on
 # purpose: update the hash in the same commit, knowing every SDK and
 # opencode cousin's prompt cache resets (the edit moves both lanes' bytes).
-SDK_CONTRACT_SHA256 = "4173f84fefa70dbb27f27dea19ef103532ac72c9a920a7f56de822f65964e934"
+SDK_CONTRACT_SHA256 = "579158d2f4522b80f72cc1009caa1aba5543851d71d4f0dfb5c257222a24e78a"
 
 
 def as_opencode(sdk_text):
@@ -42,9 +44,11 @@ def as_opencode(sdk_text):
     the tool lines, the three names in "Tools, not the terminal CLIs", and
     which runner that section says the cousin is on. The OTHER_SERVERS
     paragraph is the SDK lane's only (opencode loads exactly one server),
-    and so is SKILL_HINT (opencode loads no skills)."""
+    and so is SKILL_HINT (opencode loads no skills), and SHELL_TOOL
+    (opencode's shell tool is lowercase)."""
     sdk_text = sdk_text.replace("\n\n" + contract.OTHER_SERVERS.strip(), "")
     sdk_text = sdk_text.replace("\n\n" + contract.SKILL_HINT, "")
+    sdk_text = sdk_text.replace("\n\n" + contract.SHELL_TOOL, "")
     return (sdk_text.replace("- `mcp__cousin__", "- `cousin_")
             .replace("(`mcp__cousin__", "(`cousin_")
             .replace("You run on the SDK runner,", "You run on the opencode runner,"))
@@ -76,7 +80,7 @@ class TestContractLanes(HermeticCase):
     def test_the_opencode_contract_names_cousin_tools(self):
         reg = _registry(TRACKER_TOML)
         text = contract.render(reg, "1.12.0", tool_name=opencode_name, runner=OPENCODE_RUNNER,
-                               other_servers=None, skill_hint=False)
+                               other_servers=None, skill_hint=False, shell_tool=False)
         for d in tools.tool_definitions(reg):
             self.assertIn("- `cousin_%s`: " % d["name"], text, d["name"])
         self.assertNotIn("mcp__", text)
@@ -120,6 +124,24 @@ class TestContractLanes(HermeticCase):
             reg, "1.12.0", tool_name=opencode_name, runner=OPENCODE_RUNNER, other_servers=None,
             call_form=True, skill_hint=False))
 
+    def test_the_shell_tool_paragraph_closes_the_tools_section(self):
+        """A Sonnet model called the shell by a lowercase or placeholder
+        name, and the CLI refused it: the SDK lane's contract names `Bash`
+        as the last paragraph before "Generations". Opencode's own shell is
+        lowercase, so its contract leaves the paragraph out."""
+        reg = _registry()
+        sdk = contract.render(reg, "1.12.0")
+        self.assertIn("\n\n" + contract.SHELL_TOOL + "\n\n## Generations", sdk)
+        self.assertEqual(sdk.count(contract.SHELL_TOOL), 1)
+        self.assertIn("run through the `Bash` tool", contract.SHELL_TOOL)
+        self.assertNotIn("`bash`", contract.SHELL_TOOL)
+        self.assertEqual(contract.render(reg, "1.12.0", shell_tool=False),
+                         sdk.replace("\n\n" + contract.SHELL_TOOL, ""))
+        self.assertNotIn(contract.SHELL_TOOL, contract.render(
+            reg, "1.12.0", tool_name=opencode_name, runner=OPENCODE_RUNNER, other_servers=None,
+            call_form=True, skill_hint=False, shell_tool=False))
+        contract.SHELL_TOOL.encode("ascii")
+
     def test_every_tool_line_uses_the_naming_function(self):
         reg = _registry(TRACKER_TOML)
         seen = []
@@ -156,7 +178,7 @@ class TestPromptLanes(PromptCase):
     def test_the_opencode_prompt_names_cousin_tools_and_differs_only_there(self):
         sdk = self.compose()
         oc = self.compose(tool_name=opencode_name, runner=OPENCODE_RUNNER, other_servers=None,
-                          skill_hint=False)
+                          skill_hint=False, shell_tool=False)
         self.assertIn("- `cousin_reply`: ", oc)
         self.assertIn("- `cousin_handoff`: ", oc)
         self.assertNotIn("mcp__cousin__", oc)
@@ -168,6 +190,18 @@ class TestPromptLanes(PromptCase):
         block = prompt.compose_context_block(self.home, root=self.root, registry=self.registry,
                                              version="1.12.0")
         self.assertNotIn("[fw-skills]", block)
+
+    def test_the_shell_tool_line_is_in_the_sdk_prompt_and_the_pane_block(self):
+        """The SDK lane and the tmux pane both run Claude Code, whose shell
+        tool is `Bash`; the opencode runner composes without it."""
+        from cousin_lib.runner import prompt
+        self.assertIn(contract.SHELL_TOOL, self.compose())
+        block = prompt.compose_context_block(self.home, root=self.root, registry=self.registry,
+                                             version="1.12.0")
+        self.assertIn(contract.SHELL_TOOL, block)
+        self.assertNotIn(contract.SHELL_TOOL, self.compose(
+            tool_name=opencode_name, runner=OPENCODE_RUNNER, other_servers=None,
+            call_form=True, skill_hint=False, shell_tool=False))
 
     def test_the_opencode_prompt_carries_the_call_form(self):
         oc = self.compose(tool_name=opencode_name, runner=OPENCODE_RUNNER, other_servers=None,

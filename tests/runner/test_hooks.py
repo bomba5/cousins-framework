@@ -612,6 +612,20 @@ class TestNeverRaises(HooksCase):
         self.assertEqual(len(errs), 1)
 
 
+class TestSubagentStart(HooksCase):
+    def test_every_subagent_opens_with_the_shell_tool_s_name(self):
+        """A subagent has its own system prompt, never the contract, and
+        Sonnet subagents called the shell by a lowercase name: the hook
+        gives each one the contract's SHELL_TOOL line, whatever its type."""
+        from cousin_lib.runner import contract
+        for agent_type in ("general-purpose", "Explore"):
+            out = _run(self.cbs["SubagentStart"](
+                self._base("SubagentStart", agent_id="a1", agent_type=agent_type), None, {}))
+            self.assertEqual(out, {"hookSpecificOutput": {
+                "hookEventName": "SubagentStart", "additionalContext": contract.SHELL_TOOL}})
+        self.assertEqual([e for e in self.stream.tail() if e["kind"] == "hook"], [])
+
+
 class TestBuildHooks(HooksCase):
     def test_build_hooks_wraps_every_event_in_matchers(self):
         try:
@@ -621,7 +635,8 @@ class TestBuildHooks(HooksCase):
         table = hooks.build_hooks(self.home, slug="wren", root=self.root, machine=self.machine,
                                   stream=self.stream)
         for ev in ("PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStop",
-                   "UserPromptSubmit", "Stop", "PreCompact", "Notification", "PermissionRequest"):
+                   "SubagentStart", "UserPromptSubmit", "Stop", "PreCompact", "Notification",
+                   "PermissionRequest"):
             self.assertIn(ev, table); self.assertTrue(table[ev][0].hooks)
         self.assertEqual(table["PreToolUse"][0].matcher, "Agent|Task|Bash")
         self.assertIsNone(table["PostToolUse"][0].matcher)

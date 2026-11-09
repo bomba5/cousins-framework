@@ -268,8 +268,9 @@ class TestRuntimeModelAndEffort(unittest.TestCase):
         # the CLI silently served plain fable for it.
         from cousin_lib.config import DEFAULT_MODELS
         # claude-opus-5-5 probed live on running cousins; claude-sonnet-5-5
-        # and claude-haiku-5-5 by the live matrix on CLI 2.1.299.
-        for model in ("claude-opus-5-5", "claude-fable-5-1", "claude-opus-5",
+        # and claude-haiku-5-5 by the live matrix on CLI 2.1.299;
+        # claude-fable-5-2 by the live matrix on the SDK 0.2.180 bundled CLI.
+        for model in ("claude-opus-5-5", "claude-fable-5-2", "claude-fable-5-1", "claude-opus-5",
                       "claude-opus-5[1m]", "claude-sonnet-5-5", "claude-sonnet-5",
                       "claude-sonnet-5[1m]", "claude-haiku-5-5",
                       "claude-haiku-4-5-20251001"):

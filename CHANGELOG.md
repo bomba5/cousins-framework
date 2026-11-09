@@ -3,6 +3,24 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.8.0 - 2026-11-09
+
+### Added
+
+- **Claude Fable 5.2 in the model catalogue** (`claude-fable-5-2`), so
+  the spawn dialog and the console's model picker offer it. Fable 5.1
+  stays listed, since Anthropic still serves it. There is no `[1m]`
+  variant, as with 5.1: the 1M context window is Fable's default.
+
+### Changed
+
+- **The harness moves to the Agent SDK 0.2.180, which bundles Claude Code
+  2.1.321.** The live matrix passes on the new pair, every catalogue
+  model included, and a direct turn on `claude-fable-5-2` reports that
+  model at init and on the reply. The image's lock was re-resolved with
+  it (starlette 1.10.0, sse-starlette 3.7.0, httpx2 2.16.0 and a few
+  patch releases ride along).
+
 ## 4.7.1 - 2026-11-08
 
 ### Fixed

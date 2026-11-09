@@ -30,9 +30,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   name, right after a thinking block, and the CLI refused the call: 41
   of the tool faults log's `unknown_tool` rows in three days, none on
   Opus. The contract on the SDK lane and in the tmux pane now says
-  shell commands run through `Bash`, with its capital B, and a
-  `SubagentStart` hook opens every subagent with the same line, since a
-  subagent never sees the contract. The opencode lane, whose shell tool
+  shell commands run through `Bash`, with its capital B, and on the SDK
+  lane a `SubagentStart` hook opens every subagent with the same line,
+  since a subagent never sees the contract. The opencode lane, whose shell tool
   is lowercase, is unchanged. The contract's bytes move once, so each
   `sdk` cousin starts one cold prompt cache at its next start.
 

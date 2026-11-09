@@ -276,5 +276,6 @@ class TestRuntimeModelAndEffort(unittest.TestCase):
                       "claude-haiku-4-5-20251001"):
             self.assertIn(model, DEFAULT_MODELS)
         self.assertNotIn("claude-fable-5-1[1m]", DEFAULT_MODELS)
+        self.assertNotIn("claude-fable-5-2[1m]", DEFAULT_MODELS)
         self.assertEqual(DEFAULT_MODELS[0], "claude-opus-5-5")
         self.assertEqual(len(set(DEFAULT_MODELS)), len(DEFAULT_MODELS))

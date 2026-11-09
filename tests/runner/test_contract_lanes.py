@@ -35,7 +35,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # tmux pane's, so opencode's bytes did not move with it): the bytes the
 # SDK lane's renderer produces. A registry or static-text edit changes it on
 # purpose: update the hash in the same commit, knowing every SDK and
-# opencode cousin's prompt cache resets (the edit moves both lanes' bytes).
+# opencode cousin's prompt cache resets when the edit is in text both lanes
+# render; a lane-only paragraph, like SHELL_TOOL, moves only its lane's.
 SDK_CONTRACT_SHA256 = "579158d2f4522b80f72cc1009caa1aba5543851d71d4f0dfb5c257222a24e78a"
 
 

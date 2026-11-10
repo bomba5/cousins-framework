@@ -11,6 +11,7 @@ A hook never raises into the SDK: the failure becomes a `hook` event.
 |                                 | its updatedInput output or {}             |
 | PostToolUse, PostToolUseFailure | recorder (job close, activity line)       |
 | SubagentStop                    | recorder (background agent close)         |
+| SubagentStart                   | the `Bash` tool's name -> additionalContext |
 | UserPromptSubmit                | recall -> additionalContext, `recall`     |
 | Stop                            | session checkpoint, `checkpoint`; the     |
 |                                 | reply gate (`gate` event, may block once) |
@@ -42,6 +43,7 @@ import os
 import threading
 
 from cousin_lib import perimeter, recording, skills
+from cousin_lib.runner import contract
 from cousin_lib.runner.envelope import CONTEXT_MARK
 
 RECORD_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStop")
@@ -553,6 +555,12 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
         replied.clear()
         return {}
 
+    async def on_subagent_start(payload):
+        # A subagent gets its own system prompt, not the contract: the
+        # contract's line on the shell tool's name opens its context here.
+        return {"hookSpecificOutput": {"hookEventName": "SubagentStart",
+                                       "additionalContext": contract.SHELL_TOOL}}
+
     async def on_precompact(payload):
         # this session's own stream only: a side session's checkpoint must
         # not carry the primary's operator rows, nor the reverse
@@ -601,6 +609,7 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     table["UserPromptSubmit"] = guarded("UserPromptSubmit", on_prompt)
     table["Stop"] = guarded("Stop", on_stop)
     table["PreCompact"] = guarded("PreCompact", on_precompact)
+    table["SubagentStart"] = guarded("SubagentStart", on_subagent_start)
     table["Notification"] = guarded("Notification", waiting)
     table["PermissionRequest"] = guarded("PermissionRequest", waiting)
     if policy is not None:

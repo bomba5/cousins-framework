@@ -116,7 +116,7 @@ def authored_identity(home, *, root):
 
 def compose_system_prompt(home, *, root, registry, version=None, tool_name=None, runner=None,
                           other_servers=contract.OTHER_SERVERS, call_form=False,
-                          skill_hint=True):
+                          skill_hint=True, shell_tool=True):
     """law + contract + identity + operator rules + standing instructions.
     Never truncated.
     `tool_name` names the tools for the lane (contract.render); None is
@@ -125,11 +125,14 @@ def compose_system_prompt(home, *, root, registry, version=None, tool_name=None,
     adds the contract's paragraph on calling a tool rather than writing
     it out (contract.CALL_FORM); the opencode lane passes True.
     `skill_hint` keeps the contract's paragraph on the per-turn skills
-    hint (contract.SKILL_HINT); a lane without the hint passes False."""
+    hint (contract.SKILL_HINT); a lane without the hint passes False.
+    `shell_tool` keeps the contract's paragraph naming the `Bash` tool
+    (contract.SHELL_TOOL); the opencode lane, whose shell is lowercase,
+    passes False."""
     identity, _degraded = authored_identity(home, root=root)
     return _compose(root, registry, version, identity=identity.strip(), home=home,
                     tool_name=tool_name, runner=runner, other_servers=other_servers,
-                    call_form=call_form, skill_hint=skill_hint)
+                    call_form=call_form, skill_hint=skill_hint, shell_tool=shell_tool)
 
 
 def compose_context_block(home, *, root, registry, version=None):
@@ -166,7 +169,8 @@ def standing_instructions(home):
 
 
 def _compose(root, registry, version, *, identity, home=None, tool_name=None, runner=None,
-             other_servers=contract.OTHER_SERVERS, call_form=False, skill_hint=True):
+             other_servers=contract.OTHER_SERVERS, call_form=False, skill_hint=True,
+             shell_tool=True):
     if version is None:
         from cousin_lib.version import version as _v
         version = _v()
@@ -178,7 +182,8 @@ def _compose(root, registry, version, *, identity, home=None, tool_name=None, ru
         sections.append("# Framework law\n\n" + law)
     sections.append(contract.render(registry, version, tool_name=tool_name,
                                     runner=runner, other_servers=other_servers,
-                                    call_form=call_form, skill_hint=skill_hint).strip())
+                                    call_form=call_form, skill_hint=skill_hint,
+                                    shell_tool=shell_tool).strip())
     if identity is not None:
         sections.append(identity.strip())
     if rules:

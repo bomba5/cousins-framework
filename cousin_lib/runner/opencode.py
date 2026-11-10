@@ -1079,6 +1079,7 @@ class OpencodeRunner:
                                             runner="the opencode runner",
                                             call_form=True,
                                             skill_hint=False,
+                                            shell_tool=False,
                                             other_servers=None)
 
     def _boot(self):

@@ -131,6 +131,18 @@ match it: use the one that fits, through the `Skill` tool, instead of
 working from memory."""
 
 
+# The shell tool's name, for a lane whose shell is Claude Code's `Bash`
+# (render's `shell_tool`): one paragraph closing "Tools, not the terminal
+# CLIs". A Sonnet model called the shell by a lowercase or placeholder
+# name right after a thinking block, and the CLI refused the call
+# (tool faults, unknown_tool). The SDK lane and the tmux pane pass True;
+# opencode's own shell tool is lowercase, so it passes False and keeps its
+# bytes. The same text opens every subagent (hooks.py, SubagentStart).
+SHELL_TOOL = """Shell commands run through the `Bash` tool. Tool names are
+case-sensitive: write `Bash` exactly, with its capital B, never a
+lowercase or placeholder name."""
+
+
 # One fixed sentence, never the servers themselves: a home's .mcp.json
 # changes with the home, and this text must not (byte-stable prompt).
 OTHER_SERVERS = """Other MCP servers, from your home's .mcp.json, may be present beside
@@ -228,7 +240,7 @@ PANE_RUNNER = "an interactive Claude Code pane"
 
 
 def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHER_SERVERS,
-           call_form=False, skill_hint=True):
+           call_form=False, skill_hint=True, shell_tool=True):
     """The contract for this registry at this release. Same inputs, same bytes.
     Its prose names only the tools tool_definitions(registry) serves.
 
@@ -250,6 +262,10 @@ def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHE
     `skill_hint` adds SKILL_HINT after the envelope's paragraph: the
     lane's turns carry the skills hint. True is the SDK lane's; a lane
     without the hint passes False.
+
+    `shell_tool` adds SHELL_TOOL before "Generations": the lane's shell is
+    Claude Code's `Bash`. True for the SDK lane and the tmux pane; the
+    opencode lane, whose shell tool is lowercase, passes False.
     """
     from cousin_lib.runner.tools import tool_definitions
     tool_name = tool_name or sdk_tool_name
@@ -266,6 +282,11 @@ def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHE
         paragraphs = static.split("\n\n")
         at = next(i for i, p in enumerate(paragraphs) if p.startswith("## How you answer"))
         paragraphs.insert(at + 2, CALL_FORM.format(reply=named["reply"]))
+        static = "\n\n".join(paragraphs)
+    if shell_tool:
+        paragraphs = static.split("\n\n")
+        at = next(i for i, p in enumerate(paragraphs) if p.startswith("## Generations"))
+        paragraphs.insert(at, SHELL_TOOL)
         static = "\n\n".join(paragraphs)
     blocks = [_tool_block(d, registry, tool_name) for d in definitions]
     text = "\n\n".join([HEADER.format(version=major_minor(version)), static,

@@ -179,7 +179,7 @@ check skips and prints why.
 builds the image from the checkout, runs the runner contract suite
 (`tests/runner/contract`) inside it, runs `tests.test_docker_files` on the
 host against that image (`COUSIN_DOCKER=1`), and fails if the compressed
-image is over its size budget (`docker/image-size.sh`, 240 MB).
+image is over its size budget (`docker/image-size.sh`, 300 MB).
 
 `.github/workflows/quickstart.yml` runs the README's Docker quick start as
 written. `.github/scripts/quickstart.py` extracts the one code block under

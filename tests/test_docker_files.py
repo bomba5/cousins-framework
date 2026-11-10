@@ -60,12 +60,13 @@ _OPENCODE_TGZ = ("https://registry.npmjs.org/opencode-linux-x64/-/"
 _OPENCODE_TGZ_SHA256 = "6d89da252a8b030d923e728396dc34465cf6095101b78222b0ee337b68140dea"
 _OPENCODE_BIN_SHA256 = "f9dab32248695e9ebd56b16a1921798fd85112cf5a69c7dfd0cabc1e17be4a11"
 _OPENCODE_BIN = "/opt/opencode/bin/opencode"
-# The default image carries the opencode binary: 240 MB is the old 180 MB
-# plus the pinned tarball (60.2 MB), rounded; measured
-# 224.8 MB. The slim target, the image without it, keeps the old 180 MB
-# (measured 164.2 MB).
-_BUDGET = 240000000
-_SLIM_BUDGET = 180000000
+# The default image carries the opencode binary: the old 180 MB plus the
+# pinned tarball (60.2 MB), rounded, was 240 MB. The Agent SDK 0.2.180 wheel
+# grew from 113 to 152 MB (its bundled Claude CLI), so both budgets gained
+# 60 MB: 300 MB, measured 280.0 MB; the slim target, the image without
+# opencode, 240 MB, measured 218.4 MB.
+_BUDGET = 300000000
+_SLIM_BUDGET = 240000000
 # Executables of a JS runtime or its package manager, as words: the
 # registry's host name (registry.npmjs.org) is not one.
 _JS_TOOLS = re.compile(r"\b(node|nodejs|npm|npx|bun|bunx|yarn|pnpm)\b")
@@ -1349,10 +1350,10 @@ class TestImageSizeScript(HermeticCase):
         self.assertRegex(r.stdout, r"^compressed: 0\.3 MB \(budget 0\.2 MB\)\n$")
         self.assertIn("over budget", r.stderr)
 
-    def test_the_default_budget_is_240_mb(self):
+    def test_the_default_budget_is_300_mb(self):
         r = self.size("cousins-framework:ci")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("(budget 240.0 MB)", r.stdout)
+        self.assertIn("(budget 300.0 MB)", r.stdout)
 
     def test_usage_errors_exit_2(self):
         for args in ([], ["a", "1", "extra"], ["cousins-framework:ci", "180MB"],

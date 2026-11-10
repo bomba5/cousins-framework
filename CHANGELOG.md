@@ -20,6 +20,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   model at init and on the reply. The image's lock was re-resolved with
   it (starlette 1.10.0, sse-starlette 3.7.0, httpx2 2.16.0 and a few
   patch releases ride along).
+- **The image budgets grow by 60 MB, to 300 MB and 240 MB slim.** The
+  0.2.180 wheel is 152 MB against 0.2.166's 113 MB, all of it the
+  bundled Claude CLI, which put the compressed image at 280.0 MB and the
+  slim one at 218.4 MB, over the old 240 MB and 180 MB.
 
 ## 4.7.1 - 2026-11-08
 

@@ -2,10 +2,11 @@
 # docker/image-size.sh <image> [budget_bytes]
 #
 # The image's compressed size, measured as `docker save | gzip -6 | wc -c`
-# over the whole image, against a budget in bytes (default 240000000, 240 MB
+# over the whole image, against a budget in bytes (default 300000000, 300 MB
 # decimal: the 180 MB the image was first sized at plus the opencode binary
-# the default image carries, a 60.2 MB tarball; the slim image keeps
-# 180000000). Prints
+# the default image carries, a 60.2 MB tarball, plus 60 MB since the Agent
+# SDK 0.2.180 wheel, whose bundled Claude CLI grew from 113 to 152 MB; the
+# slim image, without opencode, has 240000000). Prints
 # one line,
 #   compressed: 224.8 MB (budget 240.0 MB)
 # and exits 0 within the budget, 1 over it, 2 on a usage error or an image
@@ -19,7 +20,7 @@ usage() {
 
 [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage
 image=$1
-budget=${2-240000000}
+budget=${2-300000000}
 case $budget in
     '' | *[!0-9]*) usage ;;
 esac

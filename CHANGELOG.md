@@ -3,6 +3,35 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.8.1 - 2026-11-11
+
+### Fixed
+
+- **A Claude account's model list follows a harness upgrade.** The
+  cached list (`data/models/<account>.json`) was fetched again only once
+  it was a day old, so after an upgrade the agent panel could offer the
+  old agent CLI's list for up to a day, without a model the new CLI
+  runs. The cache now records the CLI version whose list it is, and a
+  list from another CLI is fetched again the next time a view asks.
+- **The agent panel re-reads the model list when a background fetch
+  ends.** Opening the panel starts the fetch of a stale list, but the
+  panel kept showing the list from before it. Every fetch the console
+  starts on its own is now announced as `accounts-change` `models`, and
+  the panel reloads its suggestions, keeping a draft.
+- **The inspector's model edit waits for the model check.** Saving a new
+  model on a runner cousin answers 202 while one model turn checks it.
+  The fleet inspector read that answer as a finished save without a
+  value: the field went back to the old model, and a check that failed
+  never showed why. It now waits for the check ("checking..."), then
+  shows the new model with the restart hint, or the check's own error.
+- **A failed console operation leaves its reason in the console log.**
+  An operation lives only in the console's memory, and the next one on
+  the cousin replaces it. One that ended with a refusal or an operation
+  error (not a crash, which was already logged) left no trace once it
+  was gone.
+- The `docker/image-size.sh` example line shows the 4.8.0 budget
+  (300.0 MB) instead of the old 240.0 MB.
+
 ## 4.8.0 - 2026-11-09
 
 ### Added

@@ -18,8 +18,9 @@ lists never hold one.
 The lists are cached in data/models/<account>.json, and a read never
 fetches. A fetch runs on the operator's word (the console's refresh,
 `cousin-account models --refresh`) or when the console finds a cache older
-than a day; always in a child process whose environment has no Claude
-variable. A failed fetch keeps the last lists and says why.
+than a day, or a Claude account's list that another agent CLI gave (an
+upgrade brings new models); always in a child process whose environment
+has no Claude variable. A failed fetch keeps the last lists and says why.
 """
 import argparse
 import json
@@ -103,16 +104,30 @@ def summary(root, name):
             "error": data.get("error")}
 
 
+def installed_cli():
+    """The version of the agent CLI the SDK runs on this install
+    (harness_lock.sdk_cli, read without running it); None without the SDK.
+    A Claude account's list is that CLI's own, so the cache records it."""
+    from cousin_lib import harness_lock
+    return harness_lock.sdk_cli().get("cli")
+
+
 def stale(root, name, now=None):
     """True when the last try is older than MAX_AGE, or than RETRY_AGE when
-    that try fetched nothing (its error stands and no list came with it)."""
+    that try fetched nothing (its error stands and no list came with it);
+    and when a Claude account's list came from another agent CLI than the
+    one installed now: an upgrade can bring models the old CLI never
+    listed, and the list would lag them for up to a day."""
     data = read(root, name) or {}
     checked = data.get("checked_at")
     now = time.time() if now is None else now
     if not isinstance(checked, (int, float)):
         return True
     failed = bool(data.get("error")) and data.get("fetched_at") != checked
-    return now - checked > (RETRY_AGE if failed else MAX_AGE)
+    if now - checked > (RETRY_AGE if failed else MAX_AGE):
+        return True
+    return (not failed and data.get("kind") in CLAUDE_KINDS
+            and data.get("cli") != installed_cli())
 
 
 def mark_stale(root, name, now=None):
@@ -280,9 +295,13 @@ def update(root, account, *, now=None, **sources):
     try:
         lanes, partial = fetch(root, account, **sources)
         data.update(lanes=lanes, fetched_at=now, error=partial)
+        if account.kind in CLAUDE_KINDS:
+            data["cli"] = installed_cli()           # the CLI whose list this is
     except (CatalogError, accounts.AccountsError) as err:
         data.update(lanes=old.get("lanes") or {}, fetched_at=old.get("fetched_at"),
                     error=str(err))
+        if "cli" in old:
+            data["cli"] = old["cli"]
     # a key saved while this fetch ran: what it fetched may be the old key's
     since = (read(root, account.name) or {}).get("stale_since")
     if isinstance(since, (int, float)) and since >= begun:
@@ -350,16 +369,28 @@ def end(running, name):
             del running[name]
 
 
-def refresh_stale(root, names, running, *, now=None, start=None):
+def _refresh_then(root, name, on_done, run_refresh=None):
+    """refresh(), then on_done(name) however it ended: a view that showed
+    the stale list reads the new one."""
+    try:
+        (run_refresh or refresh)(root, name)
+    finally:
+        on_done(name)
+
+
+def refresh_stale(root, names, running, *, now=None, start=None, on_done=None):
     """Start a background refresh (a thread running refresh()) for each of
     `names` whose cache is stale and that has no fetch in flight in
-    `running` (begin's registry); the names started."""
+    `running` (begin's registry); the names started. `on_done(name)`, when
+    given, runs on that thread once its fetch has ended."""
     started = []
     with _REFRESH_LOCK:
         for name in dict.fromkeys(names):            # each once, in order
             if _busy(running, name) or not stale(root, name, now):
                 continue
-            thread = threading.Thread(target=refresh, args=(root, name), daemon=True,
+            target, args = (refresh, (root, name)) if on_done is None \
+                else (_refresh_then, (root, name, on_done))
+            thread = threading.Thread(target=target, args=args, daemon=True,
                                       name="models-%s" % name)
             running[name] = thread
             (start or threading.Thread.start)(thread)

@@ -256,6 +256,19 @@ const IDENTITY_FIELDS = {
     choices: (o) => o?.efforts
   }
 };
+function identitySaveOutcome(status, d, field) {
+  d = d || {};
+  if (status === 202)
+    return d.op && d.op.id ? { wait: d.op.id } : { error: d.error || "HTTP 202 without an operation" };
+  if (status < 200 || status > 299 || !d.ok) return { error: d.error || `HTTP ${status}` };
+  return { saved: true, value: d[field], restart: !!d.restart_required };
+}
+function identityOpOutcome(op, value) {
+  const r = op && op.result || {};
+  if (!op || op.status !== "done" || r.ok === false)
+    return { error: op && op.error || r.error || "the change failed" };
+  return { saved: true, value, restart: !!r.restart_required };
+}
 function IdentityField({ cousin, field, options }) {
   const spec = IDENTITY_FIELDS[field];
   const current = cousin[spec.row];
@@ -265,6 +278,8 @@ function IdentityField({ cousin, field, options }) {
   const [err, setErr] = React.useState(null);
   const [hint, setHint] = React.useState(null);
   const [saved, setSaved] = React.useState(null);
+  const [waitOp, setWaitOp] = React.useState(null);
+  const [op] = useLongOp(waitOp ? cousin.slug : null);
   React.useEffect(() => {
     setSaved(null);
   }, [current]);
@@ -273,8 +288,32 @@ function IdentityField({ cousin, field, options }) {
     setErr(null);
     setHint(null);
     setSaved(null);
+    setWaitOp(null);
+    setBusy(false);
   }, [cousin.slug]);
   const shown = saved != null ? saved : current;
+  const finish = React.useCallback((out) => {
+    setWaitOp(null);
+    setBusy(false);
+    if (out.error) {
+      setErr(out.error);
+      return;
+    }
+    setSaved(out.value);
+    setEditing(false);
+    setHint(out.restart ? "restart to apply" : null);
+  }, []);
+  React.useEffect(() => {
+    if (waitOp && agentOpSettled(op, waitOp.id)) finish(identityOpOutcome(op, waitOp.value));
+  }, [op, waitOp, finish]);
+  React.useEffect(() => {
+    if (!waitOp) return;
+    const t = setInterval(async () => {
+      const d = await apiGet(`/api/cousins/${cousin.slug}/op`);
+      if (d && agentOpSettled(d.op, waitOp.id)) finish(identityOpOutcome(d.op, waitOp.value));
+    }, 3e3);
+    return () => clearInterval(t);
+  }, [waitOp, cousin.slug, finish]);
   const choices = spec.choices && spec.choices(options) || [];
   const bounds = options?.heartbeat_bounds || [60, 2592e3];
   const maxChars = options?.operator_max_chars || 64;
@@ -307,17 +346,18 @@ function IdentityField({ cousin, field, options }) {
     const value = spec.kind === "seconds" ? Number(draft.trim()) : draft;
     setBusy(true);
     setErr(null);
+    let out;
     try {
       const { r, d } = await apiSend("POST", spec.url(cousin.slug), { [field]: value });
-      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      setSaved(d[field]);
-      setEditing(false);
-      setHint(d.restart_required ? "restart to apply" : null);
+      out = identitySaveOutcome(r.status, d, field);
     } catch (e) {
-      setErr(String(e.message || e));
-    } finally {
-      setBusy(false);
+      out = { error: String(e.message || e) };
     }
+    if (out.wait) {
+      setWaitOp({ id: out.wait, value });
+      return;
+    }
+    finish(out);
   };
   const small = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
   if (!editing) {
@@ -367,7 +407,7 @@ function IdentityField({ cousin, field, options }) {
       inputMode: spec.kind === "seconds" ? "numeric" : void 0,
       maxLength: spec.kind === "text" ? maxChars : void 0
     }
-  ), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: cancel, disabled: busy, style: small }, "cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: save, disabled: busy || !!problem, style: small }, busy ? "saving..." : "save")), spec.kind === "seconds" && !problem && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--fg-3)" } }, fmtBeat(draft.trim())), problem && draft !== "" && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--fg-3)" } }, problem), err && /* @__PURE__ */ React.createElement("div", { style: {
+  ), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: cancel, disabled: busy, style: small }, "cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: save, disabled: busy || !!problem, style: small }, busy ? waitOp ? "checking..." : "saving..." : "save")), waitOp && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--fg-3)" } }, "checking ", waitOp.value, " with one model turn before it is written"), spec.kind === "seconds" && !problem && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--fg-3)" } }, fmtBeat(draft.trim())), problem && draft !== "" && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 10, color: "var(--fg-3)" } }, problem), err && /* @__PURE__ */ React.createElement("div", { style: {
     padding: "5px 9px",
     fontSize: 11,
     fontFamily: "var(--mono)",

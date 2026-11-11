@@ -124,6 +124,15 @@ class Op:
                                   "phase": phase, **extra})
 
 
+def _log_failed(entry, error):
+    """A failed op's reason on the console's stderr as well: the op lives
+    only in memory, and the next op on the cousin replaces it. The words
+    are the op's own, already served and broadcast, so they hold no
+    secret."""
+    print("cousin-console: op %s %s on %s failed: %s" % (
+        entry["kind"], entry["id"], entry["slug"], error), file=sys.stderr, flush=True)
+
+
 def start(server, slug, kind, work, *, params=None):
     """Run `work(op)` on a thread as this cousin's operation; the op's
     public state. Busy when anything already runs on the cousin."""
@@ -144,8 +153,10 @@ def start(server, slug, kind, work, *, params=None):
             error = None
             if isinstance(result, dict) and result.get("ok") is False:
                 error = str(result.get("error") or "the operation failed")
+                _log_failed(entry, error)
         except OpError as err:
             result, error = None, str(err)
+            _log_failed(entry, error)
         except BaseException as err:  # noqa: BLE001 - SystemExit too: the op must end
             result, error = None, "failed: %s, see the console log" % type(err).__name__
             print("cousin-console: op %s %s on %s failed:\n%s" % (

@@ -256,12 +256,15 @@ def _key_saved(req, name):
 
 def kick_model_lists(server, names):
     """Start a background fetch of each account's model list in `names`
-    that is older than a day (model_catalog.refresh_stale), on a console
-    that refreshes on its own (console_main says so; a test server does not)."""
+    that is stale (model_catalog.refresh_stale: older than a day, or another
+    agent CLI's), on a console that refreshes on its own (console_main says
+    so; a test server does not). Each fetch that ends is announced as an
+    accounts-change "models", so a view showing the old list reads the new."""
     if not server.state.get("models.autorefresh"):
         return []
-    return model_catalog.refresh_stale(server.root, names,
-                                       server.state.setdefault("models.refreshing", {}))
+    return model_catalog.refresh_stale(
+        server.root, names, server.state.setdefault("models.refreshing", {}),
+        on_done=lambda name: server.emit("accounts-change", {"name": name, "what": "models"}))
 
 
 def _brief_status(st):

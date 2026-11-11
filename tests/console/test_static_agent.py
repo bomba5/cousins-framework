@@ -94,6 +94,16 @@ class AgentJsx(unittest.TestCase):
         self.assertNotRegex(self.src, r"#[0-9a-fA-F]{3,8}\b|rgba?\(|oklch\(")
         self.assertNotIn("—", self.src)
 
+    def test_a_model_list_fetched_in_the_background_reloads_the_panel(self):
+        """Opening the panel can start a fetch of a stale model list; the
+        panel kept offering the old list after the new one arrived."""
+        panel = _component(self.src, "AgentSettingsPanel")
+        self.assertIn('window.addEventListener("fw-accounts-change", on)', panel)
+        self.assertIn('window.removeEventListener("fw-accounts-change", on)', panel)
+        self.assertIn('(e.detail || {}).what === "models"', panel)
+        app = _read("app.jsx")
+        self.assertIn('new CustomEvent("fw-accounts-change", { detail: data })', app)
+
 
 class TheOtherFiles(unittest.TestCase):
     def test_the_inspector_shows_model_and_effort_on_the_tmux_legacy_lane_only(self):

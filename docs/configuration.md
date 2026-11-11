@@ -392,14 +392,18 @@ kept by hand:
 The opencode lane never lists a model whose id names Claude or Anthropic (it
 refuses them). The file is one JSON object, mode 0600: `{"account", "kind",
 "lanes": {"<lane>": [model ids]}, "fetched_at", "checked_at", "error"}`
-(epoch seconds). A read never fetches. A fetch runs in a child process with
-no Claude variable in its environment, as `cousin-runner --check-auth` does:
-on the operator's word (the console's accounts tab, `refresh models`, or
-`cousin-account models <name> --refresh`), or when the console finds a list
-whose last fetch is older than a day, or an hour when that fetch got nothing
-(in the background; one fetch per account at a time, whoever started it), and
-when a key is saved for the account. A failed fetch keeps the last lists and
-records why in `error`. Only
+(epoch seconds), and for a Claude account `"cli"`, the version of the agent
+CLI whose list it is. A read never fetches. A fetch runs in a child process
+with no Claude variable in its environment, as `cousin-runner --check-auth`
+does: on the operator's word (the console's accounts tab, `refresh models`,
+or `cousin-account models <name> --refresh`), or when the console finds a
+list whose last fetch is older than a day, or an hour when that fetch got
+nothing, or a Claude account's list another agent CLI gave (an upgrade can
+bring models the old CLI never listed) (in the background; one fetch per
+account at a time, whoever started it), and when a key is saved for the
+account. A background fetch that ends is announced (`accounts-change`
+`models`), so a view that showed the old list reads the new one. A failed
+fetch keeps the last lists and records why in `error`. Only
 `host` and the accounts in this file keep one; an `[agent] api_key_file`
 account belongs to one cousin and falls back to the catalogue. A model that
 is not in the list is said, never refused: a list can lag a new model by a

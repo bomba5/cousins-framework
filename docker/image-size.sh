@@ -8,7 +8,7 @@
 # SDK 0.2.180 wheel, whose bundled Claude CLI grew from 113 to 152 MB; the
 # slim image, without opencode, has 240000000). Prints
 # one line,
-#   compressed: 224.8 MB (budget 240.0 MB)
+#   compressed: 280.0 MB (budget 300.0 MB)
 # and exits 0 within the budget, 1 over it, 2 on a usage error or an image
 # that cannot be saved (never read as a small image).
 set -eu

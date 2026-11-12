@@ -191,6 +191,39 @@ class Cache(CatalogCase):
         self.assertEqual((out["fetched_at"], out["checked_at"]), (1000.0, 2000.0))
         self.assertIn("the CLI exited 1", out["error"])
 
+    def test_a_claude_list_another_cli_gave_is_stale(self):
+        """An upgrade brings models the old agent CLI never listed: its
+        list must not stand for up to a day after the switch."""
+        from unittest import mock
+        with mock.patch.object(model_catalog, "installed_cli", return_value="2.1.300"):
+            model_catalog.update(self.root, self.host, now=1000.0,
+                                 cli_models=lambda a, r: CLI_LIST)
+            self.assertEqual(model_catalog.read(self.root, "host")["cli"], "2.1.300")
+            self.assertFalse(model_catalog.stale(self.root, "host", now=1000.0 + 3600))
+        with mock.patch.object(model_catalog, "installed_cli", return_value="2.1.321"):
+            self.assertTrue(model_catalog.stale(self.root, "host", now=1000.0 + 3600))
+
+            # a failed fetch keeps the old CLI's list and says whose it is
+            def broken(account, root):
+                raise RuntimeError("the CLI exited 1")
+            model_catalog.update(self.root, self.host, now=2000.0, cli_models=broken)
+            self.assertEqual(model_catalog.read(self.root, "host")["cli"], "2.1.300")
+            self.assertFalse(model_catalog.stale(self.root, "host", now=2000.0 + 1800))
+
+            # a list cached before the CLI was recorded is fetched again once
+            data = model_catalog.read(self.root, "host")
+            data.pop("cli")
+            data.update(error=None, fetched_at=3000.0, checked_at=3000.0)
+            model_catalog._write(self.root, "host", data)
+            self.assertTrue(model_catalog.stale(self.root, "host", now=3000.0 + 60))
+
+            # an account whose list is not a CLI's is never stale for it
+            model_catalog.update(self.root, self.account("work"), now=4000.0,
+                                 http=http({model_catalog.OPENROUTER_MODELS_URL: OPENROUTER}),
+                                 run=run(OPENCODE_OUT))
+            self.assertNotIn("cli", model_catalog.read(self.root, "work"))
+            self.assertFalse(model_catalog.stale(self.root, "work", now=4000.0 + 60))
+
     def test_a_try_that_got_nothing_is_retried_after_an_hour(self):
         def broken(account, root):
             raise RuntimeError("no network")
@@ -265,6 +298,27 @@ class Refresh(CatalogCase):
                                             start=lambda t: started.append(t.name))
         self.assertEqual(names, ["work"])         # host is fresh; work once
         self.assertEqual(started, ["models-work"])
+
+    def test_a_background_fetch_that_ends_is_announced(self):
+        """A view that showed the stale list reads the new one: the
+        console's kick announces each fetch it started once it ends,
+        a failed one included."""
+        from unittest import mock
+        from cousin_lib.console import routes_accounts
+        events = []
+        server = SimpleNamespace(root=self.root, state={"models.autorefresh": True},
+                                 emit=lambda kind, data: events.append((kind, data)))
+        with mock.patch.object(model_catalog, "refresh",
+                               return_value={"error": "the child failed"}):
+            started = routes_accounts.kick_model_lists(server, ["work"])
+            self.assertEqual(started, ["work"])
+            server.state["models.refreshing"]["work"].join(5)
+        self.assertEqual(events, [("accounts-change", {"name": "work", "what": "models"})])
+
+        done = []
+        model_catalog._refresh_then(self.root, "host", done.append,
+                                    run_refresh=lambda root, name: None)
+        self.assertEqual(done, ["host"])
 
     def test_the_child_entry_refuses_an_account_it_does_not_know(self):
         out = io.StringIO()

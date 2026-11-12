@@ -296,6 +296,14 @@ function AgentSettingsPanel({ cousin }) {
   React.useEffect(() => {
     if (!c.remote && data) load();
   }, [c.lane, c.held, c.effort, c.model, c.account, c.autoStart]);
+  React.useEffect(() => {
+    if (c.remote) return;
+    const on = (e) => {
+      if ((e.detail || {}).what === "models") load();
+    };
+    window.addEventListener("fw-accounts-change", on);
+    return () => window.removeEventListener("fw-accounts-change", on);
+  }, [c.remote, load]);
   const settle = React.useCallback((done) => {
     setWaitOp(null);
     setBusy(false);

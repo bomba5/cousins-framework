@@ -3,8 +3,11 @@ by text: the console compiles its JSX in the browser, so these tests
 read the files the way the spec-coherence tests do and hold the
 surface the operator compared against the source console.
 """
+import json
 import pathlib
 import re
+import shutil
+import subprocess
 import unittest
 
 _STATIC = pathlib.Path(__file__).resolve().parents[2] / "cousin_lib" \
@@ -327,7 +330,9 @@ class InspectorIdentityEditors(unittest.TestCase):
                       "effort"):
             self.assertIn("`/api/cousins/${slug}/%s`" % route, self.cousins)
         self.assertIn("spec.url(cousin.slug)", self.field)
-        self.assertIn("restart_required", self.field)
+        # the answer is read by the pure helpers the field calls
+        self.assertIn("restart_required", _component(self.cousins, "identitySaveOutcome"))
+        self.assertIn("restart_required", _component(self.cousins, "identityOpOutcome"))
         self.assertIn("restart to apply", self.field)
         for key in ("heartbeat_bounds", "operator_max_chars"):
             self.assertIn(key, self.field, key)
@@ -352,6 +357,69 @@ class InspectorIdentityEditors(unittest.TestCase):
         beat = _component(self.cousins, "fmtBeat")
         self.assertIn("fmtDuration(", beat)
         self.assertRegex(beat, r"`\$\{n\}s \(")
+
+    def test_a_model_check_is_waited_for_not_read_as_a_save(self):
+        """A runner cousin's new model answers 202 with the check's op;
+        the field read it as a save with no value and kept the old
+        model, and a failed check never showed its reason."""
+        self.assertIn("identitySaveOutcome(r.status, d, field)", self.field)
+        self.assertNotIn("setSaved(d[field])", self.field)
+        self.assertIn("useLongOp(waitOp ? cousin.slug : null)", self.field)
+        self.assertIn("agentOpSettled(op, waitOp.id)", self.field)
+        self.assertIn("identityOpOutcome(", self.field)
+        # a missed cousin-op event: the field polls the op until it ends
+        self.assertIn("`/api/cousins/${cousin.slug}/op`", self.field)
+        self.assertIn("clearInterval", self.field)
+        self.assertIn("checking...", self.field)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class IdentitySaveOutcomes(unittest.TestCase):
+    """The pure helpers that read a field save's answer and the op it
+    waits for, run in node."""
+
+    def run_node(self, body):
+        cousins = _read("cousins.jsx")
+        src = "".join(_component(cousins, name)
+                      for name in ("identitySaveOutcome", "identityOpOutcome"))
+        out = subprocess.run(["node", "-e", src + body],
+                             capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_a_202_waits_for_its_op(self):
+        got = self.run_node("""
+          console.log(JSON.stringify([
+            identitySaveOutcome(202, {ok: true, op: {id: "abc", status: "running"}}, "model"),
+            identitySaveOutcome(202, {ok: true}, "model"),
+            identitySaveOutcome(200, {ok: true, model: "m2", restart_required: true}, "model"),
+            identitySaveOutcome(200, {ok: true, effort: "low", restart_required: false}, "effort"),
+            identitySaveOutcome(409, {ok: false, error: "a restart is already running"}, "model"),
+            identitySaveOutcome(400, null, "model")]));
+        """)
+        self.assertEqual(got[0], {"wait": "abc"})
+        self.assertIn("error", got[1])
+        self.assertEqual(got[2], {"saved": True, "value": "m2", "restart": True})
+        self.assertEqual(got[3], {"saved": True, "value": "low", "restart": False})
+        self.assertEqual(got[4], {"error": "a restart is already running"})
+        self.assertEqual(got[5], {"error": "HTTP 400"})
+
+    def test_the_op_ends_in_the_value_or_the_checks_own_words(self):
+        got = self.run_node("""
+          const why = "model: model m2 did not pass one turn on account host: validate: no";
+          console.log(JSON.stringify([
+            identityOpOutcome({status: "done", result: {ok: true, changed: ["model"],
+                                                        restart_required: true}}, "m2"),
+            identityOpOutcome({status: "failed", error: why,
+                               result: {ok: false, error: why, errors: {model: "x"}}}, "m2"),
+            identityOpOutcome({status: "failed", error: "failed: OSError, see the console log",
+                               result: null}, "m2"),
+            identityOpOutcome(null, "m2")]));
+        """)
+        self.assertEqual(got[0], {"saved": True, "value": "m2", "restart": True})
+        self.assertIn("did not pass one turn", got[1]["error"])
+        self.assertEqual(got[2], {"error": "failed: OSError, see the console log"})
+        self.assertIn("error", got[3])
 
 
 class TelegramPanel(unittest.TestCase):

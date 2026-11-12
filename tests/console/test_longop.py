@@ -138,6 +138,37 @@ class Robustness(LongOpCase):
         op = self.wait_done()
         self.assertEqual(op["error"], "the account has no login yet")
 
+    def test_a_failed_op_leaves_its_reason_in_the_console_log(self):
+        """The op lives in memory only and the next one replaces it: a
+        model check that failed left no trace once it was gone."""
+        import contextlib
+        import io
+
+        def refused(op):
+            op.stage("validating turn", "running")
+            return {"ok": False, "error": "model: model m2 did not pass one turn",
+                    "errors": {"model": "did not pass"}}
+
+        def said(op):
+            raise longop.OpError("the account has no login yet")
+
+        log = io.StringIO()
+        with contextlib.redirect_stderr(log):
+            first = longop.start(self.server, "wren", "agent-settings", refused)
+            self.assertEqual(self.wait_done()["status"], "failed")
+            second = longop.start(self.server, "wren", "login", said)
+            self.wait_done()
+        self.assertIn("op agent-settings %s on wren failed: model: model m2 did not pass one turn"
+                      % first["id"], log.getvalue())
+        self.assertIn("op login %s on wren failed: the account has no login yet" % second["id"],
+                      log.getvalue())
+
+        quiet = io.StringIO()
+        with contextlib.redirect_stderr(quiet):
+            longop.start(self.server, "wren", "agent-settings", lambda op: {"ok": True})
+            self.assertEqual(self.wait_done()["status"], "done")
+        self.assertEqual(quiet.getvalue(), "")
+
 
 class FleetRefusesDuringAnOp(LongOpCase):
     """Dismiss, start, stop and restart are 409

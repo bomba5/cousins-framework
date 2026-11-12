@@ -856,9 +856,11 @@ token file reads "set (ends WXYZ)" at most.
   the list was fetched from the account's own source (the agent CLI's list
   for a Claude account, OpenRouter's and opencode's for openrouter,
   opencode's or the endpoint's for opencode). **refresh models** fetches it
-  now; a list older than a day is fetched again in the background. The spawn
-  dialog, the cousin settings and the agent defaults offer these names, and
-  say when a model you type is not in the list (it is never refused).
+  now; a list older than a day, or one an older agent CLI gave, is fetched
+  again in the background, and a cousin's agent panel re-reads it when that
+  fetch ends. The spawn dialog, the cousin settings and the agent defaults
+  offer these names, and say when a model you type is not in the list (it
+  is never refused).
 - **add account / edit / remove**: the entry's kind and keys, written by the
   validated writer (every other line of the file kept, checked by the rules
   the runner reads it by). An edit a cousin on the account could not run

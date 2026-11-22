@@ -389,6 +389,7 @@ from cousin_lib.runner.blocks import thinking_payload as _thinking_payload  # no
 from cousin_lib.runner.blocks import tool_result_text as _tool_result_text  # noqa: E402
 
 _UNSET = object()   # no resume waiting for its snapshot check
+SERVED_TRIES, SERVED_WAIT = 10, 1.0   # waiting for MCP servers still connecting at a session's start
 
 
 # A turn's fold, interrupt-row control or query write that runs
@@ -561,6 +562,8 @@ class SdkRunner:
         # the same set, and an edit lands at the next start.
         self._user_mcp = None
         self._snapshot_on_file = _UNSET  # a resume's recorded snapshot, checked at its first init
+        self._served_for = None          # the session whose served tools were recorded or checked
+        self._served_tasks = set()       # those reads in flight (a reference, or the loop drops them)
         # Restart with resume (data/runner-session.json): the id on file
         # (cached), a write the loop owes the file, and the id the first
         # init after a resume must name.
@@ -908,6 +911,11 @@ class SdkRunner:
                                               "error": "the CLI started a new session"})
             else:
                 self._roll_if_snapshot_changed()
+                self._watch_served(self._check_served(session_id))
+        if session_id != self._served_for and (self._resume_lost or session_id != self._saved):
+            # a new session: what its MCP servers serve, for the next resume
+            self._watch_served(self._record_served(session_id))
+        self._served_for = session_id
         # a new id, or the same id on another lane than the file says: a
         # stale lane would pick the wrong resume path at the next start
         lane_moved = self._lane != "unknown" and self._lane != self._saved_lane
@@ -1188,6 +1196,88 @@ class SdkRunner:
         if now is not None and recorded != now:
             self._request_rollover("the system prompt or the tools changed since this"
                                    " session started")
+
+    def _served_path(self):
+        """data/runner-served.json beside the session file (a side session's
+        runner-served-<kind>.json): the tools its MCP servers served when the
+        session started, per server (snapshot.served)."""
+        path = self._session_path()
+        return path.with_name(path.name.replace("runner-session", "runner-served", 1))
+
+    def _read_served(self):
+        try:
+            d = json.loads(self._served_path().read_text())
+        except (OSError, ValueError):
+            return {}
+        return d if isinstance(d, dict) else {}
+
+    def _write_served(self, session_id, served):
+        path = self._served_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"session_id": session_id, "served": served, "updated": time.time()}))
+        tmp.replace(path)
+
+    def _watch_served(self, coro):
+        """Run a served-tools read beside the turn: it asks the CLI, and must
+        never hold up or fail the turn."""
+        try:
+            task = asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:            # no loop (a test calling straight in)
+            coro.close()
+            return
+        self._served_tasks.add(task)
+        task.add_done_callback(self._served_tasks.discard)
+
+    async def _served_tools(self):
+        """snapshot.served of what the CLI's MCP servers serve now; None when
+        the client cannot say. Servers still connecting are waited for a
+        little (SERVED_TRIES x SERVED_WAIT s)."""
+        ask = getattr(self._client, "get_mcp_status", None)
+        if ask is None:
+            return None
+        from cousin_lib.runner import snapshot
+        servers = []
+        for _ in range(SERVED_TRIES):
+            try:
+                status = await asyncio.wait_for(ask(), timeout=10)
+            except Exception:  # noqa: BLE001 - no status is no check, never a failed turn
+                return None
+            servers = (status or {}).get("mcpServers") or [] if isinstance(status, dict) else []
+            if not any(isinstance(x, dict) and x.get("status") == "pending" for x in servers):
+                break
+            await asyncio.sleep(SERVED_WAIT)
+        return snapshot.served(servers)
+
+    async def _record_served(self, session_id):
+        """A new session: record what its servers serve."""
+        try:
+            served = await self._served_tools()
+            if served is not None:
+                await asyncio.to_thread(self._write_served, session_id, served)
+        except Exception as exc:  # noqa: BLE001 - a record must never fail a turn
+            self.stream.append("error", {"error": "runner-served.json: %s: %s" % (type(exc).__name__, exc)})
+
+    async def _check_served(self, session_id):
+        """A proven resume: a server whose tools moved since the session
+        recorded them gets the session rolled over, as a moved snapshot
+        does, since the CLI keeps sending the recorded definitions. A record
+        for another session, or none, is replaced and rolls nothing."""
+        try:
+            on_file = await asyncio.to_thread(self._read_served)
+            served = await self._served_tools()
+            if served is None:
+                return
+            recorded = on_file.get("served") if on_file.get("session_id") == session_id else None
+            if not isinstance(recorded, dict):
+                await asyncio.to_thread(self._write_served, session_id, served)
+                return
+            moved = sorted(n for n in served if n in recorded and recorded[n] != served[n])
+            if moved:
+                self._request_rollover("an MCP server's tools changed since this session"
+                                       " started (%s)" % ", ".join(moved))
+        except Exception as exc:  # noqa: BLE001 - a check must never fail a turn
+            self.stream.append("error", {"error": "served tools check: %s: %s" % (type(exc).__name__, exc)})
 
     def _boot_row_since(self, ts):
         """The newest boot row put at or after `ts` (the journal's last

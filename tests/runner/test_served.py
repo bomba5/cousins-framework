@@ -1,6 +1,7 @@
 """served.served lists a real MCP server over stdio: a reworded tool and a
 new parameter both move its digest (the CLI's own status shows neither)."""
 import asyncio
+import importlib.util
 import os
 import pathlib
 import sys
@@ -28,6 +29,9 @@ m.run()
 '''
 
 
+# the plain CI lanes install no extras: the listing needs the mcp client (the sdk lane has it, and the sdk
+# runner, the only one that lists, cannot run without it)
+@unittest.skipUnless(importlib.util.find_spec("mcp"), "the mcp package is not installed")
 class TestServedListing(unittest.TestCase):
     def setUp(self):
         self.dir = pathlib.Path(tempfile.mkdtemp())

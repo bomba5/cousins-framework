@@ -9,7 +9,14 @@ line), the registry's tool definitions, and the cousin's own MCP servers
 (as its .mcp.json's text).
 The runner saves it with the session (runner-session.json `snapshot`)
 and rolls a resume over when it moved; the loops daemon reads it to flip
-an idle generation whose snapshot is stale (#280). No SDK import here."""
+an idle generation whose snapshot is stale (#280). No SDK import here.
+
+The .mcp.json text does not move when a server it names starts serving
+other tools (new code behind the same command line), yet the snapshot
+still sends the old definitions. `served` hashes what each connected
+server serves, as the CLI reports it; the runner records it per session
+(runner-served.json) and rolls a resume over when a server's tools
+moved."""
 import hashlib
 import json
 
@@ -50,3 +57,22 @@ def fingerprint(home, root, *, registry=None):
     except Exception:  # noqa: BLE001 - a fingerprint must never fail a start
         return None
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def served(servers):
+    """{server name: hash} of the tools each CONNECTED server serves, from
+    the CLI's MCP status (`mcpServers`): each tool's name, description and
+    annotations. The CLI reports no input schema, so a parameter added
+    without a word in the description is not seen. A server that is not
+    connected is left out: one that failed to start must not read as a
+    change on every restart."""
+    out = {}
+    for server in servers or ():
+        if not isinstance(server, dict) or server.get("status") != "connected" or not server.get("name"):
+            continue
+        tools = sorted(([t.get("name") or "", t.get("description") or "", t.get("annotations") or {}]
+                        for t in server.get("tools") or () if isinstance(t, dict)),
+                       key=lambda t: t[0])
+        text = json.dumps(tools, sort_keys=True, default=str)
+        out[server["name"]] = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    return out

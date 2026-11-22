@@ -209,7 +209,10 @@ the next start. A restart resumes the same session
 (below) is how a cousin starts fresh. A resumed sdk session keeps the system
 prompt and the tool list it started with (the CLI's prompt snapshot), so when
 either changed since then (the law, its identity files, your rules, the
-registry or `.mcp.json`), the runner rolls it over after its first
+registry, `.mcp.json`, or the tools an MCP server serves: new code behind the
+same `.mcp.json` line, recorded per session in `data/runner-served.json` by
+name, description and annotations, since the CLI reports no input schema),
+the runner rolls it over after its first
 [turn](glossary.md#turn) (which still runs with the old ones), and the next
 session gets the new ones. A release's version number alone does not; a
 release that changes the contract text or the shipped registry does, once. The console's card and inspector have

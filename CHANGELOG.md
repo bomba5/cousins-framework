@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.8.2 - 2026-11-22
+
+### Fixed
+
+- **A resumed session gets an MCP server's new tools.** The agent CLI
+  records the tool definitions on a session's first request and sends
+  that record on every resume. The runner rolled a resume over when its
+  fingerprint moved, but that fingerprint counts `.mcp.json` as text, so
+  new code behind the same server line (a new parameter, a reworded tool)
+  never reached the cousin: after a restart it still saw the old tool.
+  The runner now asks the CLI what each connected server serves (each
+  tool's name, description and annotations), records it per session in
+  `data/runner-served.json`, and rolls a resume over when a server's
+  tools moved. The CLI reports no input schema, so a parameter added
+  without a word in the description still goes unseen.
+
 ## 4.8.1 - 2026-11-11
 
 ### Fixed

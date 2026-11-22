@@ -277,7 +277,10 @@ every start, reconnect and [rollover](../glossary.md#rollover), and the CLI gets
 | `opencode` | none | the `system` field of each prompt, over the loopback HTTP API with the server's password |
 
 A changed identity reaches the next fresh session; a resumed SDK session
-keeps the prompt it first recorded (the preset's `snapshot`).
+keeps the prompt and the tool definitions it first recorded (the preset's
+`snapshot`), so the runner rolls a resume over when they moved: the prompt,
+the registry and `.mcp.json` by their fingerprint, and the tools each
+connected MCP server serves by the CLI's MCP status (`data/runner-served.json`).
 
 ## Picking one
 

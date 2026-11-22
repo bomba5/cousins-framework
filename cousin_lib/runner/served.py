@@ -10,7 +10,7 @@ schema), so it cannot see a reworded tool or a new parameter.
 
 So the runner asks each server itself, the way the CLI starts it (the
 same command, arguments, environment and working directory, or the same
-URL), and hashes every tool's name, description, input schema and
+URL and headers, `${NAME}` expanded as the CLI expands it), and hashes every tool's name, description, input schema and
 annotations. `served` gives {server: hash}; a server it cannot list in
 TIMEOUT seconds, or of a kind it does not speak, is left out: a broken
 server must never read as a change on every restart, and a check that
@@ -40,23 +40,31 @@ def _tool(t):
 async def list_one(spec, cwd):
     """The digest of one server's tools; None for a kind it does not speak."""
     from mcp import ClientSession
+
+    from cousin_lib.runner.mcp_config import expand
+    # `${NAME}` is the CLI's to expand (mcp_config passes it through), so the
+    # listing expands it the same way, or a server would start without its
+    # credential and be left out every time
+    x = lambda value: expand(str(value), os.environ)  # noqa: E731
     kind = spec.get("type") or ("stdio" if spec.get("command") else "http" if spec.get("url") else None)
     if kind == "stdio":
         from mcp import StdioServerParameters
         from mcp.client.stdio import stdio_client
-        env = dict(os.environ, **{k: str(v) for k, v in (spec.get("env") or {}).items()})
-        params = StdioServerParameters(command=spec["command"], args=[str(a) for a in spec.get("args") or ()],
+        env = dict(os.environ, **{k: x(v) for k, v in (spec.get("env") or {}).items()})
+        params = StdioServerParameters(command=x(spec["command"]), args=[x(a) for a in spec.get("args") or ()],
                                        env=env, cwd=str(cwd))
         with open(os.devnull, "w") as quiet:
             async with stdio_client(params, errlog=quiet) as (read, write):
                 return await _list(ClientSession, read, write)
     if kind == "http":
         from mcp.client.streamable_http import streamablehttp_client
-        async with streamablehttp_client(spec["url"], headers=spec.get("headers")) as (read, write, _):
+        headers = {k: x(v) for k, v in (spec.get("headers") or {}).items()} or None
+        async with streamablehttp_client(x(spec["url"]), headers=headers) as (read, write, _):
             return await _list(ClientSession, read, write)
     if kind == "sse":
         from mcp.client.sse import sse_client
-        async with sse_client(spec["url"], headers=spec.get("headers")) as (read, write):
+        headers = {k: x(v) for k, v in (spec.get("headers") or {}).items()} or None
+        async with sse_client(x(spec["url"]), headers=headers) as (read, write):
             return await _list(ClientSession, read, write)
     return None
 

@@ -156,6 +156,19 @@ def references(value):
     return out
 
 
+def expand(value, environ):
+    """`value` with every `${NAME}` / `${NAME:-default}` replaced as Claude
+    Code does: NAME's value in `environ` when it is set (an empty value
+    too: measured on CLI 2.1.321, `${E:-def}` with E="" gives ""), else
+    the default, else empty. For the runner's own listing of a server
+    (served.py), which must start it as the CLI does."""
+    def one(match):
+        name, sep, default = match.group(1).partition(":-")
+        got = environ.get(name)
+        return got if got is not None else (default if sep else "")
+    return _VAR.sub(one, value) if isinstance(value, str) else value
+
+
 def _strings(kind, entry):
     """Every string the CLI expands in this entry."""
     if kind == "stdio":

@@ -540,6 +540,14 @@ class TestServedTools(RolloverCase):
         self.assertTrue(_wait(lambda: self.served_file().get("session_id") == "s-2"))
         self.assertEqual(self.served_file()["v"], 2)
 
+    def test_a_late_listing_for_a_rolled_session_writes_nothing(self):
+        r = self.build()
+        r._served_for = "s-2"                       # the session was rolled over since
+        r._write_served("s-1", {"novel": "late"})
+        self.assertEqual(self.served_file(), {})
+        r._write_served("s-2", {"novel": "now"})
+        self.assertEqual(self.served_file()["served"], {"novel": "now"})
+
     def test_a_cousin_without_own_servers_never_rolls_for_them(self):
         r = self.run_with({}, None, servers=False)
         self.assertTrue(_wait(lambda: r.state() == "idle"))

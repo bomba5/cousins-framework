@@ -217,7 +217,9 @@ release that changes the contract text or the shipped registry does, once. To se
 the cousin's own servers once more, as the CLI does, and lists every tool's
 name, description, input schema and annotations; it records them per session
 in `data/runner-served.json`. A resumed session with own servers and no record
-of its own rolls over once, since what it loaded cannot be known. The console's card and inspector have
+of its own rolls over once, since what it loaded cannot be known. A server that holds a resource only one instance can (a
+fixed port, a lock) cannot be listed beside the CLI's instance, and is left out
+of the check. The console's card and inspector have
 the same buttons. See [commands](commands.md#running-cousins) and
 [runners](reference/runners.md).
 

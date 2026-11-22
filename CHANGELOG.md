@@ -14,8 +14,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   restarted cousin. The runner now starts each of the cousin's own MCP
   servers once more, as the CLI does, lists every tool's name,
   description, input schema and annotations itself, and records that per
-  session (`data/runner-served.json`, format 2). A server it cannot list
-  in 20 s is left out and never rolls anything.
+  session (`data/runner-served.json`, format 2), `${NAME}` expanded as
+  the CLI expands it. A server it cannot list in 20 s, or one that holds
+  a resource only one instance can, is left out and never rolls anything.
 - **A session that was already stale gets fresh tools.** A resumed
   session with own MCP servers and no record of its own (one from before
   the check, or from 4.8.2) cannot say what it loaded, so it rolls over

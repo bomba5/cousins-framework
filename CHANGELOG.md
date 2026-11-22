@@ -3,6 +3,28 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.8.3 - 2026-11-22
+
+### Fixed
+
+- **4.8.2's check never saw a changed tool.** It took the servers' tools
+  from the agent CLI's MCP status, which (measured on CLI 2.1.321) names
+  each tool and its annotations but carries no description and no input
+  schema, so a reworded tool or a new parameter still never reached a
+  restarted cousin. The runner now starts each of the cousin's own MCP
+  servers once more, as the CLI does, lists every tool's name,
+  description, input schema and annotations itself, and records that per
+  session (`data/runner-served.json`, format 2). A server it cannot list
+  in 20 s is left out and never rolls anything.
+- **A session that was already stale gets fresh tools.** A resumed
+  session with own MCP servers and no record of its own (one from before
+  the check, or from 4.8.2) cannot say what it loaded, so it rolls over
+  once, as a missing prompt record already did. Expect one rollover per
+  cousin with own servers at its first restart on this version.
+- **A late listing no longer overwrites the next session's record.** A
+  slow listing for a session that was rolled over since is dropped, and
+  every write goes through a temp file of its own.
+
 ## 4.8.2 - 2026-11-22
 
 ### Fixed

@@ -389,7 +389,7 @@ from cousin_lib.runner.blocks import thinking_payload as _thinking_payload  # no
 from cousin_lib.runner.blocks import tool_result_text as _tool_result_text  # noqa: E402
 
 _UNSET = object()   # no resume waiting for its snapshot check
-SERVED_TRIES, SERVED_WAIT = 10, 1.0   # waiting for MCP servers still connecting at a session's start
+SERVED_RECORD = 2   # runner-served.json's format: 2 lists the servers itself (4.8.2's 1 asked the CLI)
 
 
 # A turn's fold, interrupt-row control or query write that runs
@@ -1199,8 +1199,8 @@ class SdkRunner:
 
     def _served_path(self):
         """data/runner-served.json beside the session file (a side session's
-        runner-served-<kind>.json): the tools its MCP servers served when the
-        session started, per server (snapshot.served)."""
+        runner-served-<kind>.json): what the session's own MCP servers served
+        when it started, per server (served.served)."""
         path = self._session_path()
         return path.with_name(path.name.replace("runner-session", "runner-served", 1))
 
@@ -1211,16 +1211,19 @@ class SdkRunner:
             return {}
         return d if isinstance(d, dict) else {}
 
-    def _write_served(self, session_id, served):
+    def _write_served(self, session_id, listed):
+        if session_id != self._served_for:
+            return                      # a late listing for a session that was rolled over since
         path = self._served_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"session_id": session_id, "served": served, "updated": time.time()}))
+        tmp = path.with_suffix(".%s.tmp" % uuid.uuid4().hex[:8])
+        tmp.write_text(json.dumps({"v": SERVED_RECORD, "session_id": session_id, "served": listed,
+                                   "updated": time.time()}))
         tmp.replace(path)
 
     def _watch_served(self, coro):
-        """Run a served-tools read beside the turn: it asks the CLI, and must
-        never hold up or fail the turn."""
+        """Run a served-tools listing beside the turn: it starts the servers
+        once more, and must never hold up or fail the turn."""
         try:
             task = asyncio.get_running_loop().create_task(coro)
         except RuntimeError:            # no loop (a test calling straight in)
@@ -1229,50 +1232,42 @@ class SdkRunner:
         self._served_tasks.add(task)
         task.add_done_callback(self._served_tasks.discard)
 
-    async def _served_tools(self):
-        """snapshot.served of what the CLI's MCP servers serve now; None when
-        the client cannot say. Servers still connecting are waited for a
-        little (SERVED_TRIES x SERVED_WAIT s)."""
-        ask = getattr(self._client, "get_mcp_status", None)
-        if ask is None:
-            return None
-        from cousin_lib.runner import snapshot
-        servers = []
-        for _ in range(SERVED_TRIES):
-            try:
-                status = await asyncio.wait_for(ask(), timeout=10)
-            except Exception:  # noqa: BLE001 - no status is no check, never a failed turn
-                return None
-            servers = (status or {}).get("mcpServers") or [] if isinstance(status, dict) else []
-            if not any(isinstance(x, dict) and x.get("status") == "pending" for x in servers):
-                break
-            await asyncio.sleep(SERVED_WAIT)
-        return snapshot.served(servers)
+    def _own_servers(self):
+        """The cousin's own MCP servers as the CLI gets them (.mcp.json and
+        its plugins'), never the runner's in-process `cousin` server: its
+        tools are the registry's, which the snapshot fingerprint counts."""
+        loaded = self._user_mcp
+        return dict(loaded.servers) if loaded is not None else {}
 
     async def _record_served(self, session_id):
         """A new session: record what its servers serve."""
         try:
-            served = await self._served_tools()
-            if served is not None:
-                await asyncio.to_thread(self._write_served, session_id, served)
+            from cousin_lib.runner import served
+            listed = await served.served(self._own_servers(), self.home)
+            await asyncio.to_thread(self._write_served, session_id, listed)
         except Exception as exc:  # noqa: BLE001 - a record must never fail a turn
             self.stream.append("error", {"error": "runner-served.json: %s: %s" % (type(exc).__name__, exc)})
 
     async def _check_served(self, session_id):
-        """A proven resume: a server whose tools moved since the session
-        recorded them gets the session rolled over, as a moved snapshot
-        does, since the CLI keeps sending the recorded definitions. A record
-        for another session, or none, is replaced and rolls nothing."""
+        """A proven resume: the CLI keeps sending the tool definitions it
+        recorded, so a server whose tools moved since gets the session rolled
+        over, as a moved snapshot does. A session with own servers but no
+        record of its own (one from before this check, or another session's)
+        rolls over once too: what it loaded cannot be known. A server it
+        cannot list now, or that the record lacks, is not compared."""
         try:
+            servers = self._own_servers()
+            if not servers:
+                return
             on_file = await asyncio.to_thread(self._read_served)
-            served = await self._served_tools()
-            if served is None:
-                return
-            recorded = on_file.get("served") if on_file.get("session_id") == session_id else None
+            recorded = on_file.get("served") if (on_file.get("v") == SERVED_RECORD
+                                                 and on_file.get("session_id") == session_id) else None
             if not isinstance(recorded, dict):
-                await asyncio.to_thread(self._write_served, session_id, served)
+                self._request_rollover("no record of the tools this session's MCP servers served")
                 return
-            moved = sorted(n for n in served if n in recorded and recorded[n] != served[n])
+            from cousin_lib.runner import served
+            listed = await served.served(servers, self.home)
+            moved = sorted(n for n in listed if n in recorded and recorded[n] != listed[n])
             if moved:
                 self._request_rollover("an MCP server's tools changed since this session"
                                        " started (%s)" % ", ".join(moved))

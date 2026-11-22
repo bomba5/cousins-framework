@@ -480,29 +480,27 @@ class TestSnapshot(RolloverCase):
 
 
 class TestServedTools(RolloverCase):
-    """The snapshot also freezes what the MCP servers served on a session's
-    first request. New code behind the same .mcp.json line moves no
-    fingerprint, so the runner records what each server serves (the CLI's
-    MCP status) and rolls a resume over when a server's tools moved."""
+    """The snapshot also freezes the tools the cousin's own MCP servers
+    served on a session's first request. New code behind the same
+    .mcp.json line moves no fingerprint, so the runner lists what each
+    server serves (served.served) and rolls a resume over when it moved."""
 
-    def status(self, description):
-        return {"mcpServers": [
-            {"name": "novel", "status": "connected",
-             "tools": [{"name": "drool", "description": description}]},
-            {"name": "broken", "status": "failed", "error": "no such command"}]}
-
-    def run_with(self, description, served_on_file):
+    def run_with(self, live, on_file, servers=True):
         r = self.build()
+        if servers:
+            (self.home / ".mcp.json").write_text(json.dumps(
+                {"mcpServers": {"novel": {"command": "/bin/true"}, "room": {"command": "/bin/true"}}}))
         (self.home / "data" / "runner-session.json").write_text(json.dumps(
             {"session_id": "s-1", "lane": "unknown", "generation": 0, "updated": 0,
              "snapshot": r._snapshot_fingerprint()}))
-        if served_on_file is not None:
-            (self.home / "data" / "runner-served.json").write_text(json.dumps(served_on_file))
-        live = {"status": self.status(description)}
+        if on_file is not None:
+            (self.home / "data" / "runner-served.json").write_text(json.dumps(on_file))
+        self.asked = []
 
-        async def get_mcp_status(client):
-            return live["status"]
-        p = mock.patch.object(ScriptedClient, "get_mcp_status", get_mcp_status, create=True)
+        async def fake(servers_, cwd):
+            self.asked.append(sorted(servers_))
+            return dict(live)
+        p = mock.patch("cousin_lib.runner.served.served", fake)
         p.start(); self.addCleanup(p.stop)
         r.start(); self.work(r)
         return r
@@ -512,37 +510,42 @@ class TestServedTools(RolloverCase):
                 if e["kind"] == "rollover" and e["payload"].get("phase") == "start"]
 
     def served_file(self):
-        return json.loads((self.home / "data" / "runner-served.json").read_text())
-
-    def recorded(self, description):
-        from cousin_lib.runner import snapshot
-        return {"session_id": "s-1", "served": snapshot.served(self.status(description)["mcpServers"])}
+        try:
+            return json.loads((self.home / "data" / "runner-served.json").read_text())
+        except OSError:
+            return {}
 
     def test_a_resume_whose_server_serves_other_tools_rolls_over(self):
-        r = self.run_with("drool, with a thickness", self.recorded("drool"))
+        r = self.run_with({"novel": "new", "room": "same"},
+                          {"v": 2, "session_id": "s-1", "served": {"novel": "old", "room": "same"}})
         self.assertTrue(_wait(lambda: len(self.clients) == 2))
         self.assertEqual(self.reasons(r),
                          ["an MCP server's tools changed since this session started (novel)"])
-        # the new session records what it was given
         self.assertTrue(_wait(lambda: self.served_file().get("session_id") == "s-2"))
-        self.assertEqual(self.served_file()["served"], self.recorded("drool, with a thickness")["served"])
+        self.assertEqual(self.served_file()["served"], {"novel": "new", "room": "same"})
+        self.assertIn(["novel", "room"], self.asked)       # the cousin's own servers, never `cousin`
 
     def test_a_resume_with_the_same_tools_is_not_rolled_over(self):
-        r = self.run_with("drool", self.recorded("drool"))
+        r = self.run_with({"novel": "same"}, {"v": 2, "session_id": "s-1", "served": {"novel": "same"}})
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         time.sleep(0.3)                    # the check runs beside the turn
         self.assertEqual((len(self.clients), self.reasons(r)), (1, []))
 
-    def test_a_resume_without_a_record_records_and_rolls_nothing(self):
-        r = self.run_with("drool", None)
-        self.assertTrue(_wait(lambda: (self.home / "data" / "runner-served.json").exists()))
-        self.assertEqual(self.served_file()["session_id"], "s-1")
+    def test_a_resume_without_a_record_of_its_own_rolls_over_once(self):
+        # one from before the check (4.8.2's record, or none) cannot say what
+        # the session loaded: it rolls over once, and the new session records
+        r = self.run_with({"novel": "x"}, {"session_id": "s-1", "served": {"novel": "x"}})
+        self.assertTrue(_wait(lambda: len(self.clients) == 2))
+        self.assertEqual(self.reasons(r), ["no record of the tools this session's MCP servers served"])
+        self.assertTrue(_wait(lambda: self.served_file().get("session_id") == "s-2"))
+        self.assertEqual(self.served_file()["v"], 2)
+
+    def test_a_cousin_without_own_servers_never_rolls_for_them(self):
+        r = self.run_with({}, None, servers=False)
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
         time.sleep(0.3)
         self.assertEqual((len(self.clients), self.reasons(r)), (1, []))
 
-    def test_a_server_that_is_not_connected_is_left_out(self):
-        from cousin_lib.runner import snapshot
-        self.assertEqual(sorted(snapshot.served(self.status("x")["mcpServers"])), ["novel"])
 
 if __name__ == "__main__":
     unittest.main()

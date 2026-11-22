@@ -209,13 +209,17 @@ the next start. A restart resumes the same session
 (below) is how a cousin starts fresh. A resumed sdk session keeps the system
 prompt and the tool list it started with (the CLI's prompt snapshot), so when
 either changed since then (the law, its identity files, your rules, the
-registry, `.mcp.json`, or the tools an MCP server serves: new code behind the
-same `.mcp.json` line, recorded per session in `data/runner-served.json` by
-name, description and annotations, since the CLI reports no input schema),
-the runner rolls it over after its first
+registry, `.mcp.json`, or the tools one of its own MCP servers serves: new
+code behind the same `.mcp.json` line), the runner rolls it over after its first
 [turn](glossary.md#turn) (which still runs with the old ones), and the next
 session gets the new ones. A release's version number alone does not; a
-release that changes the contract text or the shipped registry does, once. The console's card and inspector have
+release that changes the contract text or the shipped registry does, once. To see the servers' tools, the runner starts each of
+the cousin's own servers once more, as the CLI does, and lists every tool's
+name, description, input schema and annotations; it records them per session
+in `data/runner-served.json`. A resumed session with own servers and no record
+of its own rolls over once, since what it loaded cannot be known. A server that holds a resource only one instance can (a
+fixed port, a lock) cannot be listed beside the CLI's instance, and is left out
+of the check. The console's card and inspector have
 the same buttons. See [commands](commands.md#running-cousins) and
 [runners](reference/runners.md).
 

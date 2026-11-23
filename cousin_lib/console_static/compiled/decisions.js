@@ -31,6 +31,7 @@ function decisionAnswerText(d) {
 }
 function decisionOwes(d) {
   if (!d || d.status !== "answered") return "";
+  if (d.undeliverable) return "undeliverable: " + d.undeliverable;
   const out = [];
   if (!d.remembered) out.push("memory not written");
   if (!d.delivered) out.push("turn not delivered");
@@ -112,7 +113,8 @@ function DecisionsView() {
       const how = {
         delivered: "sent to @" + d.cousin,
         waiting: "kept until its group is answered",
-        pending: "kept; delivery is retried"
+        pending: "kept; delivery is retried",
+        undeliverable: "kept, but it cannot reach @" + d.cousin
       }[out.decision.delivery] || "";
       setStatus({ ok: true, msg: `answered #${d.id}` + (how ? ", " + how : "") });
       await pull();

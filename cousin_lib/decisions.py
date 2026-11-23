@@ -53,6 +53,11 @@ GROUP_GRACE_S = 60
 # over (its claimant died between the claim and the release).
 LEASE_S = 300
 PENDING = "pending:"
+# An answer that can never reach its cousin (its home is gone, or its
+# delivery is refused: a worker, no runner kind) is marked
+# "gone:<iso>:<reason>" instead of owed, so nothing retries it on its own;
+# a manual retry (redeliver(retry_gone=True)) clears the mark first.
+GONE = "gone:"
 # `answer` is the operator's act; a cousin asks, it never answers itself.
 ANSWER_REFUSAL = ("answering a decision is the operator's act: they answer in the console's"
                   " Decisions view, or with `cousin-decision answer` in their own terminal")
@@ -144,12 +149,25 @@ def _now():
 
 def done(value):
     """A remembered_at or delivered_at that says done (a time), not owed
-    (null) and not claimed (a pending lease)."""
-    return bool(value) and not str(value).startswith(PENDING)
+    (null), not claimed (a pending lease) and not undeliverable (gone)."""
+    return bool(value) and not str(value).startswith((PENDING, GONE))
+
+
+def gone_reason(value):
+    """Why a `gone:` mark says the work cannot be done; None for any other."""
+    if not str(value or "").startswith(GONE):
+        return None
+    rest = str(value)[len(GONE):]
+    return rest[len(_now()) + 1:] or "undeliverable"
+
+
+def _gone(reason):
+    return "%s%s:%s" % (GONE, _now(), " ".join(str(reason).split())[:200])
 
 
 def _owed(value, now):
-    """Null, or a lease older than LEASE_S: free to claim."""
+    """Null, or a lease older than LEASE_S: free to claim. A `gone:` mark
+    is not: only a manual retry clears it."""
     if not value:
         return True
     if not str(value).startswith(PENDING):
@@ -177,6 +195,9 @@ def _row(row):
     # what an answer still owes, said plainly for the view
     out["remembered"] = done(out.get("remembered_at"))
     out["delivered"] = done(out.get("delivered_at"))
+    reasons = [r for r in (gone_reason(out.get("remembered_at")),
+                           gone_reason(out.get("delivered_at"))) if r]
+    out["undeliverable"] = "; ".join(dict.fromkeys(reasons))
     return out
 
 
@@ -467,11 +488,18 @@ def owed(root=None):
         conn.close()
 
 
-def redeliver(*, root=None):
+def redeliver(*, retry_gone=False, root=None):
     """Retry every memory and turn an answer still owes (the console's
-    event poller calls it while anything is owed; the CLI and the console
-    have a manual retry). Returns [{"ids": [...], "ok": bool}] for the
-    turns tried."""
+    event poller calls it while anything is owed). The manual retry (the
+    CLI's, the console's button) passes retry_gone, which first clears the
+    `gone:` marks of what could not be delivered. Returns [{"ids": [...],
+    "ok": bool}] for the turns tried."""
+    if retry_gone:
+        def clear(conn):
+            for column in ("remembered_at", "delivered_at"):
+                conn.execute("UPDATE decisions SET %s=NULL WHERE %s LIKE 'gone:%%'"
+                             % (column, column))
+        _write(root, clear)
     for row in list_decisions(status="answered", root=root):
         if not done(row["remembered_at"]):
             _remember(root, row)
@@ -520,12 +548,14 @@ def _claim(root, column, ids):
 
 
 def _release(root, column, ids, lease, ok):
-    """End a claim: the time when the work was done, null to owe it again.
-    Only rows still under this lease change."""
+    """End a claim: the time when the work was done (ok True), null to
+    owe it again (False), or a `gone:` mark (ok a reason string). Only rows
+    still under this lease change."""
+    value = _now() if ok is True else (_gone(ok) if ok else None)
     _write(root, lambda conn: conn.execute(
         "UPDATE decisions SET %s=? WHERE %s=? AND id IN (%s)"
         % (column, column, ",".join("?" * len(ids))),
-        [_now() if ok else None, lease] + list(ids)))
+        [value, lease] + list(ids)))
 
 
 def memory_topic(row):
@@ -539,12 +569,16 @@ def _remember(root, row):
     redeliver."""
     try:
         home = _home(root, row["cousin"])
-        if home is None:
-            return False
         lease = _claim(root, "remembered_at", [row["id"]])
     except Exception:  # noqa: BLE001 - the answer is kept; redeliver retries
         return False
     if lease is None:
+        return False
+    if home is None:
+        try:
+            _release(root, "remembered_at", [row["id"]], lease, NO_HOME)
+        except Exception:  # noqa: BLE001 - the lease runs out and the work is retried
+            pass
         return False
     ok = False
     try:
@@ -576,20 +610,28 @@ def turn_body(rows):
     return "\n".join([head] + lines)
 
 
+NO_HOME = "the cousin's home is gone"
+
+
 def _deliver(root, rows):
     """One turn for these answered rows on the cousin's operator thread
-    (system when it has none). Whether the cousin took it; never raises."""
+    (system when it has none). True when the cousin took it, False to try
+    again, or why it never can (no home; its delivery is refused: a worker,
+    no runner kind). Never raises."""
     try:
         from cousin_lib import delivery
         home = _home(root, rows[0]["cousin"])
         if home is None:
-            return False
+            return NO_HOME
+        backend = delivery.backend_for(home)
+        if isinstance(backend, delivery.RefusedBackend):
+            return "its delivery is refused: %s" % backend.reason(home)
         operator = CousinConfig.load(home).operator_name
         thread = (delivery.thread_id("operator", operator) if operator
                   else delivery.thread_id("system"))
         item = delivery.Item(thread_id=thread, source="decision", body=turn_body(rows),
                              sender=rows[-1]["answered_by"] or "operator")
-        wait = not isinstance(delivery.backend_for(home), delivery.InboxBackend)
+        wait = not isinstance(backend, delivery.InboxBackend)
         # keyed: a retry after a put whose outcome was never recorded is
         # the first row, not a second turn
         with delivery.keyed("decision:%s:%s" % (store_id(root),
@@ -656,12 +698,12 @@ def _settle(root, cousin, grp):
         lease = _claim(root, "delivered_at", ids)
         if lease is None:
             continue                  # done meanwhile, or another process has it
-        ok = _deliver(root, unit)
+        outcome = _deliver(root, unit)
         try:
-            _release(root, "delivered_at", ids, lease, ok)
+            _release(root, "delivered_at", ids, lease, outcome)
         except Exception:  # noqa: BLE001 - the lease runs out; the keyed put is a no-op
             pass
-        out.append({"ids": ids, "ok": ok})
+        out.append({"ids": ids, "ok": outcome is True})
     return out
 
 
@@ -678,6 +720,8 @@ def _with_delivery(root, decision_id):
     row = show(decision_id, root=root)
     if row["delivered"]:
         row["delivery"] = "delivered"
+    elif gone_reason(row["delivered_at"]):
+        row["delivery"] = "undeliverable"
     elif row["grp"]:
         conn = _db(root)
         try:
@@ -728,8 +772,12 @@ def show_text(row):
     if row["status"] == "answered":
         lines.append("  answered by %s at %s in %s; memory: %s; turn: %s"
                      % (row["answered_by"], row["answered_at"], row["answered_via"],
-                        row["remembered_at"] if row["remembered"] else "not written",
-                        row["delivered_at"] if row["delivered"] else "not delivered"))
+                        row["remembered_at"] if row["remembered"] else
+                        ("undeliverable: %s" % gone_reason(row["remembered_at"])
+                         if gone_reason(row["remembered_at"]) else "not written"),
+                        row["delivered_at"] if row["delivered"] else
+                        ("undeliverable: %s" % gone_reason(row["delivered_at"])
+                         if gone_reason(row["delivered_at"]) else "not delivered")))
     return "\n".join(lines)
 
 
@@ -737,7 +785,9 @@ def answered_text(row):
     said = {"delivered": "delivered to %s" % row["cousin"],
             "waiting": "the group's turn waits until all of it is answered and its newest"
                        " question is %d s old" % GROUP_GRACE_S,
-            "pending": "delivery failed and is kept: `cousin-decision redeliver` retries it"}
+            "pending": "delivery failed and is kept: `cousin-decision redeliver` retries it",
+            "undeliverable": "undeliverable (%s): `cousin-decision redeliver` tries again"
+                             % row.get("undeliverable")}
     return "answered #%d -> %s; %s" % (row["id"], answer_text(row),
                                        said.get(row.get("delivery"), ""))
 
@@ -798,7 +848,7 @@ def _cmd_answer(args):
 
 
 def _cmd_redeliver(args):
-    tried = redeliver(root=args.root)
+    tried = redeliver(retry_gone=True, root=args.root)
     lines = ["%s #%s" % ("delivered" if t["ok"] else "still pending",
                          ", #".join(str(i) for i in t["ids"])) for t in tried]
     _print(args, {"tried": tried}, "\n".join(lines) or "nothing to deliver")

@@ -43,7 +43,9 @@ def register():
     @router.route("POST", "/api/decisions/redeliver")
     def redeliver(req):
         root = req.server.root
-        tried = decisions.redeliver(root=root) if decisions.db_path(root).is_file() else []
+        # the manual retry: what was marked undeliverable is tried again too
+        tried = (decisions.redeliver(retry_gone=True, root=root)
+                 if decisions.db_path(root).is_file() else [])
         req.server.emit("decisions-refresh", {"op": "redeliver"})
         return 200, {"ok": True, "tried": tried}
 

@@ -77,8 +77,11 @@ process.stdout.write(JSON.stringify([
   decisionOwes({status: "answered", remembered: true, delivered: true}),
   decisionOwes({status: "answered", remembered: false, delivered: true}),
   decisionOwes({status: "answered", remembered: true, delivered: false}),
-  decisionOwes({status: "open"})]));""")
-        self.assertEqual(got, ["", "memory not written", "turn not delivered", ""])
+  decisionOwes({status: "open"}),
+  decisionOwes({status: "answered", remembered: true, delivered: false,
+                undeliverable: "the cousin's home is gone"})]));""")
+        self.assertEqual(got, ["", "memory not written", "turn not delivered", "",
+                               "undeliverable: the cousin's home is gone"])
 
     def test_answer_text(self):
         got = self.run_node("""

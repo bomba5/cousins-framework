@@ -35,9 +35,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Changed
 
-- **The stdio lane passes tool arguments as `--flag=value`.** A value that
-  starts with `-` no longer fails as an unknown flag. Every shipped CLI
-  accepts the form; a CLI added to an install's registry must too.
+- **The stdio lane passes a long-flag tool argument as `--flag=value`.** A
+  value that starts with `-` no longer fails as an unknown flag. Only an
+  option whose flag starts with `--` takes this form; a short flag (`-n`)
+  still goes as two elements, so a CLI an install registered sees no change
+  there.
 - The cousin contract has one more paragraph (on the decision tool), so
   each cousin's cached prompt prefix changes once.
 

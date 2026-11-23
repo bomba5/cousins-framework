@@ -353,8 +353,8 @@ def _array_elements(spec, value, cmd_name, name):
 
 def build_call(tool, cmd_name, args, extra_argv=(), resolve=resolve_command):
     """The argv list and stdin bytes for one call. Never a string: a
-    placeholder becomes whole elements, an option one `--flag=value`
-    element (a boolean the bare flag), and nothing else is ever formatted
+    placeholder becomes whole elements, a long option one `--flag=value`
+    element, a short one two (`-n`, value), a boolean the bare flag, and nothing else is ever formatted
     into a larger string. An array-typed
     placeholder spreads into one element per item. Options go at the end,
     or just before a literal `--` in the command's argv, so a command
@@ -400,8 +400,13 @@ def build_call(tool, cmd_name, args, extra_argv=(), resolve=resolve_command):
         else:
             raise ToolError("%s: missing required property %r"
                             % (cmd_name, name))
-    # `--flag=value`, one element: a value that starts with "-" (a note
-    # such as "-x is fine") is never read by the CLI's parser as a flag
+    # A long flag takes its value as one `--flag=value` element, so a value
+    # that starts with "-" is never read by the CLI's parser as a flag. A
+    # short flag keeps two elements (`-n`, `5`): a getopt-style CLI an
+    # install registered would read `-n=5` as the value "=5".
+    def option(flag, value):
+        return ["%s=%s" % (flag, value)] if flag.startswith("--") else [flag, str(value)]
+
     flags = []
     for name, flag in cmd["options"].items():
         value = args.get(name)
@@ -410,9 +415,10 @@ def build_call(tool, cmd_name, args, extra_argv=(), resolve=resolve_command):
         if value is True:
             flags.append(flag)
         elif isinstance(value, list):
-            flags.extend("%s=%s" % (flag, v) for v in value)
+            for v in value:
+                flags.extend(option(flag, v))
         else:
-            flags.append("%s=%s" % (flag, value))
+            flags.extend(option(flag, value))
     if operands_at is None:
         argv.extend(flags)
     else:

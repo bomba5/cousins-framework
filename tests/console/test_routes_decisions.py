@@ -51,12 +51,13 @@ class TestDecisions(ConsoleCase):
         self.serve()
         decisions.ask("wren", "Which?", root=self.root)
         _, body = self.post("/api/decisions/1/answer", {"answer": "this one"})
-        self.assertEqual(body["decision"]["delivery"], "pending")
+        self.assertEqual(body["decision"]["delivery"], "undeliverable")
         with mock.patch.object(decisions, "redeliver", side_effect=AssertionError("wrote")):
             status, body = self.get("/api/decisions")
         self.assertEqual(status, 200)
         row = body["decisions"][0]
         self.assertEqual((row["remembered"], row["delivered"]), (True, False))
+        self.assertIn("its delivery is refused", row["undeliverable"])
         toml = home / "cousin.toml"
         toml.write_text(toml.read_text() + RUNNER)
         status, body = self.post("/api/decisions/redeliver", {})

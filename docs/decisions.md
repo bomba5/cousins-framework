@@ -26,12 +26,15 @@ answer: one list for the whole install, in the console's **Decisions** page.
      when it has no operator), from you, reading
      `Decision #<id> answered: <question> -> <answer>`.
 
-If the turn cannot be delivered (the cousin has no
-[runner](glossary.md#runner) right now, say), the answer is kept and marked
-undelivered; the Decisions page shows "turn not delivered" (or "memory not
-written") beside it. The console retries what is owed every few seconds,
-and **retry now** on the page and `cousin-decision redeliver` retry at
-once. Each memory and each turn is claimed by one process before it is
+If the turn cannot be delivered for now (a write that failed, say), the
+answer is kept and marked undelivered; the Decisions page shows "turn not
+delivered" (or "memory not written") beside it. The console retries what is
+owed every few seconds, and **retry now** on the page and `cousin-decision
+redeliver` retry at once. An answer that can never reach its cousin (its
+home is gone, or its delivery is refused: a [worker](glossary.md#worker), or a cousin with no
+[runner](glossary.md#runner) kind) is marked undeliverable instead, with
+the reason, and nothing retries it on its own; **retry now** and
+`cousin-decision redeliver` clear the mark and try it again. Each memory and each turn is claimed by one process before it is
 written, so a retry that overlaps an answer never writes it twice, and a
 claim left by a process that died is taken over after five minutes.
 
@@ -73,8 +76,12 @@ answer` exists for your own terminal and refuses to run inside a cousin's
 environment (`COUSIN_HOME` set), and `ask` and `withdraw` take the cousin
 from `COUSIN_HOME`. These checks read the environment, the same way
 `cousin-skill import` does: they guard against a mistake, not against a
-cousin that sets out to get around them. They are not a security boundary. The framework contract tells every cousin
-that serves the tool to put a choice that is yours into it, not only into
+cousin that sets out to get around them. They are not a security boundary.
+`answer --user` is free text, and a cousin's shell can unset `COUSIN_HOME`,
+so who answered is not verified for an answer given in the terminal; one
+given in the console is under the logged-in user.
+
+The framework contract tells every cousin that serves the tool to put a choice that is yours into it, not only into
 its chat text, and then to end the turn.
 
 ## In the terminal

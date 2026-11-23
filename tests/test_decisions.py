@@ -142,19 +142,54 @@ class TestAnswer(Case):
         self.assertEqual(len(self.turns()), 1)
 
     def test_a_failed_delivery_keeps_the_answer_and_redeliver_sends_it_once(self):
-        self.cousin("wren", operator="Priya", runner=False)     # refused: no runner kind
         self.ask()
-        row = decisions.answer(1, option="a", user="admin", root=self.root)
-        self.assertEqual((row["status"], row["delivered_at"], row["delivery"]),
-                         ("answered", None, "pending"))
+        with mock.patch.object(delivery, "deliver", return_value=delivery.FAILED):
+            row = decisions.answer(1, option="a", user="admin", root=self.root)
+            self.assertEqual((row["status"], row["delivered_at"], row["delivery"]),
+                             ("answered", None, "pending"))
+            self.assertTrue(decisions.owed(self.root))
+            self.assertEqual(decisions.redeliver(root=self.root), [{"ids": [1], "ok": False}])
         self.assertEqual(self.turns(), [])
         self.assertEqual(len(_raw(self.home)), 1)        # the memory does not wait
-        self.assertEqual(decisions.redeliver(root=self.root), [{"ids": [1], "ok": False}])
-        self.cousin("wren", operator="Priya")             # the runner is back
         self.assertEqual(decisions.redeliver(root=self.root), [{"ids": [1], "ok": True}])
         self.assertEqual(decisions.redeliver(root=self.root), [])
         self.assertEqual(len(self.turns()), 1)
-        self.assertTrue(decisions.show(1, root=self.root)["delivered_at"])
+        self.assertTrue(decisions.show(1, root=self.root)["delivered"])
+        self.assertFalse(decisions.owed(self.root))
+
+    def test_a_refused_delivery_is_undeliverable_until_a_manual_retry(self):
+        self.cousin("wren", operator="Priya", runner=False)     # refused: no runner kind
+        self.ask()
+        row = decisions.answer(1, option="a", user="admin", root=self.root)
+        self.assertEqual(row["delivery"], "undeliverable")
+        self.assertTrue(row["delivered_at"].startswith("gone:"))
+        self.assertIn("its delivery is refused", row["undeliverable"])
+        self.assertFalse(row["delivered"])
+        self.assertFalse(decisions.owed(self.root))      # the poller leaves it alone
+        self.assertEqual(decisions.redeliver(root=self.root), [])
+        self.cousin("wren", operator="Priya")             # the runner kind is back
+        self.assertEqual(decisions.redeliver(root=self.root), [])
+        self.assertEqual(decisions.redeliver(retry_gone=True, root=self.root),
+                         [{"ids": [1], "ok": True}])
+        self.assertEqual(len(self.turns()), 1)
+        self.assertEqual(decisions.show(1, root=self.root)["undeliverable"], "")
+
+    def test_a_cousin_whose_home_is_gone_is_undeliverable_until_a_manual_retry(self):
+        import shutil
+        self.ask()
+        shutil.rmtree(self.home)
+        row = decisions.answer(1, option="a", user="admin", root=self.root)
+        self.assertEqual(row["delivery"], "undeliverable")
+        self.assertTrue(row["remembered_at"].startswith("gone:"))
+        self.assertEqual(row["undeliverable"], "the cousin's home is gone")
+        self.assertFalse(decisions.owed(self.root))
+        self.assertEqual(decisions.redeliver(root=self.root), [])
+        self.home = self.cousin("wren", operator="Priya")
+        self.assertEqual(decisions.redeliver(retry_gone=True, root=self.root),
+                         [{"ids": [1], "ok": True}])
+        row = decisions.show(1, root=self.root)
+        self.assertEqual((row["remembered"], row["delivered"]), (True, True))
+        self.assertEqual((len(_raw(self.home)), len(self.turns())), (1, 1))
 
     def test_a_delivery_that_raises_never_loses_the_answer(self):
         self.ask()
@@ -333,6 +368,16 @@ class TestCli(Case):
         self.assertEqual(rc, 0)
         self.assertIn("answered #1 -> a: keep it; delivered to wren", out)
         self.assertTrue(_raw(self.home)[0]["cite"].endswith(" in the CLI"))
+
+    def test_the_cli_redeliver_retries_an_undeliverable_answer(self):
+        self.cousin("wren", operator="Priya", runner=False)     # refused: no runner kind
+        self.ask()
+        self.assertEqual(decisions.answer(1, option="a", user="admin",
+                                          root=self.root)["delivery"], "undeliverable")
+        self.cousin("wren", operator="Priya")
+        rc, out, _ = self.run_cli("redeliver")
+        self.assertEqual((rc, out.strip()), (0, "delivered #1"))
+        self.assertEqual(len(self.turns()), 1)
 
     def test_ask_and_withdraw_need_a_cousin(self):
         self.assertEqual(self.run_cli("ask", "q")[0], 2)

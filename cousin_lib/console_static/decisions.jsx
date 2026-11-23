@@ -50,9 +50,12 @@ function decisionAnswerText(d) {
   return free;
 }
 
-// What an answered decision still owes, in words; "" when nothing.
+// What an answered decision still owes, in words; "" when nothing. One
+// that can never reach its cousin says so with the reason: only "retry
+// now" tries it again.
 function decisionOwes(d) {
   if (!d || d.status !== "answered") return "";
+  if (d.undeliverable) return "undeliverable: " + d.undeliverable;
   const out = [];
   if (!d.remembered) out.push("memory not written");
   if (!d.delivered) out.push("turn not delivered");
@@ -126,7 +129,8 @@ function DecisionsView() {
       const { r, d: out } = await apiSend("POST", `/api/decisions/${d.id}/answer`, body);
       if (!r.ok || out.error) throw new Error(out.error || `HTTP ${r.status}`);
       const how = { delivered: "sent to @" + d.cousin, waiting: "kept until its group is answered",
-                    pending: "kept; delivery is retried" }[out.decision.delivery] || "";
+                    pending: "kept; delivery is retried",
+                    undeliverable: "kept, but it cannot reach @" + d.cousin }[out.decision.delivery] || "";
       setStatus({ ok: true, msg: `answered #${d.id}` + (how ? ", " + how : "") });
       await pull();
     } catch (e) {

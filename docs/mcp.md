@@ -48,8 +48,9 @@ A call names the command and its arguments:
 ```
 
 The adapter turns that into `cousin-memory decide --stdin
---level=conclusion` with the three texts on stdin. An option is one
-`--flag=value` element, so a value that starts with `-` stays a value.
+--level=conclusion` with the three texts on stdin. An option with a long
+flag is one `--flag=value` element, so a value that starts with `-` stays a
+value; a short flag (`-n`) and its value stay two elements.
 There's never a shell in between, so backticks, `$(...)`, quotes and newlines reach the CLI
 exactly as written.
 
@@ -371,8 +372,9 @@ argv = ["cancel", "{id}"]
   to be a JSON array of its `items` type, and not empty unless it's
   optional (that's how `job run` passes a command line).
 - `commands.<name>.options`: `property = "--flag"`. `true` gives the
-  bare flag, a list repeats the flag once per item, anything else goes
-  after the flag. Left out or `false`, there's no flag. The flags go at
+  bare flag, a list repeats the flag once per item, anything else is the
+  flag's value: `--flag=value` as one element for a long flag, the flag
+  and the value as two for a short one (`-n`). Left out or `false`, there's no flag. The flags go at
   the end of the argv, or just before a literal `"--"` in it, so the
   operands after `--` stay last.
 - `commands.<name>.stdin`: properties joined and fed on stdin, with

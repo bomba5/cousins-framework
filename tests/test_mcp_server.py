@@ -266,6 +266,17 @@ class CallAssemblyCase(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             parser.parse_args(["--why", "-x"])      # the old two-element form
 
+    def test_a_short_flag_and_its_value_stay_two_elements(self):
+        # a getopt-style CLI an install registered would read `-n=5` as "=5"
+        tool = {"command": ["c"], "kind": "command",
+                "properties": {"n": {"type": "integer"}, "tag": {"type": "array"},
+                               "why": {"type": "string"}},
+                "commands": {"a": {"command": ["c"], "argv": ["a"], "stdin": [],
+                                   "options": {"n": "-n", "tag": "-t", "why": "--why"}}}}
+        argv, _ = mcp_server.build_call(tool, "a", {"n": 5, "tag": ["x", "y"], "why": "-w"},
+                                        resolve=lambda name: name)
+        self.assertEqual(argv, ["c", "a", "-n", "5", "-t", "x", "-t", "y", "--why=-w"])
+
     def test_the_memory_tool_can_mark_a_topic_obsolete(self):
         # L5 needs a writer: the tool carries it
         # with the reason as a flag and --force only when asked.

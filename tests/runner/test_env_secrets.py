@@ -4,9 +4,11 @@ runner reads them at its start (a missing one is exit 2), hands them to
 the CLI's environment and checks its .mcp.json against them; they never
 reach the runner's own process environment. The invented cast; no model
 or server is started."""
+import importlib.util
 import json
 import os
 import pathlib
+import unittest
 
 from cousin_lib import agent_settings, env_secrets
 from cousin_lib.runner import main as runner_main
@@ -84,6 +86,11 @@ class TestRunnerStart(SecretCase):
         list_names(self.home, "LEDGER_KEY")
         with self.assertRaisesRegex(RunnerError, r"\.secrets/env/LEDGER_KEY"):
             runner_main.runner_for(self.home)
+
+
+@unittest.skipUnless(importlib.util.find_spec("claude_agent_sdk"), "claude-agent-sdk not installed")
+class TestRunnerOptions(SecretCase):
+    """What the started runner hands the CLI: builds the SDK's options."""
 
     def test_the_values_reach_the_cli_env_and_the_mcp_check_never_this_process(self):
         list_names(self.home, "LEDGER_KEY")

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cousins-framework"
-version = "4.8.3"
+version = "4.9.0"
 description = "Persistent, co-located AI agents: identity, memory, lifecycle, inter-agent chat"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -57,6 +57,8 @@ cousin-watch = "cousin_lib.watch:watch_main"
 cousin-supervisor = "cousin_lib.supervisor:supervisor_main"
 cousin-migrate = "cousin_lib.migrate:migrate_main"
 cousin-upgrade = "cousin_lib.upgrade:upgrade_main"
+cousin-lint = "cousin_lib.plain_language:lint_main"
+cousin-glossary = "cousin_lib.glossary:glossary_main"
 
 [project.optional-dependencies]
 # Serving MCP needs the reference SDK; everything else in the adapter

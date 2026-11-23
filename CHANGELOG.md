@@ -3,6 +3,37 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.9.0 - 2026-11-23
+
+### Added
+
+- **A plain-language check.** `cousin-lint` checks Markdown text for em
+  dashes, sentences over a length limit (20 words for steps, 25 for
+  descriptions), banned words, words a glossary says not to use, and
+  (as a note only) the passive voice. It skips code, URLs, link targets
+  and HTML comments, prints `path:line:col rule message`, and with
+  `--fix` replaces the em dashes it can fix safely. Limits, rules and the
+  banned list live in `config/plain-language.toml`. See
+  `docs/plain-language.md`.
+- **The check on what a cousin sends.** `cousin.toml`
+  `[plain_language] reply = "off" | "note" | "fix"` (default off) runs it
+  on `reply`, on `send` to a peer and on `cousin-reply`: `note` shows the
+  findings to the cousin in the tool's result, `fix` also replaces em
+  dashes before the text goes out. It never blocks a message, and texts
+  over 64,000 characters are not checked.
+- **A glossary from the code.** `cousin-glossary terms` lists the most
+  used terms of a repository (code and docs counted apart),
+  `cousin-glossary groups` counts each glossary entry against its
+  do-not-use words and flags an entry whose preferred term is not the one
+  the code uses most, and `cousin-glossary derive` writes the glossary as
+  a table (Term, Meaning, Do not use, Uses). `cousin-lint` reads that
+  table, or the `### term` format of `docs/glossary.md`.
+- **A Language page in the console.** Check a text, see the findings and
+  the fixed text, edit the limits and the banned words (saving rewrites
+  the file, so its comments go), find terms and check glossary groups for
+  a path inside the install, a cousin's home or the framework checkout.
+  The inspector sets each cousin's `reply` mode.
+
 ## 4.8.3 - 2026-11-22
 
 ### Fixed

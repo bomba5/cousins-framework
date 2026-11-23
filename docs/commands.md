@@ -59,6 +59,7 @@ Each command has one class, so you know which ones to learn first:
 | `cousin-hive` | optional | the queen for cousins on other machines, and its node tokens |
 | `cousin-image` | optional | generate an image ([media](media.md)) |
 | `cousin-meeting` | optional | a chat with several cousins at once, in rounds |
+| `cousin-glossary` | optional | the words a repository's code and docs use, against a glossary ([plain language](plain-language.md#a-glossary-from-the-code)) |
 | `cousin-migrate` | optional | move a cousin from an older release, or to another runner kind |
 | `cousin-reincarnate` | optional | give a cousin a new role and keep its memory |
 | `cousin-spawn-node` | optional | build a cousin that runs on another machine |
@@ -68,6 +69,7 @@ Each command has one class, so you know which ones to learn first:
 | `cousin-voice` | optional | generate speech ([media](media.md)) |
 | `cousin-callback` | cousin | a cousin's library of moments worth calling back to |
 | `cousin-chat` | cousin | message another cousin, list who can be reached |
+| `cousin-lint` | cousin | check text for plain language: em dashes, long sentences, banned and glossary words ([plain language](plain-language.md)) |
 | `cousin-job` | cousin | register and track background jobs; the console's Jobs page shows them |
 | `cousin-artifact` | cousin | record build outputs as rows (path, checksum, job, commit) and check them later |
 | `cousin-reason` | cousin | deprecated since 3.50.0: write and list reasoning capsules; record reasoning with `decide` instead; removed in 4.0.0 |
@@ -734,6 +736,40 @@ Nothing here approves, rejects or removes a skill: the console does.
 cousin-skill --home cousins/wren list
 cousin-skill --home cousins/wren draft board-check --description "Check a board. Use after a regen." \
     --context personal --side-effect read-only --body-file steps.md
+```
+
+## Plain language
+
+`cousin-lint` checks Markdown or text for em dashes, sentences over their
+word limit, banned words, glossary words to avoid and (a note that never
+fails) passive verbs ([plain language](plain-language.md)). It reads the
+files named, or stdin. The limits, the rules and the banned list come from
+`config/plain-language.toml`; without it, the defaults.
+
+- `--glossary PATH`: a glossary file for this run, instead of the configured one.
+- `--only RULE,...`: only these rules (`em-dash`, `sentence-length`, `banned-word`, `glossary`, `passive`).
+- `--json`: the findings as a JSON list (path, line, col, rule, excerpt, message, fix, length, severity).
+- `--fix`: print the text with the fixable findings (the em dashes) fixed; the rest go to stderr. `--write` with it writes each file back instead.
+
+Output: `path:line:col rule message`, a note's message starting `(note)`. Exit 0: no findings. Exit 1: findings (notes do not count). Exit 2: a usage error, a config that does not check, or a file or glossary that cannot be read.
+
+```
+cousin-lint docs/*.md
+cousin-lint --glossary docs/glossary.md --only glossary,em-dash notes/today.md
+```
+
+`cousin-glossary` reads a repository and counts the words its code and its
+docs use ([a glossary from the code](plain-language.md#a-glossary-from-the-code)):
+
+- `terms PATH [--top N] [--glossary FILE]`: the most used terms, code and docs apart; the glossary's terms are marked.
+- `groups PATH --glossary FILE [--group A,B,C]...`: each synonym group's uses and its dominant member; exit 1 when an entry's term is not the one the code uses most.
+- `derive PATH --glossary FILE [--group A,B,C]... --out FILE [--force]`: write the glossary in the table format, the dominant member as each term.
+
+Each takes `--json`. Only `derive` writes, and never over a file without `--force`.
+
+```
+cousin-glossary terms . --top 40 --glossary docs/glossary.md
+cousin-glossary groups . --glossary docs/glossary.md --group "thread,conversation"
 ```
 
 ## Remote cousins

@@ -232,7 +232,7 @@ Body `{"etag", "deny_tools", "deny_bash_patterns", "ask", "outbound_filter", "co
 A cousin's `[agent]` table, per runner lane, and the rest of its `cousin.toml` the inspector edits (`cousin_lib/console/routes_agent.py`). Each kind of key has one write path:
 
 - **`[agent]`** (the keys the cousin's runner reads): `spawn.persist_agent_values`, the same path `POST /api/cousins/<slug>/model` and `/effort` take on a runner cousin. Every change is checked by `agent_settings.validate`, with the runner's own checks (`runner/main.effort_of`, `accounts.check_lane` and the tmux kind's refusal of a key or token account, `refuse_claude_name` and the opencode model checks, the `[agent.sessions]` parser, `opencode.shell_env`, the pane's hard deny for `env_allow`), key by key and then for the table as a whole; an `sdk` model then passes one smallest [turn](../glossary.md#turn), in a child process, on the account and effort the same change writes (never the ones still in the file); `agent_settings.apply` writes every change in one atomic write whose hook re-checks the parsed table. A value the file already holds is not a change.
-- **The other keys** (`cousin.name`, `cousin.peer_visible`, `memory.proactive_recall`, `memory.recall_keyword_only`, `memory.review_batch`, `memory.review_model`, `lifecycle.flip_at`, `agent.commit_attribution`, `skills.repos`): `toml_edit.write_keys`, with a hook that runs the same check on the parsed result (and `config.commit_attribution` on the `[agent]` table).
+- **The other keys** (`cousin.name`, `cousin.peer_visible`, `memory.proactive_recall`, `memory.recall_keyword_only`, `memory.review_batch`, `memory.review_model`, `lifecycle.flip_at`, `agent.commit_attribution`, `skills.repos`, `plain_language.reply`): `toml_edit.write_keys`, with a hook that runs the same check on the parsed result (and `config.commit_attribution` on the `[agent]` table).
 - **Read-only**: `[chat]` port, host and tmux_session (a changed port breaks every peer), `[session]` start and end hooks (shell commands). The kind (`[agent] runner`) is switched by a migration, never here.
 - A write is refused with `409 {"busy": true}` while a long operation, a [flip](../glossary.md#flip) or a clean stop runs on the cousin. A change that needs a restart answers `restart_required: true`; the inspector offers `POST /api/cousins/<slug>/restart`.
 
@@ -246,11 +246,11 @@ Body `{"changes": {"<key>": value | null}}` (null removes the key; `sessions` is
 
 ### `GET /api/cousins/<slug>/settings`
 
-`{"fields": {"<table.key>": {"value", "set", "default", "type", "restart", "hint", "choices"?}}, "readonly": {"chat.tmux_session", "session.start_hooks", "session.end_hooks"}, "readonly_why", "errors"}`. `lifecycle.flip_at` also has `install` (`config/harness.toml default_flip_at`, else `04:00`; null for never) and `effective` (`config.flip_time`). `agent.commit_attribution` also has `install: {"value", "source"}` (`config/harness.toml [agent]`, or the built-in default, true) and `effective`, the value the cousin runs with.
+`{"fields": {"<table.key>": {"value", "set", "default", "type", "restart", "hint", "choices"?}}, "readonly": {"chat.tmux_session", "session.start_hooks", "session.end_hooks"}, "readonly_why", "errors"}`. `lifecycle.flip_at` also has `install` (`config/harness.toml default_flip_at`, else `04:00`; null for never) and `effective` (`config.flip_time`). `plain_language.reply` also has `install`, the install's `reply_default`. `agent.commit_attribution` also has `install: {"value", "source"}` (`config/harness.toml [agent]`, or the built-in default, true) and `effective`, the value the cousin runs with.
 
 ### `POST /api/cousins/<slug>/settings`
 
-Body `{"changes": {"<table.key>": value | null}}`: `cousin.name` a non-empty line of at most 64 characters; `cousin.peer_visible`, `memory.proactive_recall`, `memory.recall_keyword_only` and `agent.commit_attribution` booleans; `memory.review_batch` a whole number, 0 or more; `memory.review_model` one word (the model's argv rule); `lifecycle.flip_at` `"HH:MM"` or `"never"`; `skills.repos` a list of the repositories in its `choices` (`personal`, `work`, `private`), each at most once, `[]` for none ([skills](skills.md)). Null removes the key (the default applies); the name cannot be removed. `200 {"ok": true, "changed", "restart_required", "settings": <the GET>, "note"?}`: `restart_required` is true when a changed key is read at start (the name, the recall keys, `commit_attribution`, `skills.repos`); `peer_visible`, the review keys and `flip_at` are read as they are used. A `commit_attribution` change on a `tmux-legacy` or `tmux` cousin also rewrites its `.claude/settings.json` (`harness_settings.apply_project_settings`, what `cousin-spawn --repair-settings` runs), where that lane reads it; `note` says so, names any of the operator's own keys there (`includeCoAuthoredBy`, `attribution`, not the framework's) that say the opposite and win, or says why the file was left (its own refusal). Any other failure of that step is `500 {"error", "written": {"agent.commit_attribution": value}}`: cousin.toml already holds the value, the harness settings do not. `400 {"errors"}` for a bad value, a read-only key or an unknown one; nothing is written.
+Body `{"changes": {"<table.key>": value | null}}`: `cousin.name` a non-empty line of at most 64 characters; `cousin.peer_visible`, `memory.proactive_recall`, `memory.recall_keyword_only` and `agent.commit_attribution` booleans; `memory.review_batch` a whole number, 0 or more; `memory.review_model` one word (the model's argv rule); `lifecycle.flip_at` `"HH:MM"` or `"never"`; `skills.repos` a list of the repositories in its `choices` (`personal`, `work`, `private`), each at most once, `[]` for none ([skills](skills.md)); `plain_language.reply` one of its `choices` (`off`, `note`, `fix`; [plain language](../plain-language.md#the-reply-modes)). Null removes the key (the default applies); the name cannot be removed. `200 {"ok": true, "changed", "restart_required", "settings": <the GET>, "note"?}`: `restart_required` is true when a changed key is read at start (the name, the recall keys, `commit_attribution`, `skills.repos`); `peer_visible`, the review keys, `flip_at` and `plain_language.reply` are read as they are used. A `commit_attribution` change on a `tmux-legacy` or `tmux` cousin also rewrites its `.claude/settings.json` (`harness_settings.apply_project_settings`, what `cousin-spawn --repair-settings` runs), where that lane reads it; `note` says so, names any of the operator's own keys there (`includeCoAuthoredBy`, `attribution`, not the framework's) that say the opposite and win, or says why the file was left (its own refusal). Any other failure of that step is `500 {"error", "written": {"agent.commit_attribution": value}}`: cousin.toml already holds the value, the harness settings do not. `400 {"errors"}` for a bad value, a read-only key or an unknown one; nothing is written.
 
 ## Plugins
 
@@ -271,6 +271,34 @@ Body `{"enabled": ["<name>", ...]}`: every name a plugin of this install. Writte
 ### `/plugins/<name>/<path...>` (the proxy)
 
 Not under `/api/`, behind the same guard and login (a session; `401` without one, `503` with a broken users file). `GET`, `POST` and `HEAD` are forwarded to `http://127.0.0.1:<port>/<path...>`, the query kept, where `<port>` is the plugin's declared `[service] port`; nothing else is reachable through it. Request: hop-by-hop headers, `Cookie` and `Authorization` dropped, `X-Forwarded-Prefix: /plugins/<name>` added, the body bounded at 1 MB (`413` before it is read). Response: the status and headers passed through (hop-by-hop dropped), the body streamed and flushed chunk by chunk, so an event stream (`text/event-stream`) stays open with no buffering. A plugin the install does not have, or one with no `[service]`, is `404`; a service that does not answer is `502` with one line. Other methods: `405`.
+
+## Language
+
+The plain-language check ([plain language](../plain-language.md); `cousin_lib/console/routes_language.py`). A path in a body or a query (a glossary) is relative to the install root and must lie under the install root, a cousin's home or the framework checkout once resolved; anything else is `400`.
+
+### `POST /api/language/check`
+
+Body `{"text", "glossary"?}`: the text (at most 200000 characters) and, optionally, a glossary file for this check instead of the configured one. `200 {"findings": [{"line", "col", "rule", "excerpt", "message", "fix", "length", "severity"}], "fixed", "glossary_terms"}`: `fixed` is the text with each fixable finding fixed. `400` for a text that is not a string or too long, a glossary that cannot be read, or a `config/plain-language.toml` that does not check.
+
+### `GET /api/language/terms`
+
+Query `path` (required), `top` (1 to 1000, default 50), `glossary` (optional; else the configured one, to mark terms). `200 {"terms": [{"term", "code", "docs", "total", "glossary"}], "files", "skipped", "truncated"}` (`cousin_lib/glossary.terms`; `glossary` is `"term"`, `"avoid"` or empty). `400` for a path outside the allowed places or a bad `top`, `404` for a path that does not exist. Reads only.
+
+### `POST /api/language/groups`
+
+Body `{"path", "glossary"?, "groups"?: ["a,b,c", ...]}`: the synonym groups are the glossary's entries (the named file, else the configured one) and `groups`, the preferred word first. `200 {"groups": [{"term", "meaning", "members": [{"word", "code", "docs"}], "dominant", "flagged", "message"}], "flagged"}`. `400` when there is no group, `404` for a path that does not exist. Reads only.
+
+### `POST /api/language/derive`
+
+The groups body. `200 {"text", "entries"}`: the glossary in the table format (Term, Meaning, Do not use, Uses), each term the dominant member. The console returns the text and writes no file (`cousin-glossary derive --out` writes one).
+
+### `GET /api/language/config`
+
+`{"config": {"limits", "rules", "banned", "glossary", "reply_default"}, "exists", "path", "rules", "modes", "cousins": [{"slug", "name", "reply", "set"}], "error"?}`: the file checked (the defaults when it is missing or, with `error`, when it does not check), the rule and mode names, and each local cousin's reply mode (`set` false: the install default).
+
+### `PUT /api/language/config`
+
+Body `{"config": {...}}` in the GET's shape (a key left out takes its default). Checked whole, then the file is written in one step. `200 {"ok": true, "config"}`; `400` with the reason, nothing written. A cousin's reply mode is `plain_language.reply` in `POST /api/cousins/<slug>/settings`.
 
 ## Kind switch and migration
 

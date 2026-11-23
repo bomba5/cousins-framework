@@ -431,7 +431,8 @@ const COUSIN_SETTING_LABELS = {
   "memory.review_model": "review model",
   "lifecycle.flip_at": "flip at",
   "agent.commit_attribution": "commit attribution",
-  "skills.repos": "skill repos"
+  "skills.repos": "skill repos",
+  "plain_language.reply": "plain language"
 };
 function CousinSettingsPanel({ cousin }) {
   const c = cousin;
@@ -515,6 +516,19 @@ function CousinSettingsPanel({ cousin }) {
     }
     if (row.type === "bool") {
       return /* @__PURE__ */ React.createElement("label", { style: { display: "inline-flex", gap: 6, alignItems: "center" } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!v, disabled: busy, onChange: (e) => set(n, e.target.checked) }), /* @__PURE__ */ React.createElement("span", { style: agentMono }, v ? "true" : "false"));
+    }
+    if (row.type === "choice") {
+      return /* @__PURE__ */ React.createElement(
+        "select",
+        {
+          className: "sel",
+          value: v ?? "",
+          disabled: busy,
+          onChange: (e) => set(n, e.target.value === "" ? null : e.target.value)
+        },
+        /* @__PURE__ */ React.createElement("option", { value: "" }, "install default (", row.install || "off", ")"),
+        (row.choices || []).map((ch) => /* @__PURE__ */ React.createElement("option", { key: ch, value: ch }, ch))
+      );
     }
     if (row.type === "count") {
       return /* @__PURE__ */ React.createElement(

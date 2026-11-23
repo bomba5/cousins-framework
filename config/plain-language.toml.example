@@ -1,0 +1,33 @@
+# The plain-language check (cousin-lint, the console's Language page, and a
+# cousin's reply and send when its cousin.toml says so). Copy to
+# config/plain-language.toml to change the defaults; without the file the
+# check runs with the values shown here. See docs/plain-language.md.
+
+# What a cousin's reply and send do when its cousin.toml sets no
+# [plain_language] reply: "off", "note" (send as written, findings to the
+# cousin) or "fix" (fix the em dashes first, note the rest).
+reply_default = "off"
+
+# A glossary file, relative to the install root: its "do not use" words are
+# findings. Optional; cousin-lint --glossary overrides it for one run.
+# glossary = "docs/glossary.md"
+
+[limits]
+step = 20           # words per sentence in a numbered item, or one that starts with a verb
+description = 25    # words per sentence anywhere else
+
+[rules]
+em_dash = true
+sentence_length = true
+banned_word = true
+glossary = true
+passive = true      # a heuristic: reported as a note, never a failing finding
+
+# One table per word or phrase; `use` (optional) is named in the message.
+[[banned]]
+word = "leverage"
+use = "use"
+
+[[banned]]
+word = "utilize"
+use = "use"

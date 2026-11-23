@@ -136,7 +136,11 @@ def reply_main(argv=None):
         body = "(%s: %s)" % (attachment[0], attachment[1].name)
     try:
         cfg = CousinConfig.from_env()
-        policy = OutboundPolicy.load(framework_root_for(cfg.home))
+        root = framework_root_for(cfg.home)
+        policy = OutboundPolicy.load(root)
+        # the cousin's [plain_language] reply mode: never blocks, may fix
+        from cousin_lib import plain_language
+        body, language = plain_language.outbound(cfg.home, root, body)
         result = send_reply(cfg, body, user=args.user,
                             reply_to=args.reply_to, policy=policy,
                             attachment=attachment)
@@ -151,4 +155,6 @@ def reply_main(argv=None):
               file=sys.stderr)
         return 1
     print("reply posted (id=%s)" % result.get("id"))
+    if language:
+        print(language)
     return 0

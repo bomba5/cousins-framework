@@ -210,6 +210,7 @@ Nothing in this group is needed to run a cousin. Each page says so at the top.
 - [Remote cousins](docs/remote-cousins.md) - a cousin on another machine,
   like a Pi on your desk
 - [Plugins](docs/plugins.md) - tools, a service and a console tab the framework runs but does not ship
+- [Plain language](docs/plain-language.md) - a check for em dashes, long sentences and words to avoid, in docs and replies
 - [Jobs and loops](docs/jobs-and-loops.md) - background work and schedules
   beyond the default heartbeat and daily flip
 - [Migrating](docs/migrating.md) - moving an existing cousin in

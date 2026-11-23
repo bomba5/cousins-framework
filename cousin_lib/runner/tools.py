@@ -715,6 +715,9 @@ def reply(ctx, text, *, thread=None, reply_to=None, image=None, video=None):
     if kind not in ("operator", "person"):
         raise ValueError("%s is not a chat-surface thread; name the destination with"
                          " thread=operator:<name> or person:<name>" % target)
+    # the cousin's [plain_language] reply mode: never blocks, may fix
+    from cousin_lib import plain_language
+    text, language = plain_language.outbound(ctx.home, ctx.root, text)
     if getattr(ctx.policy, "outbound_filter", True):
         from cousin_lib.outbound_filter import OutboundPolicy
         OutboundPolicy.load(ctx.root).check(text, from_slug=ctx.slug, dest_slug="",
@@ -741,7 +744,8 @@ def reply(ctx, text, *, thread=None, reply_to=None, image=None, video=None):
     finally:
         if store is not None:
             store.close()
-    return "%s%s (#%d)" % (REPLIED, key, row["id"])
+    done = "%s%s (#%d)" % (REPLIED, key, row["id"])
+    return "%s\n%s" % (done, language) if language else done
 
 
 # --------------------------------------------------------------- send
@@ -797,13 +801,17 @@ def _send(ctx, a):
                          % (to, known, ", ".join(operators) or "(none)"))
     if a.get("image") or a.get("video"):
         raise ValueError("send: image and video go to an operator reply only, not to a peer")
+    from cousin_lib import plain_language
     from cousin_lib.outbound_filter import OutboundPolicy
+    text, language = plain_language.outbound(ctx.home, ctx.root, text)
     # One root for the filter on both routes: reply loads it from ctx.root too.
     policy = OutboundPolicy.load(ctx.root) if getattr(ctx.policy, "outbound_filter", True) else None
     result = chat.send_message(fw, cfg, to, text, policy=policy, display_name=ctx.name) or {}
     out = {"ok": True, "to": to, "id": result.get("id")}
     if result.get("queued"):
         out.update(queued=True, msg_id=result.get("msg_id"), note=result.get("note"))
+    if language:
+        out["plain_language"] = language
     return json.dumps(out, sort_keys=True)
 
 

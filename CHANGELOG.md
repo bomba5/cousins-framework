@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.11.1 - 2026-11-23
+
+### Fixed
+
+- **The plain-language check reads a chat message as a message.** A
+  `reply` or `send` that opens with `---` was read as YAML front matter,
+  so everything up to the next `---` went unchecked and unfixed; a message
+  is now checked whole (files keep their front matter skip).
+- **Indented code is code.** A block indented four spaces or a tab, after
+  a blank line and outside a list, is skipped like a fenced one; in the
+  `fix` reply mode it was being "fixed". A list item's indented
+  continuation is still prose.
+- **The `send` tool no longer promises "verbatim".** The shipped
+  registry's `text` description now says the `fix` reply mode fixes what
+  it can first.
+
 ## 4.11.0 - 2026-11-23
 
 ### Added

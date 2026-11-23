@@ -417,17 +417,21 @@ def _first_word(text):
     return m.group(0).lower() if m else ""
 
 
-def _blocks(text):
+def _blocks(text, front_matter=True):
+    """The prose blocks of Markdown `text`: fenced and indented code (four
+    spaces, or a tab, starting a block outside a list) are skipped, and so
+    is a YAML front matter block at the top when `front_matter` (a file;
+    a chat message has none, so one starting with `---` is all prose)."""
     lines = text.split("\n")
     start = 0
-    if lines and lines[0].strip() == "---":
+    if front_matter and lines and lines[0].strip() == "---":
         for k in range(1, len(lines)):
             if lines[k].strip() in ("---", "..."):
                 start = k + 1
                 break
     blocks, cur = [], None
     fence = None
-    comment = table = False
+    comment = table = in_list = False
     for n in range(start, len(lines)):
         raw = lines[n]
         fence, code = _fence(fence, raw)
@@ -437,6 +441,9 @@ def _blocks(text):
         if not raw.strip():
             cur, table = None, False
             continue
+        indent = len(raw.expandtabs(4)) - len(raw.expandtabs(4).lstrip())
+        if cur is None and not in_list and not comment and indent >= 4:
+            continue        # an indented code block: it cannot interrupt a paragraph
         raw, comment = _uncomment(raw, comment)
         if not raw.strip():
             cur = None
@@ -447,7 +454,7 @@ def _blocks(text):
             masked = " " * quote.end() + masked[quote.end():]
         body = masked.strip()
         if _HEADING.match(masked):
-            cur = None
+            cur, in_list = None, False
             blocks.append(_Block("heading", n, 0, masked))
             continue
         if _THEMATIC.match(raw):
@@ -467,10 +474,12 @@ def _blocks(text):
         if item:
             rest = masked[item.end():]
             step = item.group(3) is not None or _first_word(rest) in IMPERATIVE
-            cur = _Block("step" if step else "item", n, item.end(), rest)
+            cur, in_list = _Block("step" if step else "item", n, item.end(), rest), True
             blocks.append(cur)
             continue
         indent = len(masked) - len(masked.lstrip())
+        if indent == 0 and cur is None:
+            in_list = False     # a new unindented paragraph ends the list
         if cur is None:
             cur = _Block("para", n, indent, masked[indent:])
             blocks.append(cur)
@@ -544,10 +553,11 @@ def _dashes(raw, line, col, seg):
     return out
 
 
-def check(text, *, config=None, glossary=None):
+def check(text, *, config=None, glossary=None, front_matter=True):
     """The findings in `text`, in line and column order. `config` is a
     checked config (load_config; None: the defaults), `glossary` a
-    parse_glossary result (None: no glossary rule)."""
+    parse_glossary result (None: no glossary rule). `front_matter` False
+    reads a leading `---` block as prose (a chat message, not a file)."""
     cfg = check_config(config) if config is not None else default_config()
     on = cfg["rules"]
     found = []
@@ -560,7 +570,7 @@ def check(text, *, config=None, glossary=None):
                     terms.append((term, word, _phrase(word), preferred))
     banned = [(row, _phrase(row["word"])) for row in cfg["banned"]] if on["banned_word"] else []
     lines = text.split("\n")
-    for block in _blocks(text):
+    for block in _blocks(text, front_matter):
         joined, starts = block.joined()
         if on["em_dash"]:
             for line, col, seg in block.segments:
@@ -670,12 +680,14 @@ def outbound(home, root, text):
             glossary, problem = configured_glossary(root, cfg), ""
         except ConfigError as err:
             glossary, problem = None, "\nplain language: no glossary check: %s" % err
-        found = check(text, config=cfg, glossary=glossary)
+        # a message has no front matter: a reply that opens with `---` is checked whole
+        found = check(text, config=cfg, glossary=glossary, front_matter=False)
         fixable = [f for f in found if f.fix is not None] if mode == "fix" else []
         if fixable:
             text = apply_fixes(text, fixable)
             # the rest, where they are in the text that goes
-            found = [f for f in check(text, config=cfg, glossary=glossary) if f.fix is None]
+            found = [f for f in check(text, config=cfg, glossary=glossary, front_matter=False)
+                     if f.fix is None]
         return text, (describe(found, fixed=len(fixable)) + problem).strip()
     except Exception:  # noqa: BLE001 - the check never blocks a reply
         return text, ""

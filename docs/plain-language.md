@@ -18,9 +18,12 @@ points at verbs that may be passive. It runs in three places:
 ## What it checks
 
 The check reads Markdown or plain text. It skips fenced code blocks (in a
-list item or a quote too), inline code spans, URLs, link targets, HTML
-comments and the separator row of a table. A table cell is checked as text of
-its own. A YAML front matter block at the top of a file is skipped.
+list item or a quote too), indented code blocks (four spaces or a tab, after
+a blank line and outside a list), inline code spans, URLs, link targets,
+HTML comments and the separator row of a table. A table cell is checked as
+text of its own. A YAML front matter block at the top of a file is skipped;
+a chat message has none, so the `reply` and `send` tools check a message
+that opens with `---` whole.
 
 | rule | finds | fix |
 |---|---|---|

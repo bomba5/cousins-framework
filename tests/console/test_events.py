@@ -167,6 +167,7 @@ class TestPoller(EventsCase):
         self.assertIn(("decisions-refresh", {"open": 0}), p.poll(now=8.0))
 
     def test_the_poller_retries_what_answers_owe(self):
+        from datetime import timedelta
         from cousin_lib import delivery
         from cousin_lib.runner.inbox import Inbox
         home = self.root / "cousins" / "testa"
@@ -178,7 +179,11 @@ class TestPoller(EventsCase):
         with mock.patch.object(delivery, "deliver", return_value=delivery.FAILED):
             self.assertEqual(decisions.answer(1, answer="this", user="admin",
                                               root=self.root)["delivery"], "pending")
-        p.poll(now=2.0)
+        p.poll(now=2.0)                  # a fresh answer is its request's
+        self.assertFalse(decisions.show(1, root=self.root)["delivered"])
+        later = decisions._clock() + timedelta(seconds=decisions.ANSWER_GRACE_S + 1)
+        with mock.patch.object(decisions, "_clock", return_value=later):
+            p.poll(now=4.0)
         self.assertTrue(decisions.show(1, root=self.root)["delivered"])
         self.assertEqual(len(Inbox(home).open_rows("decision")), 1)
 

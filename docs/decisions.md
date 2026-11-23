@@ -29,7 +29,8 @@ answer: one list for the whole install, in the console's **Decisions** page.
 If the turn cannot be delivered for now (a write that failed, say), the
 answer is kept and marked undelivered; the Decisions page shows "turn not
 delivered" (or "memory not written") beside it. The console retries what is
-owed every few seconds, and **retry now** on the page and `cousin-decision
+owed every few seconds, once an answer is 30 seconds old (until then it is the
+answering request's own), and **retry now** on the page and `cousin-decision
 redeliver` retry at once. An answer that can never reach its cousin (its
 home is gone, or its delivery is refused: a [worker](glossary.md#worker), or a cousin with no
 [runner](glossary.md#runner) kind) is marked undeliverable instead, with

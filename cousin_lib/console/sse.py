@@ -151,8 +151,10 @@ def _default_sources(root):
         "decisions": lambda: decisions.signature(root=root),
         # what answers still owe (a memory, a turn, a group now due), retried
         # here, in the one poller thread, one pass at a time
-        "decisions_retry": lambda: (decisions.redeliver(root=root)
-                                    if decisions.owed(root=root) else []),
+        # (an answer younger than ANSWER_GRACE_S is its own request's)
+        "decisions_retry": lambda: (
+            decisions.redeliver(root=root, min_age=decisions.ANSWER_GRACE_S)
+            if decisions.owed(root=root) else []),
     }
 
 

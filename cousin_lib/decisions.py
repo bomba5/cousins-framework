@@ -47,6 +47,9 @@ TOPIC_CHARS = 60
 # question is this old: with one question per call, the operator could
 # otherwise settle a group before the cousin asked its next question.
 GROUP_GRACE_S = 60
+# the console's poller leaves an answer this young to the request that
+# recorded it, so the two never race for its first delivery
+ANSWER_GRACE_S = 30
 # The memory and the turn an answer owes are claimed under BEGIN
 # IMMEDIATE with a lease ("pending:<token>:<iso>" in remembered_at or
 # delivered_at); only the claimant writes, and a lease this old is taken
@@ -488,7 +491,18 @@ def owed(root=None):
         conn.close()
 
 
-def redeliver(*, retry_gone=False, root=None):
+def _young(row, now, min_age):
+    """Answered less than min_age seconds ago."""
+    if not min_age or not row.get("answered_at"):
+        return False
+    try:
+        at = datetime.fromisoformat(row["answered_at"])
+    except ValueError:
+        return False
+    return (now - at).total_seconds() < min_age
+
+
+def redeliver(*, retry_gone=False, min_age=0, root=None):
     """Retry every memory and turn an answer still owes (the console's
     event poller calls it while anything is owed). The manual retry (the
     CLI's, the console's button) passes retry_gone, which first clears the
@@ -500,10 +514,11 @@ def redeliver(*, retry_gone=False, root=None):
                 conn.execute("UPDATE decisions SET %s=NULL WHERE %s LIKE 'gone:%%'"
                              % (column, column))
         _write(root, clear)
+    now = _clock()
     for row in list_decisions(status="answered", root=root):
-        if not done(row["remembered_at"]):
+        if not done(row["remembered_at"]) and not _young(row, now, min_age):
             _remember(root, row)
-    return _settle(root, None, None)
+    return _settle(root, None, None, min_age=min_age)
 
 
 # ---- after an answer ---------------------------------------------------
@@ -650,7 +665,7 @@ def store_id(root=None):
         conn.close()
 
 
-def _units(root, cousin, grp):
+def _units(root, cousin, grp, min_age=0):
     """The turns owed: answered rows whose turn is not done, one unit per
     ungrouped row and one per settled group: no decision of it open, and
     its newest question older than GROUP_GRACE_S."""
@@ -675,6 +690,8 @@ def _units(root, cousin, grp):
                 units.append(members)
     finally:
         conn.close()
+    now = _clock()
+    units = [u for u in units if not any(_young(r, now, min_age) for r in u)]
     return sorted(units, key=lambda u: u[0]["id"])
 
 
@@ -689,11 +706,11 @@ def _group_due(conn, cousin, grp):
     return _clock() - datetime.fromisoformat(newest) >= timedelta(seconds=GROUP_GRACE_S)
 
 
-def _settle(root, cousin, grp):
+def _settle(root, cousin, grp, min_age=0):
     """Deliver every unit owed (for one cousin and group, or all of them),
     each by the one process that claims its rows."""
     out = []
-    for unit in _units(root, cousin, grp):
+    for unit in _units(root, cousin, grp, min_age):
         ids = [r["id"] for r in unit]
         lease = _claim(root, "delivered_at", ids)
         if lease is None:

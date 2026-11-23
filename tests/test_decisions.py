@@ -157,6 +157,40 @@ class TestAnswer(Case):
         self.assertTrue(decisions.show(1, root=self.root)["delivered"])
         self.assertFalse(decisions.owed(self.root))
 
+    def test_the_pollers_retry_leaves_a_fresh_answer_to_its_own_request(self):
+        # the console's poller runs redeliver(min_age=ANSWER_GRACE_S) while
+        # anything is owed: in the moment between an answer's commit and its
+        # own delivery it must not take the turn (the answer would then say
+        # "pending" for a turn that is being delivered)
+        from datetime import timedelta
+        self.ask()
+        seen = []
+
+        def poll_in_the_gap(*args, **kwargs):
+            if not seen:                 # the poller's pass, once, in the gap
+                seen.append(None)
+                seen.append(decisions.redeliver(root=self.root,
+                                                min_age=decisions.ANSWER_GRACE_S))
+            return real(*args, **kwargs)
+        real = decisions._settle
+        with mock.patch.object(decisions, "_settle", side_effect=poll_in_the_gap):
+            row = decisions.answer(1, option="a", user="admin", root=self.root)
+        self.assertEqual(seen[1], [])
+        self.assertEqual(row["delivery"], "delivered")
+        self.assertEqual(len(self.turns()), 1)
+        self.assertEqual(len(_raw(self.home)), 1)
+        # an answer older than the grace is the poller's to retry
+        self.ask()
+        with mock.patch.object(delivery, "deliver", return_value=delivery.FAILED):
+            decisions.answer(2, option="a", user="admin", root=self.root)
+        self.assertEqual(decisions.redeliver(root=self.root,
+                                             min_age=decisions.ANSWER_GRACE_S), [])
+        later = decisions._clock() + timedelta(seconds=decisions.ANSWER_GRACE_S + 1)
+        with mock.patch.object(decisions, "_clock", return_value=later):
+            self.assertEqual(decisions.redeliver(root=self.root,
+                                                 min_age=decisions.ANSWER_GRACE_S),
+                             [{"ids": [2], "ok": True}])
+
     def test_a_refused_delivery_is_undeliverable_until_a_manual_retry(self):
         self.cousin("wren", operator="Priya", runner=False)     # refused: no runner kind
         self.ask()

@@ -92,6 +92,7 @@ PACKAGE_ROUTE_MODULES = [
     "cousin_lib.console.routes_system",     # system and install config
     "cousin_lib.console.routes_skills",     # skills: inspect, approve, remove
     "cousin_lib.console.routes_language",   # plain-language check and glossary
+    "cousin_lib.console.routes_decisions",  # the decision register
 ]
 
 # /api/version is public: the login page may show it, and it says only

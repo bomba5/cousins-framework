@@ -353,8 +353,9 @@ def _array_elements(spec, value, cmd_name, name):
 
 def build_call(tool, cmd_name, args, extra_argv=(), resolve=resolve_command):
     """The argv list and stdin bytes for one call. Never a string: a
-    placeholder becomes whole elements, an option becomes flag elements,
-    and nothing is ever formatted into a larger string. An array-typed
+    placeholder becomes whole elements, an option one `--flag=value`
+    element (a boolean the bare flag), and nothing else is ever formatted
+    into a larger string. An array-typed
     placeholder spreads into one element per item. Options go at the end,
     or just before a literal `--` in the command's argv, so a command
     array after `--` stays the last thing on the line."""
@@ -399,6 +400,8 @@ def build_call(tool, cmd_name, args, extra_argv=(), resolve=resolve_command):
         else:
             raise ToolError("%s: missing required property %r"
                             % (cmd_name, name))
+    # `--flag=value`, one element: a value that starts with "-" (a note
+    # such as "-x is fine") is never read by the CLI's parser as a flag
     flags = []
     for name, flag in cmd["options"].items():
         value = args.get(name)
@@ -407,10 +410,9 @@ def build_call(tool, cmd_name, args, extra_argv=(), resolve=resolve_command):
         if value is True:
             flags.append(flag)
         elif isinstance(value, list):
-            for v in value:
-                flags.extend([flag, str(v)])
+            flags.extend("%s=%s" % (flag, v) for v in value)
         else:
-            flags.extend([flag, str(value)])
+            flags.append("%s=%s" % (flag, value))
     if operands_at is None:
         argv.extend(flags)
     else:

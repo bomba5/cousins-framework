@@ -428,6 +428,7 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `held` | `<home>/run/held` exists: a stop holds the runner down until the next start |
 | `loginRequired` | the runner waits for a login or billing fix: `{"reason", "action", "since"}` from `data/login-required.json` (`action` is the line to run), else null. The file's `detail` is never shown |
 | `plugins` | the [plugins](../plugins.md) this cousin enables (`[plugins] enabled`) that the install has, valid and not disabled: `[{"name", "title", "description", "tab"}]`, `tab` `{"title", "url", "placement"}` for a plugin with a `[console]` page (`url` is `/plugins/<name><page>`, the proxy below; `placement` `"pane"`, a tab over the pane, or `"chat"`, a strip over the chat), else null; `[]` when none, and always on an install without plugins |
+| `decisions_open` | how many [decisions](../decisions.md) this cousin asked are open; the fleet shows it as needs you while the cousin is not in a turn. `decisions_stops`: the `skill:stop` points among them, `[]` when none |
 | `removedKeys` | the keys 2.0.0 no longer reads that this cousin's `cousin.toml` still carries (`[chat] port`, `[runtime] model`, ...): `[{"where", "key", "line"}]`, `line` saying what to do; `[]` when none (and on a file that does not parse). Inert, never a refusal: the card names them until `cousin-migrate tidy <slug> --yes` removes them. The install's own (`config/harness.toml`, ...) are in `cousin-supervisor status` ([configuration](../configuration.md#removed-in-200)). A remote row has none |
 
 With the hive on, remote nodes follow the local rows. They carry the same keys (the local-only ones null or 0) plus `remote: true`, `remoteState` (`online`, `offline`, `pending` = built but never checked in, `revoked`), `online`, `revoked`, `checkedIn`, `lastSeen`, `version`. For a remote row `status` is `running` when online, and `chat` is derived (`ok` online, `down` offline, `none` before the first checkin), never probed. If a slug is both local and a node, the local row wins.
@@ -992,6 +993,22 @@ Any subset of the fields, plus `add_note` (a string appended to the notes as a d
 
 `{"ok": true, "deleted": id}` or `404`.
 
+## Decisions
+
+The decision register ([decisions](../decisions.md)). Withdrawing is the asking cousin's act and has no route.
+
+### `GET /api/decisions`
+
+Query `status` (`open`, `answered`, `withdrawn`; absent is all). `{"decisions": [...], "open": n}`, open decisions first (oldest first), then the settled ones (newest first); `open` counts every open decision whatever the filter. Each row: `{"id", "cousin", "question", "options": [{"key", "text"}], "recommendation", "why", "grp", "skill", "stop", "status", "answer", "answer_option", "answered_by", "answered_at", "answered_via", "remembered_at", "delivered_at", "created_at", "updated_at"}`. `remembered` and `delivered` say whether the answer's memory is written and its turn sent (`remembered_at` and `delivered_at` hold a time when done, a `pending:` claim while a process works on it, null when owed). The list only reads: the console's event poller retries what is owed. An install with no register yet answers `{"decisions": [], "open": 0}` and creates none. `400` bad status.
+
+### `POST /api/decisions/<id>/answer`
+
+Body `{"option"?, "answer"?}`: an option key, free text, or both; at least one. Answered under the session user, else `operator`. The answer is recorded first; the memory and the turn follow (a group's turn waits for the rest of its group). `{"ok": true, "decision"}`, the row plus `delivery`: `delivered`, `waiting` (its group has open decisions, or its newest question is under 60 s old) or `pending` (delivery failed and is retried). Emits `decisions-refresh`. `400` no answer, an unknown option or a decision already settled, `404` unknown id.
+
+### `POST /api/decisions/redeliver`
+
+Retries now what answers still owe: memories not written, turns not delivered, and groups that became due. `{"ok": true, "tried": [{"ids", "ok"}]}`, one entry per turn tried. Emits `decisions-refresh`.
+
 ## Host and the console itself
 
 ### `GET /api/version`
@@ -1261,6 +1278,7 @@ The events come from two places: route handlers announce what they just did, and
 | `cousin-op` | `{"slug", "id", "kind", "phase": "started" \| "stage" \| "done" \| "failed", "stage"?, "error"?}` | a long operation started, reported a stage, or finished (`GET /api/cousins/<slug>/op`) |
 | `loop-fire` | `{"cousin", "loop", "ts"}` | a loop's last fire time moved forward |
 | `tracker-change` | `{"id", "op": "add" \| "update" \| "delete"}` | a tracker item changed, through the console or anything else |
+| `decisions-refresh` | `{"id", "op": "answer"}` from the answer route, `{"op": "redeliver"}` from the retry route; `{"open"}` from the poller | a decision was answered through the console, or the poller (every 2 s) saw the register change, as when a cousin asks or withdraws |
 | `memory-change` | `{"slug", "action", ...}` | a memory change through the console: `trash` (a delete) and `restore` (with `id`), `obsolete`, `remember` and `decide` (with `topic`), `review` (verdicts settled), a maintain action by its name (`distill`, `compact-raw`, `compact-index`, `reindex`), `portrait-synthesize` and `portrait-edit`, and `portrait-commit` (with `by`) |
 | `meeting-change` | `{"id", "op": "open" \| "post" \| "skip" \| "delete" \| "close" \| "update"}` | a meeting opened, got a post or a skip, was deleted or closed through the console; `update` when the poller (every 2 s) sees a meeting's row or entry count change, as when a cousin speaks through the CLI |
 | `accounts-change` | `{"name", "what": "added" \| "edited" \| "removed" \| "key" \| "models"}` | an account entry or key changed through the console (never the key), or its model lists were fetched (the refresh route, or a background fetch that ended) |

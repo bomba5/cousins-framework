@@ -2019,8 +2019,21 @@ function fleetAttention(c) {
     if (r.state === "errored") return { level: "needs", why: "the runner errored" };
     if (r.state === "rate_limited") return { level: "warn", why: "rate limited" };
   }
+  // open decisions wait on the operator while the cousin is not working
+  // on something else (no runner state of its own: the row's count)
+  const working = r && r.alive && (r.state === "running" || r.state === "rolling_over");
+  if (c.decisions_open > 0 && !working) return { level: "needs", why: fleetDecisionsWhy(c) };
   if (c.chat === "down") return { level: "warn", why: "chat server down" };
   return null;
+}
+
+// The open decisions a row waits on, in words: "N decisions open", or
+// "waiting on you at <skill>:<stop>" when a skill's stop point asked them.
+function fleetDecisionsWhy(c) {
+  const n = (c && c.decisions_open) || 0;
+  const count = n + (n === 1 ? " decision open" : " decisions open");
+  const stops = (c && c.decisions_stops) || [];
+  return stops.length ? "waiting on you at " + stops.join(", ") + " (" + count + ")" : count;
 }
 
 // A runner waiting on data/login-required.json: what it waits for and the
@@ -2049,7 +2062,7 @@ function fleetState(c) {
   const att = fleetAttention(c);
   if (att && att.level === "needs") {
     return { word: c.runner && c.runner.state === "errored" ? "errored" : "needs you",
-             tone: "red", pulse: false };
+             tone: "red", pulse: false, why: att.why };
   }
   if (c.runner) {
     const st = c.runner.state;
@@ -2434,5 +2447,5 @@ Object.assign(window, {
   JobsView, MemoryView, LoopsView, TokensView, TrackerView, SettingsView, AccountPanel, RestartPanel,
   HostView, CousinTag, Field, Stat, TRACKER_STATES,
   fleetRunnerKind, fleetAttention, fleetState, fleetOrder, fleetHealth, fleetNextFlip, nextFlip, fleetIn,
-  fleetLoginWhy, fleetLoginWaits,
+  fleetLoginWhy, fleetLoginWaits, fleetDecisionsWhy,
 });

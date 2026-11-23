@@ -8,7 +8,7 @@ file that defines it, and how to add your own tools.
 
 ## What a cousin gets
 
-Every cousin spawned by the framework comes with six tools:
+Every cousin spawned by the framework comes with seven tools:
 
 | Tool | Runs | Commands |
 |---|---|---|
@@ -18,6 +18,7 @@ Every cousin spawned by the framework comes with six tools:
 | `schedule` | `cousin-schedule` | `add`, `list`, `cancel` |
 | `meeting` | `cousin-meeting` | `say`, `pass`, `minutes`, `show` ([meetings](meetings.md)) |
 | `skill` | `cousin-skill` | `list`, `show`, `draft`, `diff` ([skills](reference/skills.md)) |
+| `decision` | `cousin-decision` | `ask`, `list`, `withdraw` ([decisions](decisions.md)) |
 
 A cousin's tools come from its own `mcp-registry.toml`, copied from the
 install's at spawn. `why`, and `derived_from` on `remember` and `decide`,
@@ -46,9 +47,10 @@ A call names the command and its arguments:
  "reasoning": "leaves room for `hive` and $(whatever)", "level": "conclusion"}
 ```
 
-The adapter turns that into `cousin-memory decide --stdin --level
-conclusion` with the three texts on stdin. There's never a shell in
-between, so backticks, `$(...)`, quotes and newlines reach the CLI
+The adapter turns that into `cousin-memory decide --stdin
+--level=conclusion` with the three texts on stdin. An option is one
+`--flag=value` element, so a value that starts with `-` stays a value.
+There's never a shell in between, so backticks, `$(...)`, quotes and newlines reach the CLI
 exactly as written.
 
 `send` is the one that does more than pass arguments through. It takes

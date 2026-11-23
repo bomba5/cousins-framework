@@ -624,6 +624,9 @@ function App() {
         // Re-dispatched like cousin-flip: the Meetings view refetches
         // its list and the open thread without a SSE handle of its own.
         window.dispatchEvent(new CustomEvent("fw-meeting-change", { detail: data }));
+      } else if (kind === "decisions-refresh") {
+        // Re-dispatched like meeting-change: the Decisions view refetches.
+        window.dispatchEvent(new CustomEvent("fw-decisions-refresh", { detail: data }));
       } else if (kind === "tracker-change" || kind === "loop-fire") {
         // Views that care poll their own routes.
       }

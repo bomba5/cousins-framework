@@ -144,7 +144,7 @@ class TestDoctrineFollowsServedTools(HermeticCase):
         return reg, contract.render(reg, "1.12.0", **kw)
 
     def test_a_disabled_tool_is_named_nowhere(self):
-        for name in ("send", "memory", "job", "schedule", "meeting"):
+        for name in ("send", "memory", "job", "schedule", "meeting", "decision"):
             reg, text = self._without(name)
             self.assertNotIn("`%s`" % name, text, name)
             self.assertNotIn("mcp__cousin__%s" % name, text, name)

@@ -96,6 +96,7 @@ differently here and in the agent:
 | `must-not-trigger` | a prompt | one that MUST NOT; a draft without it is not approved |
 | `scope` | `own`, `shared` | the cousin's folder (the default) or `shared/`; `shared` only for a general skill in `personal` |
 | `source` | `<url>@<commit>`, the full commit | a skill from outside: where it came from |
+| `stops` | stop names, comma-separated, each like a skill name, each once | its stop points: where it asks the operator's choices with the `decision` tool and ends the turn ([stop points](#stop-points)) |
 
 `hosts`, `reads`, `rests-on` and `source` left out, or with nothing after
 the colon (YAML's null), are not declared; `""` declares none (`hosts: ""`
@@ -117,6 +118,28 @@ them, so a format rule never unloads an approved skill. Reading the
 frontmatter is the one rule loading shares: a value it cannot read (a
 double-quoted one with an escape JSON lacks) keeps that skill from loading,
 with the reason.
+
+### Stop points
+
+A skill that needs the operator's choices at known places names them in
+`stops` (`stops: "review, publish"`); the `draft` tool and command take it
+as `stops` and `--stops`, and the draft review in the console shows it. The
+draft tool and approval refuse a name that is not lowercase letters, digits
+and single `-`, and a name given twice; loading does not check it, but a
+list that is not sound adds nothing. When the cousin's skills are exported
+at a start, the exported SKILL.md gets one line after its frontmatter (the
+approved copy is unchanged):
+
+```
+Stop points: review, publish. At each, ask every question that is the operator's choice with the decision tool (skill `board-check` and stop set: the stop's answers come back together), then end the turn. Continue when the answers come back.
+```
+
+A decision asked with `skill` and `stop` gets the group
+`<skill>:<stop>@<run>`, so a stop's questions come back as one turn once all
+are answered, and a later run of the skill is a group of its own
+([decisions](../decisions.md#skill-stop-points)). The console's Decisions page titles
+the group "skill <name>, stop <stop>", and the fleet says "waiting on you at
+<skill>:<stop>".
 
 Public interface, under the same rule (adding is MINOR, renaming or
 removing is MAJOR): these metadata keys, the `[skills] repos` key in

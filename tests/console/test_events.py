@@ -12,7 +12,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from cousin_lib import jobs, loops, tracker
+from cousin_lib import decisions, jobs, loops, tracker
 from cousin_lib.console import router, sse
 
 
@@ -154,6 +154,31 @@ class TestPoller(EventsCase):
         events = p.poll(now=6.0)
         self.assertIn(("tracker-change", {"id": item["id"], "op": "delete"}),
                       events)
+
+    def test_a_change_in_the_decision_register_is_a_decisions_refresh(self):
+        p = self._poller()
+        p.poll(now=0.0)
+        self.assertNotIn("decisions-refresh", [k for k, _ in p.poll(now=2.0)])
+        self.assertFalse(decisions.db_path(self.root).exists())     # polling creates no store
+        decisions.ask("testa", "Which?", root=self.root)
+        self.assertIn(("decisions-refresh", {"open": 1}), p.poll(now=4.0))
+        self.assertNotIn("decisions-refresh", [k for k, _ in p.poll(now=6.0)])
+        decisions.withdraw(1, cousin="testa", root=self.root)
+        self.assertIn(("decisions-refresh", {"open": 0}), p.poll(now=8.0))
+
+    def test_the_poller_retries_what_answers_owe(self):
+        from cousin_lib.runner.inbox import Inbox
+        home = self.root / "cousins" / "testa"          # no runner yet: refused
+        p = self._poller()
+        p.poll(now=0.0)
+        decisions.ask("testa", "Which?", root=self.root)
+        self.assertEqual(decisions.answer(1, answer="this", user="admin",
+                                          root=self.root)["delivery"], "pending")
+        toml = home / "cousin.toml"
+        toml.write_text(toml.read_text() + '\n[agent]\nrunner = "fake"\n')
+        p.poll(now=2.0)
+        self.assertTrue(decisions.show(1, root=self.root)["delivered"])
+        self.assertEqual(len(Inbox(home).open_rows("decision")), 1)
 
     def test_consumed_timed_flips_become_cousin_flip_events(self):
         p = self._poller()

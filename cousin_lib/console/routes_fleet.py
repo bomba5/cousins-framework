@@ -275,7 +275,24 @@ def _plugins(server, config, loaded):
         return []
 
 
-def fleet_row(server, config, defaults=None, snap=_UNREAD, plugins=None):
+def decisions_summary(server):
+    """decisions.open_summary for the install, read once per listing; {}
+    when the register cannot be read (it never takes the listing down)."""
+    from cousin_lib import decisions
+    try:
+        return decisions.open_summary(server.root)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _decisions_open(summary, slug):
+    """The row's `decisions_open` (open decisions the cousin asked) and
+    `decisions_stops` (the skill:stop points they wait at)."""
+    entry = summary.get(slug) or {}
+    return {"decisions_open": entry.get("open", 0), "decisions_stops": entry.get("stops", [])}
+
+
+def fleet_row(server, config, defaults=None, snap=_UNREAD, plugins=None, decisions=None):
     raw = read_toml(config.home)
     cousin = raw.get("cousin", {}) if isinstance(raw, dict) else {}
     chat = None if _is_runner(config) else chat_health(config)
@@ -348,6 +365,9 @@ def fleet_row(server, config, defaults=None, snap=_UNREAD, plugins=None):
         "removedKeys": removed_keys.scan_home(config.home),
         # the plugins it enables, each with its console tab or null
         "plugins": _plugins(server, config, plugins),
+        # the operator's choices it waits on: the fleet says "needs you"
+        **_decisions_open(decisions_summary(server) if decisions is None else decisions,
+                          config.slug),
         **lane,
     }
 
@@ -376,7 +396,8 @@ def fleet_rows(server):
         loaded = fw_plugins.load(server.root)
     except Exception:  # noqa: BLE001 - _plugins answers [] per row then
         loaded = None
-    rows = [fleet_row(server, config, defaults, snap, loaded)
+    asked = decisions_summary(server)
+    rows = [fleet_row(server, config, defaults, snap, loaded, asked)
             for config in FrameworkConfig(server.root).list_cousins()]
     return rows + console_hive.remote_rows(
         server, {row["slug"] for row in rows})

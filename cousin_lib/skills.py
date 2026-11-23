@@ -61,7 +61,11 @@ TRIGGER_KEYS = ("should-trigger", "must-not-trigger")
 # "" declares none (`hosts: ""` contacts no host). The list keys are
 # comma-separated strings, since the format's metadata values are strings.
 DECLARED_KEYS = ("hosts", "reads", "rests-on", "source")
-LIST_KEYS = ("hosts", "reads", "rests-on")
+# `stops`: the skill's stop points, where it asks the operator's choices
+# with the decision tool (docs/decisions.md); the export adds one line
+# naming them (stops_line).
+STOPS_KEY = "stops"
+LIST_KEYS = ("hosts", "reads", "rests-on", STOPS_KEY)
 SKILL_FILE = "SKILL.md"
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
@@ -339,7 +343,42 @@ def declared_problems(front):
         out.append("license takes an SPDX identifier, not %s" % licence)
     elif source and not licence:
         out.append("a skill from outside (metadata.source) needs a license")
+    names = _items(meta.get(STOPS_KEY, ""))
+    bad = [n for n in names if not NAME_RE.match(n) or len(n) > NAME_MAX]
+    if bad:
+        out.append("metadata.stops takes stop names, comma-separated, each lowercase letters,"
+                   " digits and single '-', not %s" % ", ".join(bad))
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        out.append("metadata.stops names each stop once, not %s twice" % ", ".join(dupes))
     return out
+
+
+def stops_of(front):
+    """The skill's stop points (metadata.stops), in order; [] when it
+    declares none or the list is not sound (declared_problems says why)."""
+    names = _items((front.get("metadata") or {}).get(STOPS_KEY, ""))
+    if any(not NAME_RE.match(n) or len(n) > NAME_MAX for n in names) \
+            or len(set(names)) != len(names):
+        return []
+    return names
+
+
+def stops_line(name, stops):
+    """The line the export puts after a skill's frontmatter when it
+    declares stop points: what the cousin does at each one."""
+    return ("Stop points: %s. At each, ask every question that is the operator's choice with"
+            " the decision tool (skill `%s` and stop set: the stop's answers come back"
+            " together), then end the turn. Continue when the answers come back."
+            % (", ".join(stops), name))
+
+
+def _with_stops_line(text, name, stops):
+    """The SKILL.md text with stops_line after the closing `---` line, the
+    frontmatter and the body kept byte for byte."""
+    lines = text.split("\n")
+    end = next(i for i in range(1, len(lines)) if lines[i].strip() == "---")
+    return "\n".join(lines[:end + 1] + [stops_line(name, stops), ""] + lines[end + 1:])
 
 
 def _normal(key, value):
@@ -1005,6 +1044,9 @@ def export_plugins(root, home, slug, *, base=None, omit=None):
             else:
                 kept.append(name)
                 report["loaded"].append("%s:%s" % (plugin, name))
+                stops = stops_of(front)
+                if stops:
+                    skill.write_text(_with_stops_line(skill.read_text(), name, stops))
         if not kept:
             if dest.exists():
                 shutil.rmtree(dest)
@@ -1932,6 +1974,8 @@ def main(argv=None):
     p.add_argument("--body-file", help="the steps (default: stdin)")
     p.add_argument("--dry-run-task", default="",
                    help="a skill from outside: the sample task its dry run does")
+    p.add_argument("--stops", help="its stop points, comma-separated names: where it asks the"
+                                   " operator's choices with the decision tool")
     p = sub.add_parser("import", help="a draft from a skill published outside: the operator's"
                                       " act, refused inside a cousin's environment (COUSIN_HOME)")
     p.add_argument("source", help="<https url>@<full commit>:<folder>")
@@ -1973,7 +2017,8 @@ def main(argv=None):
                                          "must-not-trigger": args.must_not_trigger,
                                          "hosts": args.hosts, "reads": args.reads,
                                          "rests-on": args.rests_on, "source": args.source,
-                                         DRY_RUN_KEY: args.dry_run_task})
+                                         DRY_RUN_KEY: args.dry_run_task,
+                                         STOPS_KEY: args.stops})
             print(draft_written(home, slug, args.name, path))
         elif args.command == "import":
             if os.environ.get("COUSIN_HOME"):

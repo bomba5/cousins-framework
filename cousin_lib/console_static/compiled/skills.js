@@ -33,7 +33,7 @@ function SkillDiff({ text }) {
 }
 function SkillMeta({ metadata }) {
   const m = metadata || {};
-  const keys = ["scope", "context", "hosts", "reads", "rests-on", "should-trigger", "must-not-trigger", "source"];
+  const keys = ["scope", "context", "hosts", "reads", "rests-on", "stops", "should-trigger", "must-not-trigger", "source"];
   const always = ["hosts", "reads"];
   const has = (k) => Object.prototype.hasOwnProperty.call(m, k);
   const rows = keys.filter((k) => always.includes(k) || has(k) && m[k] !== "");

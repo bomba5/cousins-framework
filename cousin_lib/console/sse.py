@@ -29,7 +29,7 @@ import sys
 import threading
 import time
 
-from cousin_lib import jobs, loops, meetings, tracker
+from cousin_lib import decisions, jobs, loops, meetings, tracker
 from cousin_lib.config import FrameworkConfig
 from cousin_lib.console import router
 
@@ -148,6 +148,11 @@ def _default_sources(root):
         "requests": lambda: loops.list_requests(limit=200),
         "tracker": lambda: tracker.list_items(root=root),
         "meetings": lambda: meetings.list_meetings(root=root),
+        "decisions": lambda: decisions.signature(root=root),
+        # what answers still owe (a memory, a turn, a group now due), retried
+        # here, in the one poller thread, one pass at a time
+        "decisions_retry": lambda: (decisions.redeliver(root=root)
+                                    if decisions.owed(root=root) else []),
     }
 
 
@@ -191,6 +196,8 @@ def snapshot(*, root=None, sources=None):
 
 # ---- poller ------------------------------------------------------------
 
+_UNPOLLED = object()    # a store not read yet (None is "no store")
+
 class Poller:
     """Diffs the stores on a schedule and emits the differences. The
     first poll is a baseline: it emits the refresh events (they carry
@@ -207,6 +214,7 @@ class Poller:
         self._jobs = None
         self._tracker = None
         self._meetings = None
+        self._decisions = _UNPOLLED
         self._flips = None
         self._fires = None
         self._thread = None
@@ -223,6 +231,7 @@ class Poller:
             self._diff_flips(events)
             self._diff_tracker(events)
             self._diff_meetings(events)
+            self._diff_decisions(events)
         if self._next_slow is None or now >= self._next_slow:
             self._next_slow = now + self.slow
             events.append(("cousins-refresh", _call(self.sources, "cousins", [])))
@@ -304,6 +313,16 @@ class Poller:
                     events.append(("meeting-change",
                                    {"id": mid, "op": "update"}))
         self._meetings = rows
+
+    def _diff_decisions(self, events):
+        """A cousin asks through its tool, outside the console: a change
+        in the register's signature (row count, newest change, open
+        count) is the signal; the view refetches its own route."""
+        _call(self.sources, "decisions_retry", [])
+        sig = _call(self.sources, "decisions", None)
+        if self._decisions is not _UNPOLLED and sig != self._decisions and sig is not None:
+            events.append(("decisions-refresh", {"open": sig[2]}))
+        self._decisions = sig
 
     def _diff_fires(self, events):
         fires = dict(_call(self.sources, "last_fires", {}))

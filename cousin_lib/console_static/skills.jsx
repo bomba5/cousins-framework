@@ -53,7 +53,8 @@ function SkillDiff({ text }) {
 // declared empty ("none"): the approve view leads with them.
 function SkillMeta({ metadata }) {
   const m = metadata || {};
-  const keys = ["scope", "context", "hosts", "reads", "rests-on", "should-trigger", "must-not-trigger", "source"];
+  // stops: where the skill asks the operator's choices (the decision tool)
+  const keys = ["scope", "context", "hosts", "reads", "rests-on", "stops", "should-trigger", "must-not-trigger", "source"];
   const always = ["hosts", "reads"];
   const has = (k) => Object.prototype.hasOwnProperty.call(m, k);
   const rows = keys.filter(k => always.includes(k) || (has(k) && m[k] !== ""));

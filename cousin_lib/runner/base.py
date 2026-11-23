@@ -73,6 +73,7 @@ SOURCE_PRIORITY = {
     "reaction": 1,
     "hook": 1,
     "boot": 1,
+    "decision": 1,    # the operator's answer from the decision register: operator chat's rank
     "meeting": 2,
     "schedule": 4,
     "job": 4,         # a job's close notice the cousin asked for (jobs.notify_owner)

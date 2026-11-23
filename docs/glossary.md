@@ -24,6 +24,13 @@ its `cousin.toml`, its identity files, its memory and its stores. It keeps its
 identity across sessions; a session is a process it runs in, not the cousin.
 See [cousins.md](cousins.md).
 
+### decision
+
+a question a cousin asks the operator with its `decision` tool,
+kept in the install's decision register until answered on the console's
+Decisions page; the answer comes back as a turn and an operator-level
+memory. See [decisions.md](decisions.md).
+
 ### distilled
 
 the views under a cousin's `memory/distilled/`, rebuilt from

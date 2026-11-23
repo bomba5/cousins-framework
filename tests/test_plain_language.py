@@ -410,8 +410,12 @@ class TestReviewFixes(unittest.TestCase):
         self.assertEqual(rules(pl.check(item)), ["em-dash"])
         # a lazy continuation of a paragraph is prose too
         self.assertEqual(rules(pl.check("Text that\n    goes on %s here\n" % DASH)), ["em-dash"])
-        # after the list ends, indented code is code again
-        self.assertEqual(pl.check("- item\n\nPara.\n\n    a %s b\n" % DASH), [])
+        # after the list ends, indented code is code again: a paragraph, a
+        # rule, a quote or a table at the margin ends it
+        for between in ("Para.", "---", "> quoted", "| a | b |\n|---|---|\n| c | d |"):
+            text = "- item\n\n%s\n\n    a %s b\n" % (between, DASH)
+            self.assertEqual(pl.check(text), [], between)
+            self.assertEqual(self.fixed(text), text, between)
 
     def test_a_message_starting_with_a_rule_has_no_front_matter(self):
         text = "---\nOne %s two.\n---\nok\n" % DASH

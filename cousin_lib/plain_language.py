@@ -452,17 +452,21 @@ def _blocks(text, front_matter=True):
         quote = _QUOTE.match(masked)
         if quote:
             masked = " " * quote.end() + masked[quote.end():]
+            if not raw[:1].isspace():
+                in_list = False     # a quote at the margin ends the list
         body = masked.strip()
         if _HEADING.match(masked):
             cur, in_list = None, False
             blocks.append(_Block("heading", n, 0, masked))
             continue
         if _THEMATIC.match(raw):
-            cur = None
+            cur, in_list = None, False
             continue
         nxt = lines[n + 1] if n + 1 < len(lines) else ""
         if "|" in body and (table or body.startswith("|") or _is_separator(nxt)):
             cur, table = None, True
+            if not raw[:1].isspace():
+                in_list = False     # so does a table at the margin
             if _is_separator(masked):
                 continue
             for off, cell in _split_cells(masked):

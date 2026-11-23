@@ -1087,7 +1087,8 @@ A name the framework sets itself is refused: an account variable
 (`ANTHROPIC_API_KEY` and the rest of `accounts.AUTH_VARS`), `CLAUDE*`,
 `ANTHROPIC*`, `COUSIN_*`, `FRAMEWORK_ROOT`, `PLUGIN_DIR`, the process
 basics (`PATH`, `HOME`, `TMPDIR` and the others the tmux pane always
-gets, `LC_*`) and `LD_*`, `DYLD_*`, `PYTHON*`.
+gets, `LC_*`) and the ones that load code into a process (`LD_*`, `DYLD_*`,
+`PYTHON*`, `NODE_OPTIONS`, `NODE_PATH`, `BASH_ENV`, `ENV`).
 
 The runner reads every value at its start and adds it to the agent CLI's
 environment, beside the account's variables, so a `${NAME}` in the

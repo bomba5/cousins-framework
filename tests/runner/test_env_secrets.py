@@ -55,7 +55,7 @@ class TestNamesAndValues(SecretCase):
     def test_names_the_framework_sets_are_refused(self):
         for name in ("ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN",
                      "COUSIN_HOME", "FRAMEWORK_ROOT", "PATH", "HOME", "LD_PRELOAD",
-                     "PYTHONPATH", "LC_ALL"):
+                     "PYTHONPATH", "LC_ALL", "NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV"):
             with self.subTest(name=name):
                 with self.assertRaisesRegex(env_secrets.EnvSecretError, name):
                     env_secrets.names_of({"env_secrets": [name]})

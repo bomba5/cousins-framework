@@ -83,6 +83,18 @@ class EnvSecretRoutes(ConsoleCase):
         self.assertEqual(status, 200, body)
         self.assertFalse(self.file().exists())
 
+    def test_only_a_removable_stray_is_offered_and_a_directory_is_refused(self):
+        self.login()
+        folder = self.home / ".secrets" / "env"
+        self.post("/api/cousins/wren/env-secrets/LEDGER_KEY", {"value": VALUE})
+        (folder / "OLD.bak").write_text("x")
+        (folder / "SUBDIR").mkdir()
+        row = self.get("/api/cousins/wren/agent")[1]["settings"]["env_secrets"]
+        self.assertEqual(sorted(row["secrets"]), ["LEDGER_KEY"])
+        status, body = self.delete("/api/cousins/wren/env-secrets/SUBDIR")
+        self.assertEqual(status, 400, body)
+        self.assertTrue((folder / "SUBDIR").is_dir())
+
     def test_the_mcp_page_counts_a_listed_secret_as_set(self):
         self.login()
         (self.home / ".mcp.json").write_text(json.dumps(MCP))

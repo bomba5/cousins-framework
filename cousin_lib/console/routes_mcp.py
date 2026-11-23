@@ -466,12 +466,12 @@ def _server_view(name, kind, entry, secret_names=()):
 
 
 def _secret_names(home):
-    """The cousin's [agent] env_secrets on the sdk lane (the one that reads
-    them), () when unset or unreadable."""
-    from cousin_lib import env_secrets
+    """The cousin's [agent] env_secrets on a lane that reads them
+    (agent_settings' schema), () when unset or unreadable."""
+    from cousin_lib import agent_settings, env_secrets
     try:
         agent = tomllib.loads((Path(home) / "cousin.toml").read_text()).get("agent") or {}
-        if agent.get("runner") != "sdk":
+        if env_secrets.KEY not in agent_settings.lane_keys(agent_settings.lane_of(agent)):
             return ()
         return env_secrets.names_of(agent)
     except (OSError, tomllib.TOMLDecodeError, env_secrets.EnvSecretError):

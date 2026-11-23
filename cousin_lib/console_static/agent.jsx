@@ -69,54 +69,6 @@ function agentEnvProblem(name, denyPrefixes) {
   return null;
 }
 
-// [agent] env_secrets' values: one write-only box per name (the draft list's,
-// then any value file no name lists, which can be removed). A value is
-// written at once (POST .../env-secrets/<NAME>), before the list is saved:
-// the server refuses a listed name with no value file.
-function AgentEnvSecrets({ slug, names, secrets, disabled, onChanged }) {
-  const [msg, setMsg] = React.useState(null);
-  const known = secrets || {};
-  const listed = names || [];
-  const extra = Object.keys(known).filter(n => !listed.includes(n));
-  const save = async (name, value) => {
-    setMsg(null);
-    try {
-      const { r, d } = await apiSend("POST", `/api/cousins/${slug}/env-secrets/${encodeURIComponent(name)}`, { value });
-      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      setMsg({ ok: true, text: name + " saved" + (d.listed ? "; restart the cousin to use it" : "; save the list to use it") });
-    } catch (e) { setMsg({ ok: false, text: String(e.message || e) }); }
-    onChanged();
-  };
-  const remove = async (name) => {
-    setMsg(null);
-    try {
-      const { r, d } = await apiSend("DELETE", `/api/cousins/${slug}/env-secrets/${encodeURIComponent(name)}`);
-      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
-    } catch (e) { setMsg({ ok: false, text: String(e.message || e) }); }
-    onChanged();
-  };
-  if (!listed.length && !extra.length) return null;
-  return (
-    <div data-env-secrets style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {listed.map(n => (
-        <div key={n} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <span style={agentMono}>{n}</span>
-          <SecretField status={known[n] || { set: false }} disabled={disabled}
-                       placeholder={`paste the value of ${n}`} onSubmit={v => save(n, v)} />
-          {known[n] && known[n].error && <span style={agentErr}>{known[n].error}</span>}
-        </div>
-      ))}
-      {extra.map(n => (
-        <div key={n} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <span style={agentHint}>{n}: a value file no name lists</span>
-          <button className="btn ghost" style={agentSmall} disabled={disabled} onClick={() => remove(n)}>remove</button>
-        </div>
-      ))}
-      {msg && <span style={msg.ok ? agentHint : agentErr}>{msg.text}</span>}
-    </div>
-  );
-}
-
 // A client-side hint for a model under the lane's model_rule (describe()'s;
 // the server stays the authority), and for one the account's own fetched
 // list does not hold (said, never refused: a list can lag a new model).
@@ -164,6 +116,54 @@ const agentSmall = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
 const agentMono = { fontFamily: "var(--mono)", fontSize: 11 };
 const agentHint = { fontSize: 10, color: "var(--fg-3)", lineHeight: 1.5 };
 const agentErr = { fontFamily: "var(--mono)", fontSize: 10, color: "var(--red)", whiteSpace: "pre-wrap" };
+
+// [agent] env_secrets' values: one write-only box per name (the draft list's,
+// then any value file no name lists, which can be removed). A value is
+// written at once (POST .../env-secrets/<NAME>), before the list is saved:
+// the server refuses a listed name with no value file.
+function AgentEnvSecrets({ slug, names, secrets, disabled, onChanged }) {
+  const [msg, setMsg] = React.useState(null);
+  const known = secrets || {};
+  const listed = names || [];
+  const extra = Object.keys(known).filter(n => !listed.includes(n));
+  const save = async (name, value) => {
+    setMsg(null);
+    try {
+      const { r, d } = await apiSend("POST", `/api/cousins/${slug}/env-secrets/${encodeURIComponent(name)}`, { value });
+      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setMsg({ ok: true, text: name + " saved" + (d.listed ? "; restart the cousin to use it" : "; save the list to use it") });
+    } catch (e) { setMsg({ ok: false, text: String(e.message || e) }); }
+    onChanged();
+  };
+  const remove = async (name) => {
+    setMsg(null);
+    try {
+      const { r, d } = await apiSend("DELETE", `/api/cousins/${slug}/env-secrets/${encodeURIComponent(name)}`);
+      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    } catch (e) { setMsg({ ok: false, text: String(e.message || e) }); }
+    onChanged();
+  };
+  if (!listed.length && !extra.length) return null;
+  return (
+    <div data-env-secrets style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {listed.map(n => (
+        <div key={n} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={agentMono}>{n}</span>
+          <SecretField status={known[n] || { set: false }} disabled={disabled}
+                       placeholder={`paste the value of ${n}`} onSubmit={v => save(n, v)} />
+          {known[n] && known[n].error && <span style={agentErr}>{known[n].error}</span>}
+        </div>
+      ))}
+      {extra.map(n => (
+        <div key={n} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <span style={agentHint}>{n}: a value file no name lists</span>
+          <button className="btn ghost" style={agentSmall} disabled={disabled} onClick={() => remove(n)}>remove</button>
+        </div>
+      ))}
+      {msg && <span style={msg.ok ? agentHint : agentErr}>{msg.text}</span>}
+    </div>
+  );
+}
 
 // Ask migrate.jsx's kind-switch dialog to open for this cousin.
 function openKindSwitch(slug) {

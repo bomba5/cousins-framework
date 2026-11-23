@@ -417,8 +417,10 @@ def env_secrets_state(home, value):
     names = [n for n in (value or []) if isinstance(n, str)]
     folder = Path(home).joinpath(*env_secrets.DIR)
     try:
+        # only what DELETE can remove: a regular file named like a variable
         extra = sorted(p.name for p in folder.iterdir()
-                       if p.name not in names and not p.name.startswith("."))
+                       if p.name not in names and env_secrets._NAME.match(p.name)
+                       and p.is_file() and not p.is_symlink())
     except OSError:
         extra = []
     return env_secrets.state(home, names + extra)
@@ -461,8 +463,9 @@ def remove_env_secret(req, slug, home, name):
     """Remove one value file; refused (409) while env_secrets still lists the
     name, which would leave the runner unable to start."""
     from cousin_lib import env_secrets
-    from cousin_lib.console.routes_accounts import _audit, _require_user
+    from cousin_lib.console.routes_accounts import _audit, _operator_only, _require_user
     _require_user(req)
+    _operator_only()
     try:
         path = env_secrets.path(home, name)
     except env_secrets.EnvSecretError as err:
@@ -470,10 +473,14 @@ def remove_env_secret(req, slug, home, name):
     if _listed_secret(home, name):
         raise HttpError(409, "[agent] env_secrets still lists %s: take it out of the list"
                              " first, or the runner will not start" % name)
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise HttpError(400, "%s is not a regular file: remove it by hand" % path)
     try:
         path.unlink()
     except FileNotFoundError:
         raise HttpError(404, "no value file for %s" % name)
+    except OSError as err:
+        raise HttpError(500, "cannot remove %s: %s" % (path, err.strerror))
     _audit(req, "env-secret-removed", None, cousin=slug, variable=name)
     return {"ok": True, "slug": slug, "name": name}
 

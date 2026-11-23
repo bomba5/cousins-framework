@@ -26,8 +26,9 @@ read them, as it can read the files: this keeps a secret out of
 A name the framework sets itself is refused (`reserved`): an account
 variable (accounts.AUTH_VARS), CLAUDE* and ANTHROPIC*, the framework's
 own (COUSIN_*, FRAMEWORK_ROOT, PLUGIN_DIR), the process basics (PATH,
-HOME and the rest of tmux_launch.BASE_ENV, LC_*) and the loader's
-(LD_*, DYLD_*, PYTHON*). Errors name the variable and the file, never a
+HOME and the rest of tmux_launch.BASE_ENV, LC_*) and the ones that load
+code into a process the CLI starts (LD_*, DYLD_*, PYTHON*, NODE_OPTIONS,
+NODE_PATH, BASH_ENV, ENV). Errors name the variable and the file, never a
 value."""
 from __future__ import annotations
 
@@ -40,7 +41,8 @@ DIR = (".secrets", "env")
 KEY = "env_secrets"
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RESERVED_PREFIXES = ("CLAUDE", "ANTHROPIC", "COUSIN_", "LC_", "LD_", "DYLD_", "PYTHON")
-RESERVED_NAMES = ("FRAMEWORK_ROOT", "PLUGIN_DIR", "HOME", "PATH", "USER", "LOGNAME", "SHELL",
+RESERVED_NAMES = ("FRAMEWORK_ROOT", "PLUGIN_DIR", "NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV",
+                  "HOME", "PATH", "USER", "LOGNAME", "SHELL",
                   "SSH_AUTH_SOCK", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "LANG",
                   "LOCALE_ARCHIVE", "TZ", "COLORTERM", "TMPDIR", "TERM", "PWD")
 
@@ -54,7 +56,7 @@ def reserved(name):
     if name in accounts.AUTH_VARS:
         return "an account variable"
     if name.startswith(RESERVED_PREFIXES) or name in RESERVED_NAMES:
-        return "a variable the framework or the process sets itself"
+        return "a variable the framework or the process sets itself, or one that loads code"
     return None
 
 

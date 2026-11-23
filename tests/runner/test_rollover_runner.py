@@ -497,7 +497,7 @@ class TestServedTools(RolloverCase):
             (self.home / "data" / "runner-served.json").write_text(json.dumps(on_file))
         self.asked = []
 
-        async def fake(servers_, cwd):
+        async def fake(servers_, cwd, environ=None):
             self.asked.append(sorted(servers_))
             return dict(live)
         p = mock.patch("cousin_lib.runner.served.served", fake)

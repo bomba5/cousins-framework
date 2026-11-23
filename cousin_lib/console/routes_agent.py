@@ -22,6 +22,9 @@ written: a changed port breaks every peer, and a hook is a shell command.
 Routes:
   GET  /api/cousins/<slug>/agent      agent_settings.describe, the hold, env_allow's base
   POST /api/cousins/<slug>/agent      {"changes": {key: value|null}}
+  POST   /api/cousins/<slug>/env-secrets/<NAME>  {"value"}: write one [agent]
+         env_secrets value file (write-only; a logged-in user, operator-run)
+  DELETE /api/cousins/<slug>/env-secrets/<NAME>  remove an unlisted one
   GET  /api/cousins/<slug>/settings   the COUSIN_FIELDS and the read-only rows
   POST /api/cousins/<slug>/settings   {"changes": {"table.key": value|null}}
 
@@ -30,6 +33,7 @@ from __future__ import annotations
 
 import re
 import tomllib
+from pathlib import Path
 
 from cousin_lib.console import router
 from cousin_lib.console.app import HttpError
@@ -398,7 +402,80 @@ def describe_agent(home, root):
         from cousin_lib.runner.tmux_launch import BASE_ENV, DENY_PREFIXES
         row["base"] = list(BASE_ENV) + ["LC_*"]
         row["deny_prefixes"] = list(DENY_PREFIXES)
+    row = out["settings"].get("env_secrets")
+    if row is not None:
+        from cousin_lib import env_secrets
+        row["secrets"] = env_secrets_state(home, row.get("value"))
+        row["reserved_prefixes"] = list(env_secrets.RESERVED_PREFIXES)
     return out
+
+
+def env_secrets_state(home, value):
+    """{NAME: {set, last4, error}} for the names listed, plus every value
+    file in .secrets/env that no name lists (so one can be removed)."""
+    from cousin_lib import env_secrets
+    names = [n for n in (value or []) if isinstance(n, str)]
+    folder = Path(home).joinpath(*env_secrets.DIR)
+    try:
+        extra = sorted(p.name for p in folder.iterdir()
+                       if p.name not in names and not p.name.startswith("."))
+    except OSError:
+        extra = []
+    return env_secrets.state(home, names + extra)
+
+
+def _listed_secret(home, name):
+    from cousin_lib import env_secrets
+    agent = _read(home).get("agent") or {}
+    value = agent.get(env_secrets.KEY) or []
+    return isinstance(value, list) and name in value
+
+
+def write_env_secret(req, slug, home, name, value):
+    """One [agent] env_secrets value, written to <home>/.secrets/env/<NAME>
+    through the one secret writer; a name the runner would refuse is 400."""
+    from cousin_lib import env_secrets
+    from cousin_lib.console import secrets
+    from cousin_lib.console.routes_accounts import _audit, _operator_only, _require_user
+    _require_user(req)
+    _operator_only()
+    try:
+        if env_secrets.names_of({env_secrets.KEY: [name]}) != (name,):
+            raise env_secrets.EnvSecretError("%r is not a variable name" % (name,))
+        path = env_secrets.path(home, name)
+    except env_secrets.EnvSecretError as err:
+        raise HttpError(400, str(err))
+    within = Path(home).absolute() / env_secrets.DIR[0]
+    try:
+        state = secrets.write_secret_file(path, value, within=str(within))
+    except ValueError as err:
+        raise HttpError(400, str(err))
+    finally:
+        del value
+    _audit(req, "env-secret", None, cousin=slug, variable=name)
+    return {"ok": True, "slug": slug, "name": name, "secret": state,
+            "listed": _listed_secret(home, name)}
+
+
+def remove_env_secret(req, slug, home, name):
+    """Remove one value file; refused (409) while env_secrets still lists the
+    name, which would leave the runner unable to start."""
+    from cousin_lib import env_secrets
+    from cousin_lib.console.routes_accounts import _audit, _require_user
+    _require_user(req)
+    try:
+        path = env_secrets.path(home, name)
+    except env_secrets.EnvSecretError as err:
+        raise HttpError(400, str(err))
+    if _listed_secret(home, name):
+        raise HttpError(409, "[agent] env_secrets still lists %s: take it out of the list"
+                             " first, or the runner will not start" % name)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        raise HttpError(404, "no value file for %s" % name)
+    _audit(req, "env-secret-removed", None, cousin=slug, variable=name)
+    return {"ok": True, "slug": slug, "name": name}
 
 
 def _needs_turn(home, changes):
@@ -520,6 +597,20 @@ def register():
                 out["note"] = note
             return out
         return change_agent(server, slug, home, changes, answer=answer)
+
+    @router.route("POST", "/api/cousins/{slug}/env-secrets/{name}")
+    def set_env_secret(req, slug, name):
+        home = cousin_home(req.server, slug)
+        value = req.body.get("value")
+        try:
+            return 200, write_env_secret(req, slug, home, name, value)
+        finally:
+            del value
+
+    @router.route("DELETE", "/api/cousins/{slug}/env-secrets/{name}")
+    def delete_env_secret(req, slug, name):
+        home = cousin_home(req.server, slug)
+        return 200, remove_env_secret(req, slug, home, name)
 
     @router.route("GET", "/api/cousins/{slug}/settings")
     def get_settings(req, slug):

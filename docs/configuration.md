@@ -1065,6 +1065,39 @@ is matched against, see [chat](chat.md)) and `policy.toml` (below). A
 last 1.x release's `cousin-migrate` read it once, to move the cousin's key
 into an `anthropic-key` account, and nothing in 2.0.0 reads it.
 
+### [agent] env_secrets
+
+`env_secrets` (the `sdk` kind) lists secret variables of this cousin's own,
+by name:
+
+```toml
+[agent]
+env_secrets = ["LEDGER_KEY"]
+```
+
+Each name's value is the file `<home>/.secrets/env/<NAME>`: one line of
+printable characters with no spaces, mode 0600, in a directory of mode
+0700, both the runner's user's (the reader every secret file goes
+through). The console writes it: the agent settings show one write-only
+box per listed name (`POST /api/cousins/<slug>/env-secrets/<NAME>`,
+[console API](reference/console-api.md)). Write the value first, then
+list the name: a listed name with no value file is refused where it is
+set, and the runner refuses to start without it (exit 2, naming the file).
+A name the framework sets itself is refused: an account variable
+(`ANTHROPIC_API_KEY` and the rest of `accounts.AUTH_VARS`), `CLAUDE*`,
+`ANTHROPIC*`, `COUSIN_*`, `FRAMEWORK_ROOT`, `PLUGIN_DIR`, the process
+basics (`PATH`, `HOME`, `TMPDIR` and the others the tmux pane always
+gets, `LC_*`) and `LD_*`, `DYLD_*`, `PYTHON*`.
+
+The runner reads every value at its start and adds it to the agent CLI's
+environment, beside the account's variables, so a `${NAME}` in the
+home's [`.mcp.json`](#mcpjson-the-runners-mcp-servers) reaches the server it names. The values
+never enter the supervisor's environment, another cousin's runner or a
+command line. The model's own commands inherit the CLI's environment, and
+the model can read the files in its home: `env_secrets` keeps a secret out
+of `.mcp.json` and away from every other cousin, not away from its own.
+A changed value or list takes a restart.
+
 ### [agent] strict_harness
 
 `config/harness.lock.toml` names the harness the framework is tested with:
@@ -1393,7 +1426,8 @@ the same tool list at every start.
   session's `mcp-config-<kind>.json`), named by `--mcp-config`, never inline
   on the CLI's command line, which the host's users can read; it is
   rewritten at every start and removed when the runner stops. Still keep
-  the secret in the runner's environment and only its `${NAME}` in
+  the secret in the runner's environment (one cousin's own: its
+  [`[agent] env_secrets`](#agent-env_secrets)) and only its `${NAME}` in
   `.mcp.json`: the file is plain text the model can read and edit, and a
   stdio server's `args` (expanded) are on that server's own command line.
   A variable that is unset and has no default skips that server, and the

@@ -446,8 +446,12 @@ class SdkRunner:
                  effort=None, cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
                  drain_timeout_s=30.0, policy=None, registry=None, handoff_deadline_s=None,
                  session=PRIMARY, claim_kinds=None, exclude_kinds=(), memory_reviewer=None,
-                 commit_attribution=None, thinking_display=None):
+                 commit_attribution=None, thinking_display=None, secret_env=None):
         self.home = Path(home)
+        # [agent] env_secrets (env_secrets.load, read by runner_for): added
+        # to the CLI's environment and to the one .mcp.json is checked and
+        # its servers listed against; never to this process's own
+        self.secret_env = dict(secret_env or {})
         # Which rows this session claims: claim_kinds None is every
         # kind but exclude_kinds; a side session names its own kind.
         self.session = session
@@ -681,7 +685,8 @@ class SdkRunner:
         # SecretMissing (a login to do: _connect waits for it), or a
         # secret broken after the start: a connect failure with its message,
         # never the secret.
-        env = dict(accounts.account_env(self.account, self.root), **AUTO_MEMORY_OFF)
+        env = dict(self.secret_env, **accounts.account_env(self.account, self.root),
+                   **AUTO_MEMORY_OFF)
         # The tools and hooks are in-process: no settings file is read
         # (setting_sources=[]) and none is written; the policy is a
         # PreToolUse hook, since bypassPermissions skips can_use_tool.
@@ -807,7 +812,8 @@ class SdkRunner:
         if self._user_mcp is None:
             from cousin_lib.runner import mcp_config
             try:
-                self._user_mcp = mcp_config.load(self.home, root=self.root)
+                self._user_mcp = mcp_config.load(self.home, self._server_environ(),
+                                                 root=self.root)
             except Exception as err:  # noqa: BLE001 - never fatal: the cousin keeps `cousin`
                 self._user_mcp = mcp_config.Loaded(True, skipped=[{
                     "name": None, "reason": "%s not read: %s" % (mcp_config.FILE,
@@ -815,6 +821,11 @@ class SdkRunner:
             if self._user_mcp.present or self._user_mcp.plugins:
                 self.stream.append("mcp_config", self._user_mcp.event())
         return dict({"cousin": {**server, "alwaysLoad": True}}, **self._user_mcp.servers)
+
+    def _server_environ(self):
+        """The environment the CLI starts the home's servers with: this
+        process's plus the cousin's secret variables."""
+        return dict(os.environ, **self.secret_env)
 
     # -- the session on file (restart with resume) -----------------------
     def _session_path(self):
@@ -1243,7 +1254,8 @@ class SdkRunner:
         """A new session: record what its servers serve."""
         try:
             from cousin_lib.runner import served
-            listed = await served.served(self._own_servers(), self.home)
+            listed = await served.served(self._own_servers(), self.home,
+                                         environ=self._server_environ())
             await asyncio.to_thread(self._write_served, session_id, listed)
         except Exception as exc:  # noqa: BLE001 - a record must never fail a turn
             self.stream.append("error", {"error": "runner-served.json: %s: %s" % (type(exc).__name__, exc)})
@@ -1266,7 +1278,7 @@ class SdkRunner:
                 self._request_rollover("no record of the tools this session's MCP servers served")
                 return
             from cousin_lib.runner import served
-            listed = await served.served(servers, self.home)
+            listed = await served.served(servers, self.home, environ=self._server_environ())
             moved = sorted(n for n in listed if n in recorded and recorded[n] != listed[n])
             if moved:
                 self._request_rollover("an MCP server's tools changed since this session"

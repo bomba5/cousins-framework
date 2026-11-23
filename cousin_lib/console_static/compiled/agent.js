@@ -37,6 +37,43 @@ function agentEnvProblem(name, denyPrefixes) {
   if (hit) return name + ": " + hit + "* never reaches the pane (the hard deny)";
   return null;
 }
+function AgentEnvSecrets({ slug, names, secrets, disabled, onChanged }) {
+  const [msg, setMsg] = React.useState(null);
+  const known = secrets || {};
+  const listed = names || [];
+  const extra = Object.keys(known).filter((n) => !listed.includes(n));
+  const save = async (name, value) => {
+    setMsg(null);
+    try {
+      const { r, d } = await apiSend("POST", `/api/cousins/${slug}/env-secrets/${encodeURIComponent(name)}`, { value });
+      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setMsg({ ok: true, text: name + " saved" + (d.listed ? "; restart the cousin to use it" : "; save the list to use it") });
+    } catch (e) {
+      setMsg({ ok: false, text: String(e.message || e) });
+    }
+    onChanged();
+  };
+  const remove = async (name) => {
+    setMsg(null);
+    try {
+      const { r, d } = await apiSend("DELETE", `/api/cousins/${slug}/env-secrets/${encodeURIComponent(name)}`);
+      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    } catch (e) {
+      setMsg({ ok: false, text: String(e.message || e) });
+    }
+    onChanged();
+  };
+  if (!listed.length && !extra.length) return null;
+  return /* @__PURE__ */ React.createElement("div", { "data-env-secrets": true, style: { display: "flex", flexDirection: "column", gap: 4 } }, listed.map((n) => /* @__PURE__ */ React.createElement("div", { key: n, style: { display: "flex", flexDirection: "column", gap: 2 } }, /* @__PURE__ */ React.createElement("span", { style: agentMono }, n), /* @__PURE__ */ React.createElement(
+    SecretField,
+    {
+      status: known[n] || { set: false },
+      disabled,
+      placeholder: `paste the value of ${n}`,
+      onSubmit: (v) => save(n, v)
+    }
+  ), known[n] && known[n].error && /* @__PURE__ */ React.createElement("span", { style: agentErr }, known[n].error))), extra.map((n) => /* @__PURE__ */ React.createElement("div", { key: n, style: { display: "flex", gap: 6, alignItems: "center" } }, /* @__PURE__ */ React.createElement("span", { style: agentHint }, n, ": a value file no name lists"), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", style: agentSmall, disabled, onClick: () => remove(n) }, "remove"))), msg && /* @__PURE__ */ React.createElement("span", { style: msg.ok ? agentHint : agentErr }, msg.text));
+}
 function agentModelProblem(rule, value, row) {
   if (!value) return null;
   if (/\s/.test(value)) return "one word, no spaces";
@@ -395,7 +432,16 @@ function AgentSettingsPanel({ cousin }) {
         onChange: (v) => set(key, v),
         disabled: busy
       }
-    ), key === "env_allow" && row.base && /* @__PURE__ */ React.createElement("span", { style: agentHint }, "always passed: ", row.base.join(" "), "; never passed (the hard deny, it wins):", " ", (row.deny_prefixes || []).map((p) => p + "*").join(" "), " and credential names"), key === "auto_start" && /* @__PURE__ */ React.createElement("span", { style: agentHint }, "the supervisor starts it with itself; false keeps it down until started"), row.hint && key !== "auto_start" && /* @__PURE__ */ React.createElement("span", { style: agentHint }, row.hint), row.set && !row.readonly && !(key in draft && draft[key] === null) && key !== "sessions" && /* @__PURE__ */ React.createElement(
+    ), key === "env_allow" && row.base && /* @__PURE__ */ React.createElement("span", { style: agentHint }, "always passed: ", row.base.join(" "), "; never passed (the hard deny, it wins):", " ", (row.deny_prefixes || []).map((p) => p + "*").join(" "), " and credential names"), key === "env_secrets" && /* @__PURE__ */ React.createElement(
+      AgentEnvSecrets,
+      {
+        slug: c.slug,
+        names: valueOf(key),
+        secrets: row.secrets,
+        disabled: busy,
+        onChanged: load
+      }
+    ), key === "auto_start" && /* @__PURE__ */ React.createElement("span", { style: agentHint }, "the supervisor starts it with itself; false keeps it down until started"), row.hint && key !== "auto_start" && /* @__PURE__ */ React.createElement("span", { style: agentHint }, row.hint), row.set && !row.readonly && !(key in draft && draft[key] === null) && key !== "sessions" && /* @__PURE__ */ React.createElement(
       "button",
       {
         className: "btn ghost",

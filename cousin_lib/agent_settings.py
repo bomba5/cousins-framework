@@ -115,6 +115,11 @@ SCHEMA = {
     # The tmux kind's own key: its pane's environment allowlist.
     "env_allow": {"type": "env_list", "lanes": ("tmux",), "default": [],
                   "hint": "variables the agent may inherit; the hard deny still wins"},
+    # env_secrets.py: the sdk kind's own secret variables, each read from
+    # <home>/.secrets/env/<NAME> at the runner's start
+    "env_secrets": {"type": "env_list", "lanes": ("sdk",), "default": [],
+                    "hint": "secret variables for this cousin's agent and its .mcp.json"
+                            " servers, each value in .secrets/env/<NAME>"},
 }
 
 
@@ -301,6 +306,17 @@ def _check_value(key, value, lane, home):
             # the pane would never get is refused where it is set
             from cousin_lib.runner.tmux_launch import env_allow_of
             env_allow_of({"env_allow": list(value)})
+        if key == "env_secrets":
+            # the runner's own check: a reserved name, and (for a cousin
+            # that exists) a value file it would refuse to start without
+            from cousin_lib import env_secrets
+            try:
+                names = env_secrets.names_of({key: list(value)})
+                if home is not None:
+                    for name in names:
+                        env_secrets.read(home, name)
+            except env_secrets.EnvSecretError as err:
+                raise ValueError(str(err))
         return list(value)
     if not isinstance(value, str):
         raise ValueError("must be a string")

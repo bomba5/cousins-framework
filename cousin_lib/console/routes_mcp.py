@@ -428,7 +428,9 @@ def _pairs(mapping, field, server, masked):
     return out
 
 
-def _server_view(name, kind, entry):
+def _server_view(name, kind, entry, secret_names=()):
+    """`secret_names`: the cousin's [agent] env_secrets, which its runner
+    sets for the CLI, so a reference to one is not an unset variable."""
     masked = []
     row = {"name": name, "type": kind,
            "ignored_keys": sorted(k for k in entry if k != "type"
@@ -457,9 +459,23 @@ def _server_view(name, kind, entry):
     row["account_vars"] = sorted({n for n, _ in refs if n in AUTH_VARS})
     row["unset_vars"] = sorted({n for n, has_default in refs
                                 if not has_default and n not in os.environ
-                                and n not in AUTH_VARS})
+                                and n not in secret_names and n not in AUTH_VARS})
+    row["secret_vars"] = sorted({n for n, _ in refs if n in secret_names})
     row["masked"] = masked
     return row
+
+
+def _secret_names(home):
+    """The cousin's [agent] env_secrets on a lane that reads them
+    (agent_settings' schema), () when unset or unreadable."""
+    from cousin_lib import agent_settings, env_secrets
+    try:
+        agent = tomllib.loads((Path(home) / "cousin.toml").read_text()).get("agent") or {}
+        if env_secrets.KEY not in agent_settings.lane_keys(agent_settings.lane_of(agent)):
+            return ()
+        return env_secrets.names_of(agent)
+    except (OSError, tomllib.TOMLDecodeError, env_secrets.EnvSecretError):
+        return ()
 
 
 def servers_answer(home):
@@ -481,7 +497,8 @@ def servers_answer(home):
                     body["parse_error"] = s["reason"]
                 else:
                     body["kept"].append({"name": s["name"], "reason": s["reason"]})
-            body["servers"] = [_server_view(n, k, e) for n, k, e in entries]
+            names = _secret_names(home)
+            body["servers"] = [_server_view(n, k, e, names) for n, k, e in entries]
     body["last_event"] = last_events(home, ("mcp_config",)).get("mcp_config")
     return body
 

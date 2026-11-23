@@ -37,20 +37,23 @@ def _tool(t):
     return {"name": t.name, "description": t.description, "inputSchema": t.inputSchema, "annotations": ann}
 
 
-async def list_one(spec, cwd):
-    """The digest of one server's tools; None for a kind it does not speak."""
+async def list_one(spec, cwd, environ=None):
+    """The digest of one server's tools; None for a kind it does not speak.
+    `environ` is the CLI's environment (default this process's): the sdk
+    runner adds the cousin's [agent] env_secrets to it."""
     from mcp import ClientSession
 
     from cousin_lib.runner.mcp_config import expand
     # `${NAME}` is the CLI's to expand (mcp_config passes it through), so the
     # listing expands it the same way, or a server would start without its
     # credential and be left out every time
-    x = lambda value: expand(str(value), os.environ)  # noqa: E731
+    environ = os.environ if environ is None else environ
+    x = lambda value: expand(str(value), environ)  # noqa: E731
     kind = spec.get("type") or ("stdio" if spec.get("command") else "http" if spec.get("url") else None)
     if kind == "stdio":
         from mcp import StdioServerParameters
         from mcp.client.stdio import stdio_client
-        env = dict(os.environ, **{k: x(v) for k, v in (spec.get("env") or {}).items()})
+        env = dict(environ, **{k: x(v) for k, v in (spec.get("env") or {}).items()})
         params = StdioServerParameters(command=x(spec["command"]), args=[x(a) for a in spec.get("args") or ()],
                                        env=env, cwd=str(cwd))
         with open(os.devnull, "w") as quiet:
@@ -76,11 +79,12 @@ async def _list(session_cls, read, write):
     return digest([_tool(t) for t in tools])
 
 
-async def served(servers, cwd):
-    """{server name: digest} for every server it could list, in parallel."""
+async def served(servers, cwd, environ=None):
+    """{server name: digest} for every server it could list, in parallel,
+    each started with `environ` (list_one)."""
     async def one(name, spec):
         try:
-            return name, await asyncio.wait_for(list_one(spec, cwd), TIMEOUT)
+            return name, await asyncio.wait_for(list_one(spec, cwd, environ), TIMEOUT)
         except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
             raise
         except BaseException:  # noqa: BLE001 - a server that cannot be listed (an anyio group too) is left out

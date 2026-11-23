@@ -3,6 +3,26 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.11.0 - 2026-11-23
+
+### Added
+
+- **Per-cousin secret variables.** `[agent] env_secrets` (the `sdk`
+  kind) names variables whose values live in the cousin's own
+  `.secrets/env/<NAME>` (0600). The runner reads them at start and adds
+  them to the agent CLI's environment only, so a `${NAME}` in that
+  cousin's `.mcp.json` reaches its server while the value stays out of
+  `.mcp.json`, the supervisor's environment and every other cousin. A
+  listed name without its value file is refused where it is set, and the
+  runner refuses to start without it (exit 2, naming the file). Names the
+  framework sets itself (account variables, `CLAUDE*`, `ANTHROPIC*`,
+  `COUSIN_*`, `PATH` and the like) are refused.
+- **The console writes the values.** The agent settings show one
+  write-only box per listed name (`POST /api/cousins/<slug>/env-secrets/<NAME>`,
+  a logged-in user, audited without the value), and a value file no name
+  lists can be removed (`DELETE`, refused while listed). The MCP page no
+  longer flags a `${NAME}` the cousin's `env_secrets` lists as unset.
+
 ## 4.10.0 - 2026-11-23
 
 ### Added

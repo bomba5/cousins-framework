@@ -301,11 +301,18 @@ def runner_for(home, *, kind=None):
     except accounts.AccountsError as err:
         raise RunnerError(str(err))
     if kind == "sdk":
+        from cousin_lib import env_secrets
         from cousin_lib.runner.sdk import SdkRunner
+        try:
+            # [agent] env_secrets: every named value file, read now; one
+            # missing or refused is exit 2, never a session without it
+            secret_env = env_secrets.load(home, agent)
+        except env_secrets.EnvSecretError as err:
+            raise RunnerError(str(err))
         common = dict(account=account, model=agent.get("model"),
                       effort=effort_of(agent), commit_attribution=commit_attribution,
                       thinking_display=thinking_display_of(agent, root_for(home)),
-                      policy=policy)
+                      policy=policy, secret_env=secret_env)
         if side:
             return sessions.Sessions(home, kinds=side, **common)
         return SdkRunner(home, **common)

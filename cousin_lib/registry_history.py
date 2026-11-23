@@ -201,6 +201,12 @@ SHIPPED_BEFORE = {
         {'to': '--user', 'image': '--image'},
         {'to': '--user'},
     ),
+    ('tools.send.properties', 'text'): (
+        {'type': 'string', 'description': 'message body, verbatim'},
+    ),
+    ('tools.send.properties', 'text.description'): (
+        'message body, verbatim',
+    ),
     ('tools.skill', 'description'): (
         'Your skills (procedures you load when you need them): list what loads at your next start and your drafts, show one, write a draft, import one published outside, diff a draft against what is approved, record the job that ran a dry run, check whether your loaded skills went stale. The operator approves drafts in the console; nothing here approves, rejects or removes a skill.',
         'Your skills (procedures you load when you need them): list what loads at your next start and your drafts, show one, write a draft, import one published outside, diff a draft against what is approved, record the job that ran a dry run. The operator approves drafts in the console; nothing here approves, rejects or removes a skill.',

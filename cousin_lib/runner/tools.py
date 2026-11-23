@@ -534,7 +534,8 @@ def _sk_draft(ctx, a):
                   # absent is not declared; "" declares none
                   "hosts": _str(a, "hosts", None), "reads": _str(a, "reads", None),
                   "rests-on": _str(a, "rests_on", None), "source": _str(a, "source", None),
-                  skills.DRY_RUN_KEY: _str(a, "dry_run_task")})
+                  skills.DRY_RUN_KEY: _str(a, "dry_run_task"),
+                  skills.STOPS_KEY: _str(a, "stops", None)})
     return skills.draft_written(ctx.home, ctx.slug, name, path)
 
 
@@ -554,6 +555,34 @@ def _sk_diff(ctx, a):
     return text or "no difference from what is approved"
 
 
+# --------------------------------------------------------------- decision
+
+def _d_ask(ctx, a):
+    from cousin_lib import decisions
+    options = a.get("options")
+    if isinstance(options, (str, dict)):
+        options = [options]
+    row = decisions.ask(ctx.slug, _required(a, "question", "ask"), options=options or (),
+                        recommendation=_str(a, "recommendation"), why=_str(a, "why"),
+                        group=_str(a, "group"), skill=_str(a, "skill"), stop=_str(a, "stop"),
+                        root=ctx.root)
+    return decisions.asked_text(row)
+
+
+def _d_list(ctx, a):
+    from cousin_lib import decisions
+    status = _str(a, "status") or "open"
+    rows = decisions.list_decisions(cousin=ctx.slug, status=None if status == "all" else status,
+                                    group=_str(a, "group") or None, root=ctx.root)
+    return decisions.list_text(rows)
+
+
+def _d_withdraw(ctx, a):
+    from cousin_lib import decisions
+    return decisions.withdrawn_text(
+        decisions.withdraw(_int(a, "id", "withdraw"), cousin=ctx.slug, root=ctx.root))
+
+
 HANDLERS = {
     "memory": {"search": _m_search, "decide": _m_decide, "remember": _m_remember,
                "obsolete": _m_obsolete, "recall": _m_recall, "activity": _m_activity,
@@ -566,6 +595,7 @@ HANDLERS = {
                 "show": _t_show, "delete": _t_delete},
     "skill": {"list": _sk_list, "show": _sk_show, "draft": _sk_draft, "diff": _sk_diff,
               "dry-run": _sk_dry_run, "check": _sk_check},
+    "decision": {"ask": _d_ask, "list": _d_list, "withdraw": _d_withdraw},
 }
 
 

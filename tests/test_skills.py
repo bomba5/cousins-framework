@@ -1149,17 +1149,19 @@ class TestCli(SkillsCase):
                 "source": "https://g.example/o/r@" + COMMIT, "license": "MIT"}
         args["source"] += ":skills/board-check"
         args["dry_run_task"] = "run the check"
+        args["stops"] = "review, publish"
         self.assertEqual(set(args), set(tool["properties"]) - {"command", "job"})
         argv, stdin = mcp_server.build_call(tool, "draft", args, resolve=lambda c: c)
         self.assertEqual(argv[0], "cousin-skill")
-        self.assertEqual(argv[argv.index("--hosts") + 1], "")
+        self.assertIn("--hosts=", argv)
         code, out, _ = self.run_cli(*argv[1:], stdin=stdin.decode())
         self.assertEqual(code, 0, out)
         # the draft tool writes no licence file: the one thing still missing
         self.assertIn("before approval: a skill from outside keeps its licence file", out)
         meta = skills.parse((self.wren / "skill-drafts" / "board-check" / "SKILL.md")
                             .read_text())[0]["metadata"]
-        self.assertEqual((meta["hosts"], meta["rests-on"]), ("", "kicad-cli --version"))
+        self.assertEqual((meta["hosts"], meta["rests-on"], meta["stops"]),
+                         ("", "kicad-cli --version", "review, publish"))
 
 
 class TestTriggerTest(SkillsCase):
@@ -1233,3 +1235,69 @@ class TestTriggerTest(SkillsCase):
         with self.assertRaisesRegex(SkillError, "should-trigger or must-not-trigger"):
             skills.trigger_test(self.root, self.wren, "wren", "board-check",
                                 checker=lambda p, d: (None, "ok"))
+
+
+class TestStops(SkillsCase):
+    """metadata.stops: a skill's stop points. Checked by the draft tool and
+    approval, and named in one line the export adds after the frontmatter."""
+
+    def write(self, stops, name="board-check"):
+        return skills.write_draft(self.wren, name, description="Check a board. Use after a regen.",
+                                  body=BODY, context="personal", side_effect="read-only",
+                                  metadata=dict(PROMPTS, stops=stops), root=self.root,
+                                  slug="wren")
+
+    def test_written_normalized_and_bad_names_refused(self):
+        path = self.write(" review ,publish,, ")
+        front = skills.parse(path.read_text())[0]
+        self.assertEqual(front["metadata"]["stops"], "review, publish")
+        self.assertEqual(skills.stops_of(front), ["review", "publish"])
+        for bad, word in (("Review", "stop names"), ("a b", "stop names"),
+                          ("review, review", "once")):
+            with self.assertRaises(SkillError, msg=bad) as cm:
+                self.write(bad)
+            self.assertIn("metadata.stops", str(cm.exception))
+            self.assertIn(word, str(cm.exception))
+        self.assertNotIn("stops", skills.parse(self.write(None).read_text())[0]["metadata"])
+        self.assertEqual(skills.stops_of({"metadata": {"stops": "a, a"}}), [])
+
+    def test_the_export_names_the_stop_points_after_the_frontmatter(self):
+        self.write("review, publish")
+        self.approve(self.wren, "wren")
+        self.draft(self.wren, name="plain-check")
+        self.approve(self.wren, "wren", "plain-check")
+        approved = skills.show_approved(self.root, "personal", "wren", "board-check")["text"]
+        paths, _ = skills.export_plugins(self.root, self.wren, "wren")
+        exported = (paths[-1] / "skills" / "board-check" / "SKILL.md").read_text()
+        line = ("Stop points: review, publish. At each, ask every question that is the"
+                " operator's choice with the decision tool (skill `board-check` and stop set:"
+                " the stop's answers come back together), then end the turn. Continue when"
+                " the answers come back.")
+        head, _, body = approved.partition("\n---\n")
+        self.assertEqual(exported, head + "\n---\n" + line + "\n\n" + body)
+        self.assertEqual(skills.parse(exported)[0], skills.parse(approved)[0])
+        plain = skills.show_approved(self.root, "personal", "wren", "plain-check")["text"]
+        self.assertEqual((paths[-1] / "skills" / "plain-check" / "SKILL.md").read_text(), plain)
+
+    def test_the_cli_and_the_tool_take_stops(self):
+        os.environ["FRAMEWORK_ROOT"] = str(self.root)
+        with mock.patch("sys.stdin", __import__("io").StringIO(BODY)), \
+                mock.patch("builtins.print"):
+            code = skills.main(["--home", str(self.wren), "draft", "board-check",
+                                "--description", "Check a board.", "--context", "personal",
+                                "--side-effect", "read-only", "--stops", "review"])
+        self.assertEqual(code, 0)
+        front = skills.parse((self.wren / "skill-drafts" / "board-check" / "SKILL.md")
+                             .read_text())[0]
+        self.assertEqual(front["metadata"]["stops"], "review")
+        from cousin_lib.runner import tools
+        ctx = tools.ToolContext(home=self.wren, slug="wren", name="Wren", root=self.root,
+                                turn=None, policy=None)
+        text, is_error = tools.call(ctx, "skill", {
+            "command": "draft", "name": "other-check", "description": "Check.",
+            "context": "personal", "side_effect": "read-only", "body": BODY,
+            "stops": "a-stop, b-stop"})
+        self.assertFalse(is_error, text)
+        front = skills.parse((self.wren / "skill-drafts" / "other-check" / "SKILL.md")
+                             .read_text())[0]
+        self.assertEqual(front["metadata"]["stops"], "a-stop, b-stop")

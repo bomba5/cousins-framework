@@ -549,6 +549,8 @@ function App() {
         window.dispatchEvent(new CustomEvent("fw-accounts-change", { detail: data }));
       } else if (kind === "meeting-change") {
         window.dispatchEvent(new CustomEvent("fw-meeting-change", { detail: data }));
+      } else if (kind === "decisions-refresh") {
+        window.dispatchEvent(new CustomEvent("fw-decisions-refresh", { detail: data }));
       } else if (kind === "tracker-change" || kind === "loop-fire") {
       }
     }

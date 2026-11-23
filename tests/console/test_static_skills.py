@@ -24,6 +24,11 @@ class SkillsJsx(unittest.TestCase):
         # both ask twice
         self.assertGreaterEqual(self.src.count("<SysConfirmButton"), 3)
 
+    def test_the_draft_review_shows_the_declared_stops(self):
+        meta = self.src[self.src.index("function SkillMeta("):self.src.index("function SkillTrigger(")]
+        self.assertIn('"stops"', meta[meta.index("const keys = ["):])
+        self.assertIn("<SkillMeta metadata={d.metadata} />", self.src)
+
     def test_it_says_where_a_private_cousins_skills_are(self):
         self.assertIn("a private cousin's are in its inspector", self.src)
         self.assertIn('data.lane === "opencode"', self.src)

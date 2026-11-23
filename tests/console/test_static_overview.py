@@ -185,6 +185,36 @@ process.stdout.write(JSON.stringify(rows.map(r => fleetAttention(r))));""")
         self.assertIn("gave up on its pane", got[0]["why"])
         self.assertEqual(got[1:], [None, None])
 
+    def test_open_decisions_need_you_while_the_runner_is_not_working(self):
+        """No runner state of its own: the row's decisions_open count, read
+        only while the cousin is up and not in a turn."""
+        got = self.run_node("""
+const idle = {alive: true, state: "idle"};
+const rows = [
+  {slug: "a", status: "running", runner: idle, decisions_open: 2},
+  {slug: "b", status: "running", runner: idle, decisions_open: 1},
+  {slug: "c", status: "running", runner: {alive: true, state: "running"}, decisions_open: 3},
+  {slug: "d", status: "stopped", decisions_open: 3},
+  {slug: "e", status: "running", runner: idle, decisions_open: 0},
+  {slug: "f", status: "running", tmuxSession: "f", decisions_open: 1},
+];
+process.stdout.write(JSON.stringify(rows.map(r => [fleetAttention(r), fleetState(r).word,
+  fleetState(r).why || null])));""")
+        self.assertEqual(got[0], [{"level": "needs", "why": "2 decisions open"}, "needs you",
+                                  "2 decisions open"])
+        self.assertEqual(got[1][0], {"level": "needs", "why": "1 decision open"})
+        self.assertEqual([g[0] for g in got[2:5]], [None, None, None])
+        self.assertEqual(got[2][1], "working")
+        self.assertEqual(got[5][0]["level"], "needs")
+
+    def test_an_open_skill_stop_says_where_it_waits(self):
+        got = self.run_node("""
+process.stdout.write(JSON.stringify(fleetAttention({status: "running",
+  runner: {alive: true, state: "idle"}, decisions_open: 2,
+  decisions_stops: ["board-check:review"]})));""")
+        self.assertEqual(got, {"level": "needs",
+                               "why": "waiting on you at board-check:review (2 decisions open)"})
+
     def test_needs_you_first_then_warnings_then_running_then_stopped(self):
         got = self.run_node("""
 const rows = [

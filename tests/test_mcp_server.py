@@ -81,7 +81,7 @@ class RegistryCase(unittest.TestCase):
         self.assertEqual(reg["timeout"], 120)
         self.assertEqual(reg["max_output"], mcp_server.DEFAULT_MAX_OUTPUT)
         self.assertEqual(set(reg["tools"]),
-                         {"memory", "send", "job", "schedule", "meeting", "skill"})
+                         {"memory", "send", "job", "schedule", "meeting", "skill", "decision"})
         self.assertTrue(reg["tools"]["memory"]["enabled"])
         self.assertEqual(reg["tools"]["memory"]["kind"], "command")
 
@@ -249,8 +249,33 @@ class CallAssemblyCase(unittest.TestCase):
             self.tool, "search", {"query": "a b `c`", "top": 3},
             resolve=lambda name: name)
         self.assertEqual(argv, ["cousin-memory", "search", "a b `c`",
-                                "--top", "3"])
+                                "--top=3"])
         self.assertIsNone(stdin)
+
+    def test_an_option_value_that_starts_with_a_dash_stays_a_value(self):
+        # `--flag=value` is one element, so the CLI's parser never reads a
+        # value such as "-x" as a flag of its own
+        argv, _ = mcp_server.build_call(
+            self.tool, "obsolete", {"topic": "t", "why": "-x"},
+            resolve=lambda name: name)
+        self.assertEqual(argv[-1], "--why=-x")
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--why")
+        self.assertEqual(parser.parse_args(argv[-1:]).why, "-x")
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args(["--why", "-x"])      # the old two-element form
+
+    def test_a_short_flag_and_its_value_stay_two_elements(self):
+        # a getopt-style CLI an install registered would read `-n=5` as "=5"
+        tool = {"command": ["c"], "kind": "command",
+                "properties": {"n": {"type": "integer"}, "tag": {"type": "array"},
+                               "why": {"type": "string"}},
+                "commands": {"a": {"command": ["c"], "argv": ["a"], "stdin": [],
+                                   "options": {"n": "-n", "tag": "-t", "why": "--why"}}}}
+        argv, _ = mcp_server.build_call(tool, "a", {"n": 5, "tag": ["x", "y"], "why": "-w"},
+                                        resolve=lambda name: name)
+        self.assertEqual(argv, ["c", "a", "-n", "5", "-t", "x", "-t", "y", "--why=-w"])
 
     def test_the_memory_tool_can_mark_a_topic_obsolete(self):
         # L5 needs a writer: the tool carries it
@@ -260,7 +285,7 @@ class CallAssemblyCase(unittest.TestCase):
             {"topic": "deploy path", "why": "the pipeline deploys"},
             resolve=lambda name: name)
         self.assertEqual(argv, ["cousin-memory", "obsolete", "deploy path",
-                                "--why", "the pipeline deploys"])
+                                "--why=the pipeline deploys"])
         self.assertIsNone(stdin)
         argv, _ = mcp_server.build_call(
             self.tool, "obsolete", {"topic": "t", "why": "w", "force": True},
@@ -270,7 +295,7 @@ class CallAssemblyCase(unittest.TestCase):
         argv, _ = mcp_server.build_call(
             self.tool, "obsolete", {"topic": "a", "topics": ["b", "c"], "why": "w"},
             resolve=lambda name: name)
-        self.assertEqual(argv, ["cousin-memory", "obsolete", "a", "b", "c", "--why", "w"])
+        self.assertEqual(argv, ["cousin-memory", "obsolete", "a", "b", "c", "--why=w"])
 
     def test_a_schema_property_no_command_passes_on_is_refused(self):
         """A home's registry whose schema grew while a command's options
@@ -322,8 +347,7 @@ class CallAssemblyCase(unittest.TestCase):
         argv, _ = mcp_server.build_call(
             tool, "a", {"flag": True, "many": ["x", "y"], "n": 0},
             resolve=lambda name: name)
-        self.assertEqual(argv, ["c", "a", "--flag", "--m", "x", "--m", "y",
-                                "--n", "0"])
+        self.assertEqual(argv, ["c", "a", "--flag", "--m=x", "--m=y", "--n=0"])
         argv, _ = mcp_server.build_call(tool, "a", {"flag": False},
                                         resolve=lambda name: name)
         self.assertEqual(argv, ["c", "a"])
@@ -377,7 +401,7 @@ class CallAssemblyCase(unittest.TestCase):
         argv, _ = mcp_server.build_call(
             self.tool, "search", {"query": "q", "collection": "notes"},
             resolve=lambda name: name)
-        self.assertEqual(argv[-2:], ["--collection", "notes"])
+        self.assertEqual(argv[-1:], ["--collection=notes"])
 
     def test_array_elements_are_checked_against_an_item_enum(self):
         tool = {"kind": "command", "command": "c", "description": "d",
@@ -599,7 +623,7 @@ class SendCase(unittest.TestCase):
             {"kestrel"})
         self.assertFalse(is_error, text)
         log = json.loads((self.tmp / "op.py.log").read_text())
-        self.assertEqual(log["argv"], ["--user", "Operator"])
+        self.assertEqual(log["argv"], ["--user=Operator"])
         self.assertEqual(log["stdin"], HOSTILE)
 
     def test_operator_reply_with_an_image_passes_the_flag(self):
@@ -612,8 +636,7 @@ class SendCase(unittest.TestCase):
             {"kestrel"})
         self.assertFalse(is_error, text)
         log = json.loads((self.tmp / "op.py.log").read_text())
-        self.assertEqual(log["argv"], ["--user", "Operator",
-                                       "--image", "/tmp/render.png"])
+        self.assertEqual(log["argv"], ["--user=Operator", "--image=/tmp/render.png"])
 
     def test_unknown_destination_is_an_error_naming_what_is_known(self):
         text, is_error = mcp_server.call_tool(
@@ -857,7 +880,7 @@ class CliCase(unittest.TestCase):
         self.assertEqual(rc, 0)
         tools = json.loads(out)
         self.assertEqual(sorted(t["name"] for t in tools),
-                         ["job", "meeting", "memory", "schedule", "send", "skill"])
+                         ["decision", "job", "meeting", "memory", "schedule", "send", "skill"])
 
     def test_selftest_prints_every_tool_and_its_commands_without_the_sdk(self):
         # Every module the SDK probe imports is blocked, not just the
@@ -1417,8 +1440,8 @@ class JobRunCase(unittest.TestCase):
         self.assertEqual(
             self._argv({"title": "t", "desc": "why", "log": "data/t.log",
                         "argv": ["sh", "--desc", "x"]}),
-            ["cousin-job", "start", "shell", "--json", "--desc", "why",
-             "--home-log", "data/t.log", "--", "t", "sh", "--desc", "x"])
+            ["cousin-job", "start", "shell", "--json", "--desc=why",
+             "--home-log=data/t.log", "--", "t", "sh", "--desc", "x"])
 
     def test_a_title_that_looks_like_an_option_sits_after_the_separator(self):
         for title in ("--", "-x", "--json"):
@@ -1461,7 +1484,7 @@ class TrailingOperandCase(unittest.TestCase):
         argv, _ = mcp_server.build_call(
             self._tool(), "x", {"cmd": ["a", "-b"], "flag": True, "n": 2},
             resolve=lambda name: name)
-        self.assertEqual(argv, ["c", "x", "--flag", "--n", "2", "--", "a", "-b"])
+        self.assertEqual(argv, ["c", "x", "--flag", "--n=2", "--", "a", "-b"])
 
     def test_an_optional_array_may_be_empty(self):
         argv, _ = mcp_server.build_call(self._tool(optional=True), "x",

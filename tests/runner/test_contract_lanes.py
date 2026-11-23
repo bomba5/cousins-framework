@@ -32,12 +32,14 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # only, so opencode's bytes did not move with it), plus 4.4.2's Memory
 # wording (the `memory` tool's `remember` command, never a bare one), plus
 # 4.7.1's SHELL_TOOL paragraph before "Generations" (the SDK lane's and the
-# tmux pane's, so opencode's bytes did not move with it): the bytes the
+# tmux pane's, so opencode's bytes did not move with it), plus the `decision`
+# tool in the shipped registry and its paragraph under "How you answer"
+# (both lanes): the bytes the
 # SDK lane's renderer produces. A registry or static-text edit changes it on
 # purpose: update the hash in the same commit, knowing every SDK and
 # opencode cousin's prompt cache resets when the edit is in text both lanes
 # render; a lane-only paragraph, like SHELL_TOOL, moves only its lane's.
-SDK_CONTRACT_SHA256 = "579158d2f4522b80f72cc1009caa1aba5543851d71d4f0dfb5c257222a24e78a"
+SDK_CONTRACT_SHA256 = "695e3f674c988814892b94ff5563138da8835c9368da64c37711d2394ad603b0"
 
 
 def as_opencode(sdk_text):

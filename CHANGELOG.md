@@ -3,6 +3,46 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 4.10.0 - 2026-11-23
+
+### Added
+
+- **A decision register.** A cousin puts a question that is the
+  operator's to answer into the new `decision` tool (`ask`, `list`,
+  `withdraw`; CLI `cousin-decision`), one question per call, with its
+  options and a recommendation. The console's new Decisions page lists
+  the open ones of every cousin; the operator answers with an option or
+  a note. The answer becomes an operator-level memory in the asking
+  cousin's home, with a cite, and comes back to the cousin as a turn on
+  the operator's thread (source `decision`, operator-chat priority, never
+  folded into a running turn). Store: `data/decisions.db`. See
+  `docs/decisions.md`.
+- **Grouped decisions.** Questions asked with one group come back as one
+  turn, once every one is settled and the newest is at least 60 s old.
+- **Nothing is lost or sent twice.** The answer is recorded first; the
+  memory and the turn are each claimed under a lease, and a failed one is
+  retried by the console's event poller or at once with
+  `POST /api/decisions/redeliver`. The page shows "memory not written" or
+  "turn not delivered" for rows still owed.
+- **The fleet shows "needs you"** for a running cousin with open
+  decisions, with the count (and the skill stop, when there is one) in the
+  tooltip.
+- **Skill stop points.** A skill's `metadata.stops` names the points where
+  it waits for the operator (`cousin-skill draft --stops`, the `skill`
+  tool's `stops`). The exported copy tells the cousin to ask its questions
+  there with the decision tool and end the turn; they form one group per
+  run of the skill, titled "skill X, stop Y" in the console.
+
+### Changed
+
+- **The stdio lane passes a long-flag tool argument as `--flag=value`.** A
+  value that starts with `-` no longer fails as an unknown flag. Only an
+  option whose flag starts with `--` takes this form; a short flag (`-n`)
+  still goes as two elements, so a CLI an install registered sees no change
+  there.
+- The cousin contract has one more paragraph (on the decision tool), so
+  each cousin's cached prompt prefix changes once.
+
 ## 4.9.0 - 2026-11-23
 
 ### Added

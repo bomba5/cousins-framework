@@ -1452,8 +1452,16 @@ function fleetAttention(c) {
     if (r.state === "errored") return { level: "needs", why: "the runner errored" };
     if (r.state === "rate_limited") return { level: "warn", why: "rate limited" };
   }
+  const working = r && r.alive && (r.state === "running" || r.state === "rolling_over");
+  if (c.decisions_open > 0 && !working) return { level: "needs", why: fleetDecisionsWhy(c) };
   if (c.chat === "down") return { level: "warn", why: "chat server down" };
   return null;
+}
+function fleetDecisionsWhy(c) {
+  const n = c && c.decisions_open || 0;
+  const count = n + (n === 1 ? " decision open" : " decisions open");
+  const stops = c && c.decisions_stops || [];
+  return stops.length ? "waiting on you at " + stops.join(", ") + " (" + count + ")" : count;
 }
 function fleetLoginWhy(l) {
   const what = l && l.reason === "billing" ? "billing stopped" : "login required";
@@ -1474,7 +1482,8 @@ function fleetState(c) {
     return {
       word: c.runner && c.runner.state === "errored" ? "errored" : "needs you",
       tone: "red",
-      pulse: false
+      pulse: false,
+      why: att.why
     };
   }
   if (c.runner) {
@@ -1756,5 +1765,6 @@ Object.assign(window, {
   nextFlip,
   fleetIn,
   fleetLoginWhy,
-  fleetLoginWaits
+  fleetLoginWaits,
+  fleetDecisionsWhy
 });

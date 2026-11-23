@@ -293,6 +293,7 @@ COMMANDS = {
     "cousin-tracker": (["list"], SHARED_MESSAGE),
     "cousin-lint": ([], None),                       # stdin, defaults without a root
     "cousin-glossary": (["terms", "{tmp}", "--top", "3"], None),
+    "cousin-decision": (["list"], SHARED_MESSAGE),
     "cousin-meeting": (["list"], SHARED_MESSAGE),
     "cousin-memory": (["search", "kettle"], _HOME),
     "cousin-flip": (["--dry-run", "wren"], SHARED_MESSAGE),

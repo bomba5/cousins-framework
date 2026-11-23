@@ -131,7 +131,9 @@ warnings, then the running ones, then the stopped ones. The columns:
 - **state**, in words beside its dot: `working`, `idle`, `needs you`,
   `rate limited`, `errored`, `enrolled` (a [worker](glossary.md#worker)) or `stopped`. A cousin
   "needs you" when its [runner](glossary.md#runner) waits for a permission
-  or a login; the reason replaces the role line in the cousin column.
+  or a login, or while it has an open [decision](decisions.md) and is not
+  working ("2 decisions open"); the reason replaces the role line in the
+  cousin column and is the dot's tooltip.
   A stopped cousin is never flagged: stopping it was your decision.
   The dot's colour reads the same wherever a cousin has one (the sidebar,
   the cards, the chat header, this table): green while it works (the dot
@@ -854,6 +856,18 @@ The plain-language check ([plain language](plain-language.md)), in tabs:
   counts each glossary entry's synonyms and flags an entry whose term is not
   the one the code uses most. Derive shows a glossary built from those counts,
   to copy; the console writes no file.
+
+## Decisions
+
+The questions cousins asked you with their `decision` tool, kept until you
+answer. The header says how many are open. Open decisions are grouped by
+cousin, then by group; each shows its question, why it was asked, its
+options as buttons (the recommended one marked) and a box for a note or an
+answer of your own. A group's answers go back to the cousin together, once
+the whole group is answered. Answered decisions are below, collapsed, with
+who answered and when; one whose memory or turn is still owed says "memory
+not written" or "turn not delivered". The console retries those on its
+own; **retry now** does it at once. See [decisions](decisions.md).
 
 ## Meetings
 

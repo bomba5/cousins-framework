@@ -207,6 +207,7 @@ SHIPPED_BEFORE = {
         'Your skills (procedures you load when you need them): list what loads at your next start and your drafts, show one, write a draft, diff a draft against what is approved. The operator approves drafts in the console; nothing here approves, rejects or removes a skill.',
     ),
     ('tools.skill.commands.draft', 'options'): (
+        {'scope': '--scope', 'should_trigger': '--should-trigger', 'must_not_trigger': '--must-not-trigger', 'hosts': '--hosts', 'reads': '--reads', 'rests_on': '--rests-on', 'source': '--source', 'license': '--license', 'dry_run_task': '--dry-run-task'},
         {'scope': '--scope', 'should_trigger': '--should-trigger', 'must_not_trigger': '--must-not-trigger', 'hosts': '--hosts', 'reads': '--reads', 'rests_on': '--rests-on', 'source': '--source', 'license': '--license'},
         {'scope': '--scope', 'should_trigger': '--should-trigger', 'must_not_trigger': '--must-not-trigger'},
     ),

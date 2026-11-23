@@ -218,6 +218,7 @@ source = { type = "string", optional = true, description = "a skill from outside
 license = { type = "string", optional = true, description = "an SPDX identifier its licence file reads as; required with source (draft)" }
 dry_run_task = { type = "string", optional = true, description = "a skill from outside: the sample task its dry run does (draft)" }
 job = { type = "integer", optional = true, description = "the job that ran the allowed dry run (dry-run)" }
+stops = { type = "string", optional = true, description = "its stop points, comma-separated names: where it asks the operator's choices with the decision tool, then ends the turn (draft)" }
 body = { type = "string", description = "the steps, in Markdown (draft)" }
 
 [tools.skill.commands.list]
@@ -228,7 +229,7 @@ argv = ["show", "{name}"]
 
 [tools.skill.commands.draft]
 argv = ["draft", "{name}", "--description", "{description}", "--context", "{context}", "--side-effect", "{side_effect}"]
-options = { scope = "--scope", should_trigger = "--should-trigger", must_not_trigger = "--must-not-trigger", hosts = "--hosts", reads = "--reads", rests_on = "--rests-on", source = "--source", license = "--license", dry_run_task = "--dry-run-task" }
+options = { scope = "--scope", should_trigger = "--should-trigger", must_not_trigger = "--must-not-trigger", hosts = "--hosts", reads = "--reads", rests_on = "--rests-on", source = "--source", license = "--license", dry_run_task = "--dry-run-task", stops = "--stops" }
 stdin = ["body"]
 
 [tools.skill.commands.dry-run]
@@ -240,3 +241,30 @@ argv = ["diff", "{name}"]
 [tools.skill.commands.check]
 argv = ["check"]
 options = { name = "--name" }
+
+[tools.decision]
+command = "cousin-decision"
+description = "Ask the operator a question whose answer is their choice, not yours: one question per call, with its options, the option you recommend and why. Questions that belong together share a group and come back together. After asking, end the turn: the answer comes back as a turn on your operator thread and is written to your memory. list shows your open questions; withdraw takes one back."
+
+[tools.decision.properties]
+question = { type = "string", description = "one question, said so the operator can answer it without the chat (ask)" }
+options = { type = "array", items = "string", optional = true, description = "the choices, each \"key: text\" such as \"a: keep the cache\"; a bare text gets the next letter (ask)" }
+recommendation = { type = "string", optional = true, description = "the option key you recommend (ask)" }
+why = { type = "string", optional = true, description = "why it is asked and why you recommend what you do (ask)" }
+group = { type = "string", optional = true, description = "a name for questions that belong together: their answers come back as one turn when all are answered (ask, list)" }
+skill = { type = "string", optional = true, description = "the skill whose stop point asks it (ask)" }
+stop = { type = "string", optional = true, description = "that stop point's name (ask)" }
+status = { type = "string", optional = true, enum = ["open", "answered", "withdrawn", "all"], description = "filter; default open (list)" }
+id = { type = "integer", description = "the decision's id (withdraw)" }
+
+[tools.decision.commands.ask]
+# The question after `--`: whatever it says, it is never read as an option.
+argv = ["ask", "--", "{question}"]
+options = { options = "--option", recommendation = "--recommendation", why = "--why", group = "--group", skill = "--skill", stop = "--stop" }
+
+[tools.decision.commands.list]
+argv = ["list"]
+options = { status = "--status", group = "--group" }
+
+[tools.decision.commands.withdraw]
+argv = ["withdraw", "{id}"]

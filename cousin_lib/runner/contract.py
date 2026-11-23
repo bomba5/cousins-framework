@@ -48,6 +48,10 @@ folded into your running turn), name the thread.[[send| A peer is answered
 with `send`, never with `reply`.]][[meeting| A meeting line is answered with the
 `meeting` tool on your turn only.]]
 
+[[decision|A choice that is the operator's to make goes into the `decision` tool,
+one question per call with its options and the one you recommend, not only
+into your chat text. Then end the turn: the answer comes back as a turn.]]
+
 [[memory|## Memory]]
 
 [[memory|Memory writes default to your own conclusion (L3). What the operator

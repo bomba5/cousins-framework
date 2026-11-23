@@ -43,7 +43,7 @@ function Led({ state, pulse }) {
 function CousinLed({ c }) {
   const st = window.fleetState ? fleetState(c) : null;
   if (!st) return <Led state={c && c.status === "running" ? "idle" : "stopped"} />;
-  return <span className={`led ${st.tone}${st.pulse ? " pulse" : ""}`} title={st.word} />;
+  return <span className={`led ${st.tone}${st.pulse ? " pulse" : ""}`} title={st.why ? st.word + ": " + st.why : st.word} />;
 }
 
 function Pill({ tone = "gray", children }) {

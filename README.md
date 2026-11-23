@@ -206,6 +206,7 @@ Nothing in this group is needed to run a cousin. Each page says so at the top.
 
 - [Telegram](docs/telegram.md) - a cousin's chat on your phone: the bridge and its setup
 - [Meetings](docs/meetings.md) - a chat with several cousins at once, in rounds
+- [Decisions](docs/decisions.md) - the questions cousins ask you, kept until you answer
 - [Media](docs/media.md) - images, video and voice, if you want them
 - [Remote cousins](docs/remote-cousins.md) - a cousin on another machine,
   like a Pi on your desk

@@ -78,6 +78,7 @@ Each command has one class, so you know which ones to learn first:
 | `cousin-skill` | cousin | its skills: list, show, draft, diff; the operator approves in the console |
 | `cousin-self-portrait` | cousin | draft the cousin's self-portrait; a person commits it |
 | `cousin-tracker` | cousin | the install's list of work in flight; the console's Tracker page shows it |
+| `cousin-decision` | cousin | ask the operator a question that is theirs to answer; they answer on the console's Decisions page |
 | `cousin-cycle` | internal | per-cousin session counters the boot packet reads |
 | `cousin-runner` | internal | drives one cousin; the supervisor starts one per cousin |
 | `cousin-session` | internal | a cousin's session start and end hooks |
@@ -715,6 +716,18 @@ so a replaced text can be read back. See
 cousin-tracker add "move the photo archive" --domain infra --tag q4
 cousin-tracker update 1 --add-note "half copied, rest tonight"
 cousin-tracker show 1 --history
+```
+
+`cousin-decision` is the terminal twin of a cousin's `decision` tool
+([decisions](decisions.md)). Subcommands: `ask`, `list`, `show`, `withdraw`,
+`answer` and `redeliver`. `answer ID --option KEY` and/or `--answer TEXT` is
+the operator's act and refuses to run inside a cousin's environment
+(`COUSIN_HOME` set); `redeliver` retries the memories and turns an answer
+still owes.
+
+```
+cousin-decision list --status all
+cousin-decision answer 3 --option b --user ana
 ```
 
 ## Skills

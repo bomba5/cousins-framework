@@ -111,6 +111,7 @@ built from it.
 | `data/jobs.db`, `data/job-logs/` | transactional + raw event | `jobs` | the job record; a failed job also lands as an L2 entry in its owner's raw memory (since 3.46.0, a done one does not) |
 | `data/artifacts.db` | transactional | `artifacts` | path, sha256, size, job, commit |
 | `data/tracker.db` | transactional + raw event (`history`) | `tracker` | the backlog; a delete keeps a `deleted` row, with who and when, in its history |
+| `data/decisions.db` | transactional + raw event (`history`) | `decisions` | the operator's open and answered decisions; an answer is kept before its memory and turn, which are each claimed under a lease and retried until done |
 | `data/meetings.db` | transactional | `meetings` | meetings and their transcripts |
 | `skills/<repo>/` (git), `data/skills/approvals.jsonl`, `data/skills/private/approvals.jsonl` | transactional + raw event | `skills` (the console's approve and remove only) | the approved skills; a repository loads only while its `main` is at the commit its last approval record names, so the records win over git ([skills](skills.md)) |
 | `data/skills/trigger-tests/<slug>/<name>.json`, `data/skills/private/trigger-tests/<slug>/<name>.json` | transactional | `skills`, the console's trigger test | a draft's last trigger test; it counts only for the diff it was run on, and approval needs one |

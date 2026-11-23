@@ -291,6 +291,8 @@ COMMANDS = {
     "cousin-skill": (["list"], _HOME),
     "cousin-job": (["list"], SHARED_MESSAGE),
     "cousin-tracker": (["list"], SHARED_MESSAGE),
+    "cousin-lint": ([], None),                       # stdin, defaults without a root
+    "cousin-glossary": (["terms", "{tmp}", "--top", "3"], None),
     "cousin-meeting": (["list"], SHARED_MESSAGE),
     "cousin-memory": (["search", "kettle"], _HOME),
     "cousin-flip": (["--dry-run", "wren"], SHARED_MESSAGE),

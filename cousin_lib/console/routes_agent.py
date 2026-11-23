@@ -12,7 +12,7 @@ the console edits. Each kind of key has one write path:
 - the other keys (COUSIN_FIELDS: the name, peer_visible, the [memory]
   recall and review keys, [lifecycle] flip_at, [agent]
   commit_attribution, which every lane reads, the tmux one included,
-  and [skills] repos):
+  [skills] repos and [plain_language] reply):
   toml_edit.write_keys, with a validate hook that runs the same check on
   the parsed result before the rename.
 
@@ -33,6 +33,7 @@ import tomllib
 
 from cousin_lib.console import router
 from cousin_lib.console.app import HttpError
+from cousin_lib.plain_language import REPLY_MODES
 from cousin_lib.skills import REPOS
 
 OP_KIND = "agent-settings"
@@ -67,6 +68,11 @@ COUSIN_FIELDS = {
                      "restart": True,
                      "hint": "the skills repositories it loads (shared/ and its own folder in"
                              " each); listing private keeps its own skills there only"},
+    "plain_language.reply": {"type": "choice", "default": None, "choices": list(REPLY_MODES),
+                             "restart": False,
+                             "hint": "what reply and send do with the plain-language check:"
+                                     " off, note the findings, or fix the em dashes and note"
+                                     " the rest; unset is the install default"},
 }
 READONLY_FIELDS = {
     "chat.tmux_session": "the session peers and the console type into",
@@ -108,6 +114,10 @@ def check_field(name, value, root=None):
     if kind == "bool":
         if not isinstance(value, bool):
             raise ValueError("must be true or false")
+        return value
+    if kind == "choice":
+        if value not in spec["choices"]:
+            raise ValueError("one of %s" % ", ".join(spec["choices"]))
         return value
     if kind == "count":
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -210,6 +220,13 @@ def describe_settings(home, root):
     attribution["install"] = _install_attribution(root)
     own = attribution["value"]
     attribution["effective"] = own if isinstance(own, bool) else attribution["install"]["value"]
+    from cousin_lib import plain_language
+    language = fields["plain_language.reply"]
+    try:
+        language["install"] = plain_language.load_config(root)["reply_default"]
+    except plain_language.ConfigError as err:
+        language["install"] = "off"
+        errors.setdefault("plain_language.reply", "config/plain-language.toml: %s" % err)
     readonly = {}
     for name in READONLY_FIELDS:
         present, value = _lookup(data, name)

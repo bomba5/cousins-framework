@@ -526,8 +526,21 @@ def _send_call(registry, name, tool, args, env, peers):
     if not to:
         raise ToolError("%s: 'to' is required" % name)
     route = resolve_send(tool, to, peers)
+    language = ""
+    home = env.get("COUSIN_HOME")
+    if route == "peer" and home and isinstance(args.get("text"), str):
+        # the cousin's [plain_language] reply mode, as the in-process send;
+        # the operator route runs cousin-reply, which applies it itself
+        from cousin_lib import plain_language
+        from cousin_lib.config import FrameworkConfig
+        root = env.get("FRAMEWORK_ROOT") or FrameworkConfig.root_from_home(home)
+        text, language = plain_language.outbound(home, root, args["text"])
+        args = dict(args, text=text)
     argv, stdin = build_call(tool, route, args)
-    return run_call(argv, stdin, env, registry["timeout"])
+    text, is_error = run_call(argv, stdin, env, registry["timeout"])
+    if language and not is_error:
+        text = "%s\n%s" % (text.rstrip("\n"), language)
+    return text, is_error
 
 
 _MEDIA_MIME = {".png": "image/png", ".jpg": "image/jpeg",

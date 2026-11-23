@@ -834,6 +834,27 @@ cousin appended while the panel was open survives unless you edited the
 notes box too; editing that box replaces the notes, and the old text
 stays in the history.
 
+## Language
+
+The plain-language check ([plain language](plain-language.md)), in tabs:
+
+- **check**: paste text or Markdown and press Check. The findings list the
+  line, the rule and the message. Fix shows the text with the em dashes
+  fixed, to copy. A glossary file (a path in the install, a cousin's home or
+  the framework checkout) can stand in for the configured one.
+- **settings**: `config/plain-language.toml`: the two sentence limits, each
+  rule on or off, the banned words (one `word = use` per line), the default
+  glossary and the default reply mode. The server checks it before it writes.
+  Below, each cousin's reply mode (`off`, `note`, `fix`, or the install
+  default), written to its `cousin.toml` like the inspector's cousin settings.
+- **glossary**: the words a repository uses
+  ([a glossary from the code](plain-language.md#a-glossary-from-the-code)).
+  Give a path in the install, a cousin's home or the framework checkout.
+  Find terms lists the most used words, code and docs apart. Check groups
+  counts each glossary entry's synonyms and flags an entry whose term is not
+  the one the code uses most. Derive shows a glossary built from those counts,
+  to copy; the console writes no file.
+
 ## Meetings
 
 A chat shared by you and several running cousins, in rounds. "New meeting"

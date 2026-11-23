@@ -42,6 +42,7 @@ Then add these when you want what they do:
 | `mcp-registry.toml` | your own default MCP tool list for new cousins |
 | `accounts.toml` | [runner](glossary.md#runner) cousins on their own login, token or API key |
 | `plugins.toml` | [plugins](plugins.md): tools, a service and a console tab the framework does not ship |
+| `plain-language.toml` | your own limits, banned words and glossary for the [plain-language check](plain-language.md) |
 
 ## The framework root
 
@@ -656,6 +657,16 @@ check) is skipped and named, never fatal: `cousin-supervisor status` lists it
 under `plugin`, `GET /api/plugins` under `problems`. The manifest's own keys
 are in [plugins](plugins.md#the-manifest). A cousin turns a plugin on in its
 `cousin.toml` ([below](#plugins-a-cousins-plugins)).
+
+## plain-language.toml
+
+The [plain-language check](plain-language.md)'s settings: the sentence
+limits (`[limits] step, description`), each rule on or off (`[rules]`), the
+banned words (`[[banned]] word, use`), a default `glossary` path and the
+`reply_default` for a cousin that sets no reply mode. Missing: the defaults
+(20 and 25 words, every rule on, nothing banned, no glossary, replies off).
+Read at each check; `config/plain-language.toml.example` shows every key.
+The console's Language page writes it.
 
 ## shared-reviewers.json
 
@@ -1438,6 +1449,20 @@ The skill repositories this cousin loads from, of `personal`, `work` and
 and its own folder from each, never another cousin's, and a draft can only
 be approved into one of them. A name outside the three loads nothing and the
 runner says so. Read at start. See [skills](reference/skills.md).
+
+### [plain_language] (a cousin's reply check)
+
+```toml
+[plain_language]
+reply = "note"      # "off", "note" or "fix"
+```
+
+What the cousin's `reply` and `send` tools do with the
+[plain-language check](plain-language.md#the-reply-modes): nothing, add the
+findings to the tool's result, or fix the em dashes first and add the rest.
+Unset: the install's `reply_default`. Read at each reply, so it applies
+without a restart. The inspector's cousin settings and the Language page
+write it.
 
 ### policy.toml
 

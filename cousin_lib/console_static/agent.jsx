@@ -465,7 +465,7 @@ const COUSIN_SETTING_LABELS = {
   "memory.proactive_recall": "recall lines", "memory.recall_keyword_only": "keyword recall",
   "memory.review_batch": "review batch", "memory.review_model": "review model",
   "lifecycle.flip_at": "flip at", "agent.commit_attribution": "commit attribution",
-  "skills.repos": "skill repos",
+  "skills.repos": "skill repos", "plain_language.reply": "plain language",
 };
 
 function CousinSettingsPanel({ cousin }) {
@@ -539,6 +539,15 @@ function CousinSettingsPanel({ cousin }) {
           <input type="checkbox" checked={!!v} disabled={busy} onChange={e => set(n, e.target.checked)} />
           <span style={agentMono}>{v ? "true" : "false"}</span>
         </label>
+      );
+    }
+    if (row.type === "choice") {
+      return (
+        <select className="sel" value={v ?? ""} disabled={busy}
+                onChange={e => set(n, e.target.value === "" ? null : e.target.value)}>
+          <option value="">install default ({row.install || "off"})</option>
+          {(row.choices || []).map(ch => <option key={ch} value={ch}>{ch}</option>)}
+        </select>
       );
     }
     if (row.type === "count") {

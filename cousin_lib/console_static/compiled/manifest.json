@@ -6,8 +6,8 @@
    "source": "bbb2e2e3b398"
   },
   "agent.jsx": {
-   "output": "2e38648cac52",
-   "source": "eb9338599234"
+   "output": "57f6bf81b994",
+   "source": "727333e88afb"
   },
   "app.jsx": {
    "output": "e65297608556",
@@ -28,6 +28,10 @@
   "explorer.jsx": {
    "output": "faa28ac2cddc",
    "source": "2ab2072444c1"
+  },
+  "language.jsx": {
+   "output": "972d3e121332",
+   "source": "1f37fd312de2"
   },
   "mcp.jsx": {
    "output": "bb55341af1f8",

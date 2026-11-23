@@ -291,6 +291,20 @@ class TestReplyModes(HermeticCase):
         self.assertIn("plain language: fixed 1 em dash; 1 finding\n", out)
         self.assertEqual(self.sent(), [text, text, "one - two. It was written."])
 
+    def test_a_reply_that_opens_with_a_rule_is_checked_whole(self):
+        self.mode("fix")
+        text = "---\nOne %s two.\n---\nok" % DASH
+        out, err = tools.call(self.ctx(), "reply", {"text": text})
+        self.assertFalse(err, out)
+        self.assertEqual(self.sent(), ["---\nOne - two.\n---\nok"])
+
+    def test_the_shipped_send_tool_does_not_promise_verbatim(self):
+        registry = mcp_server.parse_registry(mcp_server.shipped_default_registry(self.root),
+                                             "shipped")
+        said = json.dumps(registry["tools"]["send"]).lower()
+        self.assertNotIn("verbatim", said)
+        self.assertIn("plain-language", said)
+
     def test_a_check_that_fails_never_blocks_the_reply(self):
         self.mode("fix")
         with mock.patch.object(pl, "check", side_effect=RuntimeError("boom")):
@@ -386,6 +400,27 @@ class TestReviewFixes(unittest.TestCase):
             self.assertEqual(pl.check(text), [], text)
             self.assertEqual(self.fixed(text), text)
         self.assertEqual(rules(pl.check("~~~\nx\n~~~\na %s b\n" % DASH)), ["em-dash"])
+
+    def test_indented_code_is_skipped_but_list_continuations_are_prose(self):
+        code = "Run this:\n\n    x = a %s b\n\tleverage %s y\n\nDone.\n" % (DASH, DASH)
+        self.assertEqual(pl.check(code), [])
+        self.assertEqual(self.fixed(code), code)
+        # four spaces after a list item continue the item: prose, and fixed
+        item = "- Step one\n\n    more of it %s here\n" % DASH
+        self.assertEqual(rules(pl.check(item)), ["em-dash"])
+        # a lazy continuation of a paragraph is prose too
+        self.assertEqual(rules(pl.check("Text that\n    goes on %s here\n" % DASH)), ["em-dash"])
+        # after the list ends, indented code is code again: a paragraph, a
+        # rule, a quote or a table at the margin ends it
+        for between in ("Para.", "---", "> quoted", "| a | b |\n|---|---|\n| c | d |"):
+            text = "- item\n\n%s\n\n    a %s b\n" % (between, DASH)
+            self.assertEqual(pl.check(text), [], between)
+            self.assertEqual(self.fixed(text), text, between)
+
+    def test_a_message_starting_with_a_rule_has_no_front_matter(self):
+        text = "---\nOne %s two.\n---\nok\n" % DASH
+        self.assertEqual(pl.check(text), [])                       # a file: front matter
+        self.assertEqual(rules(pl.check(text, front_matter=False)), ["em-dash"])
 
     def test_an_html_comment_blanks_only_itself(self):
         self.assertEqual(rules(pl.check("<!-- c --> Real %s text\n" % DASH)), ["em-dash"])
